@@ -6,7 +6,7 @@ import { createAgentScene } from '../src/agent-scene.js';
 // A subdivided box grows far past the preflight estimate, so the budget is checked again after generation.
 function seaRecipe(copies) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{
       id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 },
       edits: [{ op: 'subdivide_edges', edges: { all: true }, cuts: 16 }],

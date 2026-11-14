@@ -1,13 +1,13 @@
 # Deterministic animation
 
-An animation clip in 67js is data: tracks of keyframes that name a part and a property. A player turns a time in seconds into part transforms. It keeps no state between calls, so the same time always gives the same picture, and you can seek forward, backward or to a fixed time for an export.
+An animation clip in Crucible is data: tracks of keyframes that name a part and a property. A player turns a time in seconds into part transforms. It keeps no state between calls, so the same time always gives the same picture, and you can seek forward, backward or to a fixed time for an export.
 
 ## Play, pause and scrub
 
 The cube moves along a smooth path and turns, and the sphere pulses and glows. Press Pause and drag the slider: the scene follows the time you set, in either direction. The console shows what `sampleAnimationClip` returns and proves that a seek back reproduces an earlier frame.
 
 ```js live poster=deterministic-animation
-import { Renderer67, box, sphere, createAnimationClip, sampleAnimationClip, createAnimationPlayer } from '67js';
+import { CrucibleRenderer, box, sphere, createAnimationClip, sampleAnimationClip, createAnimationPlayer } from 'crucible';
 
 
 function placeAt(x, y, z, size) {
@@ -43,7 +43,7 @@ console.log('samples at 1 s:', sampleAnimationClip(clip, 1).map(sample => `${sam
 console.log('Cube translation at 1 s:', sampleAnimationClip(clip, 1)[0].value);
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const player = createAnimationPlayer(clip, parts);
 
 function draw(seconds) {

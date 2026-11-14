@@ -54,7 +54,7 @@ test('fresnel is checked at the boundary and refused outside emission', () => {
 
 function recipeWithFresnel(ior) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'rim', emissiveColor: [1, 1, 1], pattern: { type: 'graph', graph: { emission: { mul: [[1, 1, 1], fresnelNode(ior)] } }, mapping: 'uv', resolution: 256 } }],
     nodes: [{ id: 'part', geometry: 'block', material: 'rim' }],

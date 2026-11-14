@@ -8,7 +8,7 @@ import { freePort } from './helpers/free-port.js';
 
 function sceneRecipe(tracks, extra = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'finish', color: [0.6, 0.6, 0.6], emission: 0 }],
     nodes: [{ id: 'block', geometry: 'box', material: 'finish' }],
@@ -128,7 +128,7 @@ test('a sunset changes the sun and sky between two frames of a render', async (c
       const { createAgentScene } = await import('/src/agent-scene.js');
       const { loadAllAgentSceneModules } = await import('/src/agent-scene.js');
       await loadAllAgentSceneModules?.();
-      const { Renderer67 } = await import('/src/renderer.js');
+      const { CrucibleRenderer } = await import('/src/renderer.js');
       const { agentEnvironmentMap } = await import('/src/agent-look.js');
       const canvas = document.createElement('canvas');
       canvas.width = 64;
@@ -139,7 +139,7 @@ test('a sunset changes the sun and sky between two frames of a render', async (c
       copy.height = 64;
       const copyContext = copy.getContext('2d', { willReadFrequently: true });
       const scene = createAgentScene(input);
-      const renderer = new Renderer67(canvas, scene.parts, { ground: false, world: true, samples: 1, pixelRatio: 1, environment: scene.environment });
+      const renderer = new CrucibleRenderer(canvas, scene.parts, { ground: false, world: true, samples: 1, pixelRatio: 1, environment: scene.environment });
       const results = [];
       for (const time of [0, 2]) {
         scene.sampleMotion(time);

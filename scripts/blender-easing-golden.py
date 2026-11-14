@@ -20,12 +20,12 @@ FAMILIES = {
     "Bounce": "BOUNCE",
     "Elastic": "ELASTIC",
 }
-# The 67js defaults for Elastic, given to Blender explicitly: Blender stores a period in frames (4.1 by default), which
+# The Crucible defaults for Elastic, given to Blender explicitly: Blender stores a period in frames (4.1 by default), which
 # has no meaning for a segment of unknown length, and treats 0 as a tiny period.
 DEFAULT_ELASTIC_SETTINGS = {"EASE_IN": {"amplitude": 1.0, "period": 0.3}, "EASE_OUT": {"amplitude": 1.0, "period": 0.3}, "EASE_IN_OUT": {"amplitude": 1.0, "period": 0.45}}
 DIRECTIONS = {"In": "EASE_IN", "Out": "EASE_OUT", "InOut": "EASE_IN_OUT"}
 # Non-default Back and Elastic settings. Blender's amplitude and period are absolute values; over a one-unit change in
-# one frame they equal the multiple of the change and the fraction of the segment that 67js takes.
+# one frame they equal the multiple of the change and the fraction of the segment that Crucible takes.
 PARAMETER_CASES = [  # (easing as written in a keyframe, family, Blender easing, Blender settings)
     ("easeOutBack(3)", "Back", "EASE_OUT", {"back": 3.0}),
     ("easeInBack(0.5)", "Back", "EASE_IN", {"back": 0.5}),

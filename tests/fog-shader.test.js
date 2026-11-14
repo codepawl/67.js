@@ -21,19 +21,19 @@ test('the core post shader carries no fog march, and the fog code arrives with f
   `);
   assert.equal(output[0], 'false');
   assert.equal(output[1], 'false');
-  assert.match(output[2], /volumeFog feature needs its shader code: add import '@codepawlhq\/67js\/addons\/fog-shader'/);
+  assert.match(output[2], /volumeFog feature needs its shader code: add import '@codepawlhq\/crucible\/addons\/fog-shader'/);
   assert.equal(output[3], 'true');
   assert.equal(output[4], 'false', 'a program without the volume step keeps the stub after the addon loads');
 });
 
 test('a renderer that draws a volume fog without the addon throws and names the import', () => {
   const output = runModule(`
-    const { Renderer67 } = await import('./src/renderer.js');
+    const { CrucibleRenderer } = await import('./src/renderer.js');
     const rendererWithoutCanvas = { environment: {}, fogFieldOverride: null };
     const frame = { eye: [0, 1, 5], environment: { volumeFog: { density: 0.1 } } };
-    try { Renderer67.prototype.render.call(rendererWithoutCanvas, frame); console.log('no error'); } catch (error) { console.log(error.message); }
+    try { CrucibleRenderer.prototype.render.call(rendererWithoutCanvas, frame); console.log('no error'); } catch (error) { console.log(error.message); }
   `);
-  assert.match(output[0], /volumeFog feature needs its shader code: add import '@codepawlhq\/67js\/addons\/fog-shader'/);
+  assert.match(output[0], /volumeFog feature needs its shader code: add import '@codepawlhq\/crucible\/addons\/fog-shader'/);
 });
 
 test('a recipe with volumeFog loads the fog code on its own, and one without does not', async () => {

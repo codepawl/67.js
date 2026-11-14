@@ -1,22 +1,22 @@
-// Moves meshes between a three.js object tree and 67js parts.
+// Moves meshes between a three.js object tree and Crucible parts.
 //   fromThreeObject(root)        three.js Object3D tree -> { parts, warnings }
-//   toThreeObject(parts, THREE)  67js parts -> { object, warnings }, a Group of Mesh + MeshStandardMaterial
-// It imports neither three.js nor 67js. It reads three.js objects by their shape (matrixWorld, geometry.attributes,
+//   toThreeObject(parts, THREE)  Crucible parts -> { object, warnings }, a Group of Mesh + MeshStandardMaterial
+// It imports neither three.js nor Crucible. It reads three.js objects by their shape (matrixWorld, geometry.attributes,
 // material fields) and builds three.js objects from the THREE namespace you pass in. For a GLB, give the parts to
-// exportGlb() from 67js.
+// exportGlb() from Crucible.
 // Anything it cannot map is listed in `warnings`; a custom shader or a skinned mesh without bones throws.
 
 const DEFAULT_LIMITS = Object.freeze({ maxParts: 10000, maxVertices: 4000000 });
 const HARD_LIMITS = Object.freeze({ maxParts: 100000, maxVertices: 20000000 });
 const NORMAL_TOLERANCE = 1e-6;
 
-// three.js wrap constants -> the GL constants a 67js texture descriptor uses.
+// three.js wrap constants -> the GL constants a Crucible texture descriptor uses.
 const GL_WRAP = Object.freeze({ 1000: 10497, 1001: 33071, 1002: 33648 });
 const THREE_WRAP_NAMES = Object.freeze({ 10497: 'RepeatWrapping', 33071: 'ClampToEdgeWrapping', 33648: 'MirroredRepeatWrapping' });
 const DOUBLE_SIDE = 2;
 const BACK_SIDE = 1;
 
-// three.js physical field -> 67js material field, with the three.js default that means "not set".
+// three.js physical field -> Crucible material field, with the three.js default that means "not set".
 const LAYER_FIELDS = Object.freeze([
   ['clearcoat', 'clearcoat', 0],
   ['clearcoatRoughness', 'clearcoatRoughness', 0],
@@ -26,14 +26,14 @@ const LAYER_FIELDS = Object.freeze([
   ['specularIntensity', 'specular', 1],
 ]);
 
-// Properties that three.js has and a 67js material cannot show, checked on every material.
+// Properties that three.js has and a Crucible material cannot show, checked on every material.
 const UNSUPPORTED_MATERIAL_PROPERTIES = Object.freeze({
-  envMap: 'Pass the image based light to Renderer67 with createEnvironmentMap().',
+  envMap: 'Pass the image based light to CrucibleRenderer with createEnvironmentMap().',
   bumpMap: 'Convert it to a normal map.',
   displacementMap: 'Model the relief in the geometry.',
   alphaMap: 'Put the alpha in the alpha channel of the base colour map.',
-  lightMap: 'Bake the light into the base colour map or use the 67js light bake.',
-  wireframe: '67js has no wireframe view.',
+  lightMap: 'Bake the light into the base colour map or use the Crucible light bake.',
+  wireframe: 'Crucible has no wireframe view.',
   flatShading: 'Give the geometry split vertices.',
 });
 
@@ -189,7 +189,7 @@ function importTexture(texture, colorSpace, label, state) {
 function importMaterial(material, owner, state) {
   const label = `${describe(owner)} material "${material.name || material.type}"`;
   if (SHADER_MATERIALS.some(flag => material[flag])) {
-    throw new ThreeBridgeError(`${label} is a ${material.type}, which 67js cannot run. Replace it with MeshStandardMaterial, or pass skipUnsupported: true to leave the object out.`);
+    throw new ThreeBridgeError(`${label} is a ${material.type}, which Crucible cannot run. Replace it with MeshStandardMaterial, or pass skipUnsupported: true to leave the object out.`);
   }
   if (!material.isMeshStandardMaterial) {
     state.warnings.push(`${label}: ${material.type} has no roughness or metalness, so only its colour, map and opacity are used.`);
@@ -312,15 +312,15 @@ function visit(object, limits, state) {
       state.warnings.push(`${error.message} (skipped)`);
     }
   } else if (object.isPoints || object.isLine || object.isSprite) {
-    state.warnings.push(`${describe(object)}: 67js draws triangle meshes only, so this object is skipped.`);
+    state.warnings.push(`${describe(object)}: Crucible draws triangle meshes only, so this object is skipped.`);
   } else if (object.isLight || object.isCamera) {
-    state.warnings.push(`${describe(object)}: lights and cameras are not parts. Set them as 67js environment and frame fields.`);
+    state.warnings.push(`${describe(object)}: lights and cameras are not parts. Set them as Crucible environment and frame fields.`);
   }
   for (const child of object.children ?? []) visit(child, limits, state);
 }
 
 /**
- * Walks a three.js Object3D tree and returns `{ parts, warnings }`. Each part is a 67js part
+ * Walks a three.js Object3D tree and returns `{ parts, warnings }`. Each part is a Crucible part
  * `{ name, geometry, matrix, material }` with the world matrix of its mesh. Meshes that share a BufferGeometry share one
  * geometry object, so the renderer batches them. Options: `maxParts`, `maxVertices`, `skipUnsupported`.
  */
@@ -427,7 +427,7 @@ function buildMaterial(THREE, source, label, state) {
 }
 
 /**
- * Builds a Group of Mesh objects from 67js parts and returns `{ object, warnings }`. THREE is the namespace of three.js
+ * Builds a Group of Mesh objects from Crucible parts and returns `{ object, warnings }`. THREE is the namespace of three.js
  * (`import * as THREE from 'three'`). Parts that share a geometry object share a BufferGeometry, and parts that share a
  * material object share a material. Each mesh takes its part matrix as is (`matrixAutoUpdate` is off), so the world
  * matrix matches the part exactly; copy `mesh.matrix` into position, quaternion and scale to animate it.
@@ -436,7 +436,7 @@ function buildMaterial(THREE, source, label, state) {
 export function toThreeObject(parts, THREE, options = {}) {
   requireNamespace(THREE);
   if (!Array.isArray(parts) || parts.length === 0) {
-    throw new ThreeBridgeError('toThreeObject needs a nonempty array of 67js parts. Pass the parts of a scene, such as the parts of fromThreeObject().');
+    throw new ThreeBridgeError('toThreeObject needs a nonempty array of Crucible parts. Pass the parts of a scene, such as the parts of fromThreeObject().');
   }
   const { name = 'parts', ...limitOptions } = options;
   const limits = resolveLimits(limitOptions);

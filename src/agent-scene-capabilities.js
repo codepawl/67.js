@@ -197,7 +197,7 @@ export const MESH_BOOLEAN_NOTES = Object.freeze({
 });
 
 export const AGENT_SCENE_CAPABILITIES = Object.freeze({
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'sdf', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh', 'fragment']),
   camera: 'eye, target, up, near, far, then fov (vertical degrees) or focalLength (mm, with sensorWidth mm, 36; not both). projection orthographic with orthoScale (view height in m, default 4). shift [x, y] moves the frame by a fraction of its size. fStop (0.7-64) turns on depth of field focused on target; 1.4 or lower is full blur; effects.depthOfField.blur must stay 0. Orthographic/shifted cameras use the rasterizer.',
   terrain: 'One mesh, x and z from -size/2 to size/2, hills about y = 0. size 40 m (1-2000), resolution 64 cells (2-256), seed 1, amplitude 1 m (0-200), holes up to 16 of {center:[x,z],radius}, no surface inside; radius a few cells or more.',
@@ -282,7 +282,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     choose: 'agx for lit scenes and Blender comparisons, neutral for product and brand colour, aces for contrast; needs loadAgentSceneModules',
   }),
   // Flush surfaces flicker (z-fighting). They are ranked at draw time by default; coplanar-overlap warns about what is left.
-  renderFlags: Object.freeze({ nodeFields: Object.freeze(['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'shadowOnly']), motion: 'node track property visible: 1 or 0, STEP', note: 'visible:false hides a node and children; holdout and shadowCatcher need a transparent canvas (Renderer67 transparent:true); flags split batches. Blended and transmissive parts cast a sun shadow weighted by opacity and tinted by colour (1024 map, one extra draw of those parts only); shadowOnly:true casts a shadow and is not drawn (gobo); castShadow:false turns it off, and cascades or splat/3-layer-map receivers skip the tint.' }),
+  renderFlags: Object.freeze({ nodeFields: Object.freeze(['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'shadowOnly']), motion: 'node track property visible: 1 or 0, STEP', note: 'visible:false hides a node and children; holdout and shadowCatcher need a transparent canvas (CrucibleRenderer transparent:true); flags split batches. Blended and transmissive parts cast a sun shadow weighted by opacity and tinted by colour (1024 map, one extra draw of those parts only); shadowOnly:true casts a shadow and is not drawn (gobo); castShadow:false turns it off, and cascades or splat/3-layer-map receivers skip the tint.' }),
   depthBias: Object.freeze({ nodeFields: Object.freeze(['decal', 'depthLayer']), maxDepthLayer: 4, environment: 'environment.resolveCoplanar', modes: Object.freeze(['offset', false]), default: 'offset', warning: 'coplanar-overlap', note: 'Automatic: flush or near-flush faces, inside one mesh or across parts, are ranked per triangle at draw time, the front face wins, geometry never moves; no field needed. resolveCoplanar false opts out. decal wins over the surface below; depthLayer stacks decals. scene_inspect flush.ranked counts ranked parts. A coplanar-overlap warning carries reason rank-overflow (over 15 stacked faces: remove duplicates), double-sided-gap, unchecked or collapsed-node.' }),
   proceduralMotion: true,
   motionIk: Object.freeze(['two-bone', 'aim', 'chain', 'spline']),

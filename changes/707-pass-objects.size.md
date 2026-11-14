@@ -1,2 +1,0 @@
-- entry:user-pass: a pass that lists parts reads the object ID pass through objectSlotAt, which needs the part-name check, the id lookup and the texture binding (751 bytes gzip); no other bundle runs that code
-- scene:agent-scene+lazy: the same code, once, in the lazy chunk the scene loads only for a recipe with postPasses (913 bytes gzip)

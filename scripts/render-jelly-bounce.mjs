@@ -15,7 +15,7 @@ import { invertedTriangles, JELLY_FRAMES_PER_SECOND, JELLY_LOOK, JELLY_PRESETS, 
 
 const PREVIEW = { width: 960, height: 540, fps: JELLY_FRAMES_PER_SECOND };
 const FRAME_COUNT = 240;
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 
 // The presets are shared with the test (tests/support/jelly-cube.mjs). Colours are named so the labels and the docs agree:
 // blue is firm, orange is medium, pink is soft.
@@ -114,7 +114,7 @@ async function main() {
     stillTimes[`${id}-deepest-dent`] = bounce.deepestFrame / JELLY_FRAMES_PER_SECOND;
     stillTimes[`${id}-rebound-top`] = bounce.topFrame / JELLY_FRAMES_PER_SECOND;
   }
-  const jobsDirectory = join(tmpdir(), `67js-jelly-bounce-${process.pid}`);
+  const jobsDirectory = join(tmpdir(), `crucible-jelly-bounce-${process.pid}`);
   const transport = new StdioClientTransport({ command: process.execPath, args: [serverEntry, '--jobs', jobsDirectory], stderr: 'ignore' });
   const client = new Client({ name: 'jelly-bounce', version: '1.0.0' });
   await client.connect(transport);

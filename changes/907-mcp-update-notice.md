@@ -1,1 +1,0 @@
-- The MCP server checks the npm registry once a day in the background and tells the agent when a newer 67js exists, so it can ask the user to update; `67js-mcp --check-update` asks by hand and `SIXTYSEVENJS_NO_UPDATE_CHECK=1`, `NO_UPDATE_NOTIFIER=1` or `CI` turn it off (#907)

@@ -1,1 +1,0 @@
-- goal:agent-scene: 23 bytes gzip (131556 to 131579) for `flushLeftovers` on the agent scene, which lets `scene_look` report z-fighting (`coplanar-overlap`) that the draw-time ranking left over; before it only `scene_inspect` named those parts, so an agent checking a frame never saw them.

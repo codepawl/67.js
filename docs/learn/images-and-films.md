@@ -1,13 +1,13 @@
 # Images and films
 
-67js turns a scene into a PNG or an MP4 from the repository checkout. The exporter renders in headless Chrome, plans the render size against a memory budget and sends each frame to FFmpeg. The commands run from a source checkout, not from an installed npm package.
+Crucible turns a scene into a PNG or an MP4 from the repository checkout. The exporter renders in headless Chrome, plans the render size against a memory budget and sends each frame to FFmpeg. The commands run from a source checkout, not from an installed npm package.
 
 ## Plan a render before you run it
 
 `planRenderSize` is the same budget planner that the exporter uses. Pick a preset, change the samples or turn on HDR and bloom, and watch the frame shrink when the estimated memory passes the budget. The console prints the plan. This example draws on a 2D canvas, so it costs no WebGL context.
 
 ```js live poster=films-budget
-import { RENDER_PRESETS, planRenderSize, estimateFrameBytes } from '67js';
+import { RENDER_PRESETS, planRenderSize, estimateFrameBytes } from 'crucible';
 
 const canvas = document.querySelector('#scene');
 const context = canvas.getContext('2d');

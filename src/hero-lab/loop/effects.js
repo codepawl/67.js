@@ -3,7 +3,7 @@
 //   drive   machines (forklifts, picker robots) slide to and fro along an aisle; the parts of one machine share a spot, so they move as one
 //   carry   a small box (a tote) rides on every driving machine
 //   gulls   a few birds circle over the quay: each is one extra part of two triangles
-//   haze    one drifting volume of fog (dust in the sun, cold air in a hall) through the 67js volume fog addon
+//   haze    one drifting volume of fog (dust in the sun, cold air in a hall) through the Crucible volume fog addon
 //   glare   the bloom strength breathes slowly
 // Each world lists what it wants in EFFECTS; a world without an entry draws exactly as before.
 // Only matrices and emission change. Movers cast into the shadow map, which is redrawn SHADOW_RATE times a second while they are on screen.

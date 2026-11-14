@@ -1,11 +1,11 @@
 # Scene queries
 
 `addons/scene-query` casts rays against a whole loaded scene and samples a walk map: the ground height and the headroom on a grid.
-It builds on the per-geometry BVH of [mesh-query.md](https://67js.codepawl.com/mesh-query.md) and adds the part that was missing, the node transforms.
+It builds on the per-geometry BVH of [mesh-query.md](https://crucible.codepawl.com/mesh-query.md) and adds the part that was missing, the node transforms.
 
 ```js
-import { loadGltf } from '67js/addons/gltf';
-import { createSceneQuery } from '67js/addons/scene-query';
+import { loadGltf } from 'crucible/addons/gltf';
+import { createSceneQuery } from 'crucible/addons/scene-query';
 
 const asset = await loadGltf('scene.glb');
 const query = createSceneQuery(asset.parts);

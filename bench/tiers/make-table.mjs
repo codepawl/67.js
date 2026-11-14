@@ -15,7 +15,7 @@ const sceneIds = valueAfter('--scenes', null)?.split(',') ?? results.scenes;
 const markdownPath = resolve(valueAfter('--markdown', resultsPath.replace(/\.json$/, '.table.md')));
 const htmlPath = resolve(valueAfter('--html', resultsPath.replace(/\.json$/, '.table.html')));
 
-const COLUMNS = ['Tier', 'For', 'Runs on', 'Trade-off', '67js measured', 'Blender equivalent measured', 'FLIP vs Cycles (lower is better)'];
+const COLUMNS = ['Tier', 'For', 'Runs on', 'Trade-off', 'Crucible measured', 'Blender equivalent measured', 'FLIP vs Cycles (lower is better)'];
 
 // The cells of one engine on one scene: the usable ones, or all of them (flagged) when none is usable.
 function group(scene, engine, samples = null) {
@@ -270,7 +270,7 @@ function summaryLines(assessments) {
   return lines;
 }
 
-const SUMMARY_COLUMNS = ['Tier', '67js time (range over scenes)', 'Blender time (range over scenes)', 'FLIP, 67js', 'FLIP, Blender'];
+const SUMMARY_COLUMNS = ['Tier', 'Crucible time (range over scenes)', 'Blender time (range over scenes)', 'FLIP, Crucible', 'FLIP, Blender'];
 const assessments = sceneIds.map(equalErrorAssessment).filter(Boolean);
 const summary = summaryLines(assessments);
 const summaryRowsList = summaryRows();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { RenderTargetLedger } from '../src/render-target-ledger.js';
 import { createDepthFragmentShader, createDepthVertexShader, createFragmentShader, depthFragmentShader, depthVertexShader } from '../src/shaders.js';
 
@@ -22,7 +22,7 @@ function recordingContext() {
 
 function tintRenderer(batches, { active = true } = {}) {
   const { context, calls, sizes } = recordingContext();
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   Object.assign(renderer, {
     context, batches, renderTargets: new RenderTargetLedger(), world: null, activeLightDirection: [1, 2, 3], shadowBounds: {},
     lightProjection: new Float32Array(16), windState: { time: 0, strength: 0 }, tintedShadowsActive: active, depthAlphaUniforms: {},
@@ -81,7 +81,7 @@ test('the shadow program never samples the sun map it is rendering into (that fe
   const { renderer, calls } = tintRenderer([opaqueBatch, glassBatch]);
   renderer.depthAlphaUniforms = { opaqueShadow: 'opaqueShadow' };
   renderer.depthWindUniforms = {};
-  renderer.drawShadowCasters = Renderer67.prototype.drawShadowCasters;
+  renderer.drawShadowCasters = CrucibleRenderer.prototype.drawShadowCasters;
   renderer.drawShadowCasters(renderer.lightProjection, 2048, true);
   const unitSet = calls.find(([name, location]) => name === 'uniform1i' && location === 'opaqueShadow');
   assert.ok(unitSet, 'the sampler is pointed away from its default unit 0');
@@ -98,8 +98,8 @@ test('while a depth map renders, the comparison sampler of the shadow program re
   renderer.shadowTexture = { name: 'sunMap' };
   renderer.depthAlphaUniforms = { opaqueShadow: 'opaqueShadow' };
   renderer.depthWindUniforms = {};
-  renderer.drawShadowCasters = Renderer67.prototype.drawShadowCasters;
-  renderer.bindPlaceholderOpaqueShadow = Renderer67.prototype.bindPlaceholderOpaqueShadow;
+  renderer.drawShadowCasters = CrucibleRenderer.prototype.drawShadowCasters;
+  renderer.bindPlaceholderOpaqueShadow = CrucibleRenderer.prototype.bindPlaceholderOpaqueShadow;
   renderer.drawShadowCasters(renderer.lightProjection, 2048, true);
   const unitSet = calls.find(([name, location]) => name === 'uniform1i' && location === 'opaqueShadow')[2];
   const placeholderBind = calls.filter(([name]) => name === 'bindTexture').pop();

@@ -14,7 +14,7 @@ const options = { width: Number(widthText), height: Number(heightText), voxelMet
 // Runs in the page.
 async function drawExplosion({ gridBytes, width, height, voxelMetres, density, frames }) {
   const { box } = await import('/src/geometry.js');
-  const { Renderer67 } = await import('/src/renderer.js');
+  const { CrucibleRenderer } = await import('/src/renderer.js');
   const { decodeVolumeGrid, registerVolumeGrid } = await import('/src/volume-grid.js');
   await import('/src/fog-shader.js');
   const grid = decodeVolumeGrid(new Uint8Array(gridBytes));
@@ -31,7 +31,7 @@ async function drawExplosion({ gridBytes, width, height, voxelMetres, density, f
   canvas.width = width;
   canvas.height = height;
   document.body.append(canvas);
-  const renderer = new Renderer67(canvas, parts, { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+  const renderer = new CrucibleRenderer(canvas, parts, { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
   const frame = { eye: [0, 7.5, 13], target: [0, 2.6, 0], fov: 42, time: 0, environment: { keyIntensity: 1.1, fillIntensity: 0.25, ambientIntensity: 0.35, localVolumes: [volume] } };
   const pixel = new Uint8Array(4);
   const draw = () => {

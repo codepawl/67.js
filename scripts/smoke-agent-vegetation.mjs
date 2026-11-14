@@ -45,7 +45,7 @@ const transport = new StdioClientTransport({
 });
 let diagnostics = '';
 transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
-const client = new Client({ name: '67js-vegetation-proof', version: '1' }, {
+const client = new Client({ name: 'crucible-vegetation-proof', version: '1' }, {
   versionNegotiation: { mode: { pin: '2026-07-28' }, probe: { timeoutMs: 180000 } },
 });
 async function call(name, argumentsValue = {}) {
@@ -66,7 +66,7 @@ try {
   const catalog = (await call('scene_asset_catalog')).structuredContent;
   const imported = catalog.assets.find(asset => asset.name === 'imported-tree.glb').assetId;
   const created = (await call('scene_create', { recipe: {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'hills', type: 'terrain', size: 50, resolution: 64, amplitude: 1.2, seed: 4 }, { id: 'beacon', type: 'sphere' }],
     materials: [{ id: 'turf', tag: 'grass', color: [0.2, 0.34, 0.1], roughness: 0.95 }, { id: 'lamp', color: [1, 0.8, 0.3], emission: 2 }],
     nodes: [

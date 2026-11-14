@@ -1,6 +1,6 @@
-# Counts the crown pixels of `foliage` that 67js lights with the sun and Cycles leaves in shadow.
-#   uv run --no-project --with numpy --with pillow python bench/reference/crown-leak.py <work directory> <67js --ambient 0 png> [<67js --ambient 0 --key 0 png>]
-# With the third picture (the same render with the sun off) its light is subtracted from the sun render, so the 67js sun is
+# Counts the crown pixels of `foliage` that Crucible lights with the sun and Cycles leaves in shadow.
+#   uv run --no-project --with numpy --with pillow python bench/reference/crown-leak.py <work directory> <Crucible --ambient 0 png> [<Crucible --ambient 0 --key 0 png>]
+# With the third picture (the same render with the sun off) its light is subtracted from the sun render, so the Crucible sun is
 # compared with the sun of Cycles alone: the sky's reflection in a leaf is not sun, and Cycles has no sky in its sun-only render.
 # Both sides then use one threshold (CYCLES_SHADOWED_BELOW); without it the old, uneven pair of thresholds applies. Needs <work directory>/foliage-cycles.npy (full light, to find the crown) and foliage-cycles-world0.npy (sun only, the true
 # shadow mask; render it with render-blender.py ... --world-strength 0 foliage). Prints the counts and writes leak.png beside the PNG:
@@ -19,7 +19,7 @@ SILHOUETTE_REACH = 2
 LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     """The curve of src/post.js, as in score.py (which cannot be imported: it scores on import). Returns display values."""
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
@@ -43,8 +43,8 @@ def near_any(mask, reach):
 def main():
     work_directory = Path(sys.argv[1])
     gpu_path = Path(sys.argv[2])
-    cycles_full = tone_map_like_67js(np.load(work_directory / "foliage-cycles.npy"))
-    cycles_sun = tone_map_like_67js(np.load(work_directory / "foliage-cycles-world0.npy"))
+    cycles_full = tone_map_like_crucible(np.load(work_directory / "foliage-cycles.npy"))
+    cycles_sun = tone_map_like_crucible(np.load(work_directory / "foliage-cycles-world0.npy"))
     gpu_sun = np.asarray(Image.open(gpu_path).convert("RGB"), dtype=np.float32) / 255
     gpu_lit_above = GPU_LIT_ABOVE
     gpu_sun_luminance = tone_mapped_luminance(gpu_sun)
@@ -65,10 +65,10 @@ def main():
     beside_lit_leaf = near_any(cycles_lit, SILHOUETTE_REACH)
 
     print(f"crown pixels {crown.sum()}")
-    print(f"sun-lit: Cycles {cycles_lit.sum()}, 67js {gpu_lit.sum()}, both {(cycles_lit & gpu_lit).sum()}, Cycles only {(cycles_lit & ~gpu_lit).sum()}")
-    print(f"leak (67js lit, Cycles shadowed) {leak.sum()}")
+    print(f"sun-lit: Cycles {cycles_lit.sum()}, Crucible {gpu_lit.sum()}, both {(cycles_lit & gpu_lit).sum()}, Cycles only {(cycles_lit & ~gpu_lit).sum()}")
+    print(f"leak (Crucible lit, Cycles shadowed) {leak.sum()}")
     print(f"  within {SILHOUETTE_REACH} px of a pixel Cycles lights (silhouette and placement): {(leak & beside_lit_leaf).sum()}")
-    print(f"  farther away (shadow that 67js does not cast): {(leak & ~beside_lit_leaf).sum()}")
+    print(f"  farther away (shadow that Crucible does not cast): {(leak & ~beside_lit_leaf).sum()}")
 
     picture = np.zeros(leak.shape + (3,), np.uint8)
     picture[crown] = 60

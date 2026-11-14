@@ -94,7 +94,7 @@ test('circle is a filled disc or a ring facing +Z', () => {
 
 function sceneWith(geometries) {
   return createAgentScene({
-    format: '67js.scene', schemaVersion: 1, geometries, materials: [{ id: 'paint' }],
+    format: 'crucible.scene', schemaVersion: 1, geometries, materials: [{ id: 'paint' }],
     nodes: geometries.map(geometry => ({ id: geometry.id, geometry: geometry.id, material: 'paint' })),
   });
 }

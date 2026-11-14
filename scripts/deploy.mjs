@@ -13,6 +13,8 @@ const commit = run('git', ['rev-parse', 'HEAD'], true);
 const remoteCommit = run('git', ['ls-remote', 'origin', 'refs/heads/main'], true).split(/\s/)[0];
 if (commit !== remoteCommit) throw new Error('Push this commit to origin/main before deployment.');
 run(process.execPath, ['scripts/prepare-release.mjs', '--require-clean']);
+// The marketplace reads /packs/index.json, which only this step writes; a fresh checkout has no public/packs.
+run(process.execPath, ['scripts/build-pack-index.mjs']);
 run(process.execPath, ['node_modules/vite/bin/vite.js', 'build']);
 run(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy']);
 const release = JSON.parse(await readFile('dist/release.json', 'utf8'));
@@ -20,7 +22,7 @@ let response;
 let live;
 for (let attempt = 0; attempt < 6; attempt++) {
   try {
-    response = await fetch(`https://67js.codepawl.com/release.json?commit=${commit}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+    response = await fetch(`https://crucible.codepawl.com/release.json?commit=${commit}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
     if (response.ok) {
       live = await response.json();
       if (live.commit === commit && live.version === release.version && live.integrity === release.integrity) break;

@@ -38,7 +38,7 @@ function findSetEnvironmentSchema(node) {
 
 async function withMcpClient(use) {
   const server = createAgentMcpServer({ async close() {}, async capabilities() { return { scene: {}, phase: 'idle' }; } });
-  const client = new Client({ name: '67js-environment-schema-test', version: '1' });
+  const client = new Client({ name: 'crucible-environment-schema-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -82,7 +82,7 @@ test('every tool lists a short environment that names the capabilities topic ins
 test('the server still checks every environment field of scene_apply and scene_create_asset', async () => {
   await withMcpClient(async client => {
     const apply = await client.callTool({ name: 'scene_apply', arguments: { expectedRevision: 0, operations: [{ type: 'set-environment', environment: { skyTop: 'blue', bogus: 1 } }] } });
-    const asset = await client.callTool({ name: 'scene_create_asset', arguments: { recipe: { format: '67js.asset', schemaVersion: 1, assetId: 'a'.repeat(64), environment: { world: 'yes' } } } });
+    const asset = await client.callTool({ name: 'scene_create_asset', arguments: { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: 'a'.repeat(64), environment: { world: 'yes' } } } });
     for (const result of [apply, asset]) assert.equal(result.isError, true);
     assert.match(apply.content[0].text, /bogus/);
     assert.match(apply.content[0].text, /skyTop/);
@@ -105,7 +105,7 @@ test('every documented environment field is in the MCP schema', async () => {
 
 function coplanarRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
     nodes: [
@@ -181,7 +181,7 @@ test('the MCP scene_create and scene_apply schemas accept the optional volumeFog
     activeSessionId() { return null; },
   };
   const server = createAgentMcpServer(runtime);
-  const client = new Client({ name: '67js-volume-fog-schema-test', version: '1' });
+  const client = new Client({ name: 'crucible-volume-fog-schema-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

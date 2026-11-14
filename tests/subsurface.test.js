@@ -11,7 +11,7 @@ import { AGENT_SCENE_CAPABILITIES } from '../src/agent-scene-capabilities.js';
 
 function recipeWithMaterial(material) {
   return {
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'finish', ...material }],
@@ -69,7 +69,7 @@ test('the subsurface code loads on demand: the recipe marker finds it, and a ren
     console.log(createFragmentShader([]).includes('subsurfaceLight'));
   `;
   const output = execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: new URL('..', import.meta.url), encoding: 'utf8' }).trim().split('\n');
-  assert.match(output[0], /subsurface feature needs its shader code: add import '@codepawlhq\/67js\/addons\/subsurface-shader'/);
+  assert.match(output[0], /subsurface feature needs its shader code: add import '@codepawlhq\/crucible\/addons\/subsurface-shader'/);
   assert.equal(output[1], 'true');
   assert.equal(output[2], 'false');
 });

@@ -1,7 +1,7 @@
 {
   "id": "airport",
   "title": "Airport ramp",
-  "blurb": "A 787 on its stand at dusk with the turnaround crew, fuel truck, loaders and light towers, drawn by 67js.",
+  "blurb": "A 787 on its stand at dusk with the turnaround crew, fuel truck, loaders and light towers, drawn by Crucible.",
   "glb": "/showcase/airport/scene.glb",
   "glbRest": ["/showcase/airport/scene.rest.glb"],
   "hdriPreview": "/showcase/airport/sky.preview.hdr",
@@ -65,7 +65,7 @@
     { "model": "Hangar", "author": "nermin", "licence": "CC BY 4.0", "source": "https://sketchfab.com/models/64f7d287f5274029bc29755a9839ebbf" },
     { "model": "Fir Sapling (trees)", "author": "Poly Haven", "licence": "CC0", "source": "https://polyhaven.com/a/fir_sapling" },
     { "model": "Island Tree 01 (trees)", "author": "Poly Haven", "licence": "CC0", "source": "https://polyhaven.com/a/island_tree_01" },
-    { "model": "Scene assembly, terrain and hills, roads, runway, taxiways, terminal piers, equipment parking, fence and material setup", "author": "CodePawl", "licence": "MIT", "source": "https://67js.codepawl.com" },
+    { "model": "Scene assembly, terrain and hills, roads, runway, taxiways, terminal piers, equipment parking, fence and material setup", "author": "CodePawl", "licence": "MIT", "source": "https://crucible.codepawl.com" },
     { "model": "Industrial Sunset (Pure Sky) HDRI", "author": "Poly Haven", "licence": "CC0", "source": "https://polyhaven.com/a/industrial_sunset_puresky" }
   ]
 }

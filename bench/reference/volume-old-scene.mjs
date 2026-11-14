@@ -16,7 +16,7 @@ const gridBytes = Array.from(readFileSync(resolve(rootFolder, 'tests/fixtures/ex
 // Runs in the page.
 async function drawOldVolumes({ gridBytes, size }) {
   const { box } = await import('/src/geometry.js');
-  const { Renderer67 } = await import('/src/renderer.js');
+  const { CrucibleRenderer } = await import('/src/renderer.js');
   const { registerVolumeGrid } = await import('/src/volume-grid.js');
   await import('/src/fog-shader.js');
   registerVolumeGrid('fixture', new Uint8Array(gridBytes));
@@ -34,7 +34,7 @@ async function drawOldVolumes({ gridBytes, size }) {
   canvas.width = size;
   canvas.height = size;
   document.body.append(canvas);
-  const renderer = new Renderer67(canvas, [floor], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+  const renderer = new CrucibleRenderer(canvas, [floor], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
   renderer.render({ eye: [0, 4, 9], target: [0, 1.2, 0], fov: 40, time: 0, environment: { keyIntensity: 1.1, fillIntensity: 0.25, ambientIntensity: 0.35, localVolumes } });
   const snapshot = document.createElement('canvas');
   snapshot.width = size;

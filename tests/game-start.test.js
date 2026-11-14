@@ -8,7 +8,7 @@ const EMPTY_RECORDING = { version: 1, samples: 0, events: [] };
 
 function gameRecipe() {
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box' }], materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'creature', geometry: 'block', material: 'paint' }],
   });

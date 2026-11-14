@@ -5,7 +5,7 @@ import { constants, setPriority, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createFrameEncoder } from './frame-encoder.mjs';
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-frame-encoder-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-frame-encoder-'));
 function run(executable, argumentsValue, binary = false) {
   const result = spawnSync(executable, argumentsValue, { windowsHide: true, encoding: binary ? undefined : 'utf8', maxBuffer: 16 * 1024 * 1024 });
   assert.equal(result.status, 0, String(result.stderr));

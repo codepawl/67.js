@@ -6,7 +6,7 @@ The output uses target-local coordinates.
 Share the target part's matrix when rendering the output beside that target.
 
 ```js
-import { shrinkwrapGeometry } from '67js/addons/shrinkwrap';
+import { shrinkwrapGeometry } from 'crucible/addons/shrinkwrap';
 
 const { geometry, stats } = shrinkwrapGeometry(sourceGeometry, targetGeometry, {
   sourceToTarget: sourceToTargetMatrix,
@@ -158,7 +158,7 @@ When the source and output share a local coordinate frame and topology, their di
 This avoids rebuilding the BVH and wrapping every vertex on each animation frame.
 
 ```js
-import { createMorphPose } from '67js';
+import { createMorphPose } from 'crucible';
 
 const wrapped = shrinkwrapGeometry(source, target, { mode: 'project', direction: [0, 0, -1] }).geometry;
 const animatedGeometry = {
@@ -169,7 +169,7 @@ const animatedGeometry = {
   }],
 };
 const morph = createMorphPose(1);
-// Assign animatedGeometry and morph to the part before constructing Renderer67.
+// Assign animatedGeometry and morph to the part before constructing CrucibleRenderer.
 // Update morph.weights[0] between zero and one before renderer.updateParts(parts).
 ```
 

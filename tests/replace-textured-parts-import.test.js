@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4 } from 'gl-matrix';
 import { box } from '../src/geometry.js';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 
 // This file never imports the replace-textured-parts addon, so the core has no texture bookkeeping registered.
 test('adding a textured part without the addon names the import to add', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.groundPart = null;
   renderer.batching = true;
   renderer.geometryBuffers = new Map();

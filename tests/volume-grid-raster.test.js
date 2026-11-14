@@ -34,7 +34,7 @@ function constantGrid(channels) {
 async function drawScenarios(page, grids, scenarios) {
   const task = async ({ grids: gridBytes, scenarios: list }) => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { decodeVolumeGrid, registerVolumeGrid } = await import('/src/volume-grid.js');
     await import('/src/fog-shader.js');
     for (const [name, bytes] of Object.entries(gridBytes)) registerVolumeGrid(name, decodeVolumeGrid(new Uint8Array(bytes)));
@@ -49,7 +49,7 @@ async function drawScenarios(page, grids, scenarios) {
     const wall = { geometry: box(0, 1), matrix: new Float32Array([12, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0.2, 0, 0, 0, -0.1, 1]), material: { tag: 'unlit', color: [0.4, 0.4, 0.4], metallic: 0, roughness: 1, emission: 0 } };
     const results = [];
     for (const localVolumes of list) {
-      const renderer = new Renderer67(canvas, [wall], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+      const renderer = new CrucibleRenderer(canvas, [wall], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
       const environment = { keyIntensity: 0, fillIntensity: 0, ambientIntensity: 0, localVolumes };
       renderer.render({ eye: [0, 0, 5], target: [0, 0, 0], fov: 40, time: 0, environment });
       copyContext.drawImage(canvas, 0, 0, 64, 64);

@@ -19,7 +19,7 @@ function registerFrames() {
 
 function gridOnlyRecipe(extra = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'grey', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'block', geometry: 'box', material: 'grey' }],

@@ -1,6 +1,6 @@
-# Scores 67js drawn with environment.viewTransform against Cycles rendered with the matching Blender view transform (issue #282).
+# Scores Crucible drawn with environment.viewTransform against Cycles rendered with the matching Blender view transform (issue #282).
 #   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/view-transform-score.py <work directory> <output directory> <agx|neutral> [scene ids]
-# Blender writes its picture in the sRGB transfer curve, and 67js encodes with a power of 1 / 2.2 (src/post.js). The Blender picture is decoded
+# Blender writes its picture in the sRGB transfer curve, and Crucible encodes with a power of 1 / 2.2 (src/post.js). The Blender picture is decoded
 # to display-linear and encoded with the 2.2 power, so both sides meet in one display space as score.py does for the plain suite; the
 # difference left is the tone curve and the lighting. Writes view-transform.json in the output directory.
 import json
@@ -39,7 +39,7 @@ def main():
         cycles = srgb_to_display(load_png(work_directory / f"{scene_id}-cycles-{blender_suffix}.png"))
         mine = load_png(work_directory / f"{scene_id}-gpu.png")
         scores[scene_id] = flip_score(cycles, mine)
-        print(f"{scene_id}: 67js {name} against Cycles {name}: {scores[scene_id]}")
+        print(f"{scene_id}: Crucible {name} against Cycles {name}: {scores[scene_id]}")
     result = {"metric": "FLIP (LDR), mean error, lower is better", "viewTransform": name, "scores": scores}
     (output_directory / "view-transform.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
 

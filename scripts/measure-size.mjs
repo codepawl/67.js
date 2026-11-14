@@ -27,11 +27,11 @@ const SCENES = {
       scene.add(new Mesh(new BoxGeometry(), new MeshStandardMaterial()), new DirectionalLight());
       renderer.render(scene, new PerspectiveCamera());`,
     engine: `
-      import { Renderer67 } from './src/renderer.js';
+      import { Renderer67 as CrucibleRenderer } from './src/renderer.js';
       import { box } from './src/geometry.js';
       const material = { tag: 'surface', color: [1, 1, 1], metallic: 0, roughness: 0.5 };
       const parts = [{ name: 'box', geometry: box(0, 1), matrix: new Float32Array(16), material }];
-      new Renderer67(document.createElement('canvas'), parts, {}).render({ eye: [3, 3, 3], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 100 });`,
+      new CrucibleRenderer(document.createElement('canvas'), parts, {}).render({ eye: [3, 3, 3], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 100 });`,
   },
   'gltf-box': {
     three: `
@@ -43,16 +43,16 @@ const SCENES = {
       scene.add(new Mesh(new BoxGeometry(), new MeshStandardMaterial()), new DirectionalLight());
       renderer.render(scene, new PerspectiveCamera());`,
     engine: `
-      import { Renderer67 } from './src/renderer.js';
+      import { Renderer67 as CrucibleRenderer } from './src/renderer.js';
       import { parseGltf } from './src/gltf.js';
-      parseGltf(new ArrayBuffer(0)).then(asset => new Renderer67(document.createElement('canvas'), asset.parts, {}).render({}));`,
+      parseGltf(new ArrayBuffer(0)).then(asset => new CrucibleRenderer(document.createElement('canvas'), asset.parts, {}).render({}));`,
   },
   'agent-scene': {
     engine: `
       import { createAgentScene } from './src/agent-scene.js';
-      import { Renderer67 } from './src/renderer.js';
+      import { Renderer67 as CrucibleRenderer } from './src/renderer.js';
       const scene = createAgentScene({});
-      new Renderer67(document.createElement('canvas'), scene.parts, {}).render(scene.camera);`,
+      new CrucibleRenderer(document.createElement('canvas'), scene.parts, {}).render(scene.camera);`,
   },
 };
 
@@ -144,7 +144,7 @@ async function writeJson(path, value) {
 function printComparisonWithThree(measured, three) {
   console.log('\nThe same scene in both engines, in bytes gzip:');
   for (const [name, threeSize] of Object.entries(three)) {
-    console.log(`  ${name.padEnd(14)} 67js ${measured[`scene:${name}`].gzip}, three.js ${threeSize.gzip}`);
+    console.log(`  ${name.padEnd(14)} Crucible ${measured[`scene:${name}`].gzip}, three.js ${threeSize.gzip}`);
   }
 }
 

@@ -68,7 +68,7 @@ function buildRecipe(boatAssetId) {
   ];
   const boatLift = BOAT_SIZE.hullHeight / 2;
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'crate', type: 'box' },
       { id: 'hull', type: 'box' },
@@ -101,11 +101,11 @@ function buildRecipe(boatAssetId) {
 await mkdir(jobsFolder, { recursive: true });
 requireKitFiles();
 
-const serverArguments = [resolve('bin/67js-mcp.mjs'), '--backend', backend, '--memory', '384', '--assets', assetFolder, '--jobs', jobsFolder];
+const serverArguments = [resolve('bin/crucible-mcp.mjs'), '--backend', backend, '--memory', '384', '--assets', assetFolder, '--jobs', jobsFolder];
 const browserPath = process.argv.includes('--vulkan') ? vulkanChromeWrapper() : process.env.CHROME_PATH;
 if (browserPath) serverArguments.push('--browser', browserPath);
 const transport = new StdioClientTransport({ command: process.execPath, args: serverArguments, stderr: 'inherit' });
-const client = new Client({ name: '67js-buoyancy-film', version: '1' });
+const client = new Client({ name: 'crucible-buoyancy-film', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 120000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });

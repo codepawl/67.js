@@ -9,11 +9,11 @@ import { createAgentPreviewFixture } from './agent-preview-fixture.mjs';
 
 // Drives the installed MCP server on SwiftShader: branches, a branch review and labels, through real tool calls.
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-branches-proof-'));
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const directory = await mkdtemp(join(tmpdir(), 'crucible-branches-proof-'));
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const transport = new PatientStdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '96'], cwd: directory, stderr: 'pipe' });
-const client = new Client({ name: '67js-branches-proof', version: '1' });
+const client = new Client({ name: 'crucible-branches-proof', version: '1' });
 
 async function call(name, argumentsValue) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 60000 });

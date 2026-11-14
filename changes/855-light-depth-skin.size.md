@@ -1,3 +1,0 @@
-- entry:fog-shader: one clamp and one constant in the light depth taps of the lit local volume step, a few dozen bytes for a smoke without a bright rim.
-- scene:agent-scene+lazy: the same clamp in the CPU path tracer's light depth, counted in the lazy bundle.
-- entry:path-tracer: the same clamp in the CPU path tracer's light depth, a few dozen bytes.

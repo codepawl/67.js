@@ -2,7 +2,7 @@
 
 Available from version `0.4.0`.
 
-`Renderer67` deforms skinned vertices in its color, shadow, and benchmark vertex shaders.
+`CrucibleRenderer` deforms skinned vertices in its color, shadow, and benchmark vertex shaders.
 The implementation uses four normalized influences per vertex and a mesh-local joint palette.
 All five PBR map channels remain available.
 

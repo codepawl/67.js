@@ -21,7 +21,7 @@ const browser = await chromium.launch({ executablePath: CHROME, headless: true, 
 async function profileOnce(page) {
   return page.evaluate(async id => {
     const { REFERENCE_SCENES } = await import('/bench/reference/scenes.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { applyLightLinks } = await import('/src/light-linking.js');
     const milliseconds = {};
     let started = performance.now();
@@ -43,7 +43,7 @@ async function profileOnce(page) {
     const linked = applyLightLinks(scene.parts, scene.environment);
     lap('lightLinks');
     const canvas = document.querySelector('canvas');
-    const renderer = new Renderer67(canvas, linked, {
+    const renderer = new CrucibleRenderer(canvas, linked, {
       ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, world: true,
       environment: scene.environment, shadowBounds: scene.shadow, shadowCascades: null,
     });

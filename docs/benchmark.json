@@ -8,13 +8,13 @@
   },
   "results": [
     {
-      "name": "67js instanced",
+      "name": "Crucible instanced",
       "milliseconds": 0.015000000596046448,
       "calls": 8,
       "pixelAgreement": 1
     },
     {
-      "name": "67js individual",
+      "name": "Crucible individual",
       "milliseconds": 1.8168749995529652,
       "calls": 575,
       "pixelAgreement": 0.99999755859375

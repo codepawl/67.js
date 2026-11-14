@@ -1,1 +1,0 @@
-- Native render jobs keep repeated geometry as instances on the `cycles` kernel, and a copy whose material makes the shared mesh emissive is sampled as a light at the right triangle (#896)

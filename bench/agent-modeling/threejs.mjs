@@ -6,7 +6,7 @@
 //
 // The agent writes build.mjs, which builds the object with three.js, writes geometry.json (the world-space triangles of
 // every mesh) and renders scene.png with headless Chrome. The same task checks and the same silhouette look score as
-// the 67js runs grade geometry.json, so the two systems are measured on the same shape. A run passes when every check
+// the Crucible runs grade geometry.json, so the two systems are measured on the same shape. A run passes when every check
 // passes and scene.png is a real picture.
 //
 // Raw transcripts go to artifacts/agent-modeling/<run>/ (ignored by Git); the summary goes to
@@ -198,7 +198,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   await mkdir(resultsDirectory, { recursive: true });
 
   // One install of three from npm, copied into each attempt's fresh folder.
-  const template = await mkdtemp(join(tmpdir(), '67js-threejs-template-'));
+  const template = await mkdtemp(join(tmpdir(), 'crucible-threejs-template-'));
   await writeFile(join(template, 'package.json'), JSON.stringify({ name: 'threejs-task', private: true, type: 'module' }));
   execFileSync(npmExecutable, ['install', 'three', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: template, stdio: 'ignore', shell: process.platform === 'win32' });
   const threeVersion = JSON.parse(await readFile(join(template, 'node_modules', 'three', 'package.json'), 'utf8')).version;
@@ -239,7 +239,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     for (let attempt = 1; attempt <= Number(options.runs); attempt++) {
       for (const task of options.tasks.split(',').map(taskById)) {
-        const workingDirectory = await mkdtemp(join(tmpdir(), '67js-threejs-task-'));
+        const workingDirectory = await mkdtemp(join(tmpdir(), 'crucible-threejs-task-'));
         try {
           await cp(template, workingDirectory, { recursive: true });
           const run = await runAgent(`${THREEJS_PREAMBLE}\n\n${task.prompt.replace(/\n/g, ' ')}`, workingDirectory);

@@ -18,7 +18,7 @@ try {
   }));
   await page.goto('http://127.0.0.1:5173/morph-composition.html');
   const reports = await page.evaluate(async () => {
-    const { Renderer67, box, createMorphPose, createSkinPose } = await import('/build/67.module.js');
+    const { CrucibleRenderer, box, createMorphPose, createSkinPose } = await import('/build/67.module.js');
     const { mat4, mat3, quat, vec3 } = await import('/node_modules/gl-matrix/esm/index.js');
     const reports = [];
     for (const mode of ['normals', 'cancellation', 'benchmark']) {
@@ -56,7 +56,7 @@ try {
         if (context.getError() !== 0) throw new Error('GPU composition generated a GL error');
         return values;
       }
-      const renderer = new Renderer67(canvas, [part, floor], options);
+      const renderer = new CrucibleRenderer(canvas, [part, floor], options);
       const gpuPixels = read(renderer);
       renderer.dispose();
       const referencePositions = new Float32Array(geometry.positions.length);
@@ -74,7 +74,7 @@ try {
         referenceNormals.set(vector, offset);
       }
       const referencePart = { ...part, skin: undefined, morph: undefined, geometry: { positions: referencePositions, normals: referenceNormals, indices: geometry.indices } };
-      const reference = new Renderer67(canvas, [referencePart, floor], options);
+      const reference = new CrucibleRenderer(canvas, [referencePart, floor], options);
       const cpuPixels = read(reference);
       reference.dispose();
       let maximumDifference = 0;

@@ -28,7 +28,7 @@ try {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/src/film.js', route => route.fulfill({ contentType: 'application/javascript', body: "export * from '/build/film.js';" }));
-    await page.route('**/src/renderer.js', route => route.fulfill({ contentType: 'application/javascript', body: "export { Renderer67 } from '/build/67.module.js';" }));
+    await page.route('**/src/renderer.js', route => route.fulfill({ contentType: 'application/javascript', body: "export { CrucibleRenderer } from '/build/67.module.js';" }));
     await page.goto(`http://127.0.0.1:${PORT}/film.html?export=1&width=${width}&height=${height}`);
     await page.waitForFunction(() => window.__filmReady);
     const result = await page.evaluate(() => {

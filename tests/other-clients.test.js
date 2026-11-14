@@ -8,7 +8,6 @@ import { listTools } from '../scripts/measure-tool-cost.mjs';
 import { checkToolSchemas, summarizeFindings, TOOL_NAME_PATTERN } from '../scripts/check-tool-schemas.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const siteOrigin = 'https://67js.codepawl.com';
 const tools = await listTools();
 
 function createStrictValidator() {
@@ -61,7 +60,7 @@ test('strict-mode and subset gaps are the known ones, so a new kind of gap is no
 });
 
 function linkedPaths(text) {
-  const absolute = [...text.matchAll(new RegExp(`${siteOrigin.replaceAll('.', '\\.')}(/[A-Za-z0-9._/-]*)`, 'g'))].map(match => match[1]);
+  const absolute = [...text.matchAll(/(?<![\w.-])https:\/\/crucible\.codepawl\.com(\/[A-Za-z0-9._/-]*)/g)].map(match => match[1]);
   const bare = [...text.matchAll(/`(\/[a-z0-9-]+\.(?:md|html|txt|json))`/g)].map(match => match[1]);
   return [...new Set([...absolute, ...bare])];
 }

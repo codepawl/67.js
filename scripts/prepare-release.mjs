@@ -11,7 +11,7 @@ import { buildApiReference } from './api-reference.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const metadata = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 if (!/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/.test(metadata.version)) throw new Error('Release version must be valid semver.');
-if (metadata.name !== '@codepawlhq/67js') throw new Error('Unexpected package name.');
+if (metadata.name !== '@codepawlhq/crucible') throw new Error('Unexpected package name.');
 
 function run(executable, argumentsList, capture = false) {
   const result = spawnSync(executable, argumentsList, { cwd: root, windowsHide: true, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit' });
@@ -111,9 +111,9 @@ if (publishedPackage) {
 const release = {
   version: metadata.version,
   packageName: metadata.name,
-  packageAlias: '67js',
+  packageAlias: 'crucible',
   commit,
-  installCommand: registryPublished ? `npm install 67js@npm:${metadata.name}@${metadata.version}` : `npm install 67js@https://67js.codepawl.com${tarball}`,
+  installCommand: registryPublished ? `npm install crucible@npm:${metadata.name}@${metadata.version}` : `npm install crucible@https://crucible.codepawl.com${tarball}`,
   tarball,
   module: `/releases/${metadata.version}/67.module.js`,
   registryPublished,

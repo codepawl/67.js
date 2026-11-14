@@ -4,13 +4,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Search [existing discussions](https://github.com/codepawl/67.js/discussions) and the [guide](https://67js.codepawl.com/docs) first. A bug goes in an [issue](https://github.com/codepawl/67.js/issues/new/choose).
+        Search [existing discussions](https://github.com/codepawl/crucible/discussions) and the [guide](https://crucible.codepawl.com/docs) first. A bug goes in an [issue](https://github.com/codepawl/crucible/issues/new/choose).
         Leave out local paths, tokens and personal data: discussions are public.
   - type: input
     id: version
     attributes:
-      label: 67js version
-      description: Run `npm ls @codepawlhq/67js`.
+      label: Crucible version
+      description: Run `npm ls @codepawlhq/crucible`.
       placeholder: 0.16.0
     validations:
       required: true

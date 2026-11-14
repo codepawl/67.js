@@ -13,7 +13,7 @@ The workflow has three steps:
 In the scene below, the studio lights are turned down, so the point light does most of the work. Drag in the picture to move the light across the floor. The slider sets the intensity, and the box turns on a shadow for the light. Every frame passes the whole `pointLights` list in `frame.environment`.
 
 ```js live poster=lights-point
-import { Renderer67, box, sphere } from '67js';
+import { CrucibleRenderer, box, sphere } from 'crucible';
 
 function placeAt(x, y, z, width, height, depth) {
   return new Float32Array([width, 0, 0, 0, 0, height, 0, 0, 0, 0, depth, 0, x, y, z, 1]);
@@ -33,7 +33,7 @@ const light = { x: -1.4, z: 0, intensity: 8, castShadow: false };
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new CrucibleRenderer(canvas, parts, {
   ground: false,
   hdr: true,
   pixelRatio: 1.25,
@@ -139,7 +139,7 @@ A point light with `castShadow: true` takes six tiles of a shadow atlas of 24 ti
 The scene has pillars and a low sun. The slider sets the density, and `frame.environment.volumeFog` replaces the whole fog object for each frame. Drag to turn the camera. The log prints the memory the depth texture adds.
 
 ```js live poster=fog-volume
-import { Renderer67, box, cylinder } from '67js';
+import { CrucibleRenderer, box, cylinder } from 'crucible';
 
 function placeAt(x, y, z, width, height, depth) {
   return new Float32Array([width, 0, 0, 0, 0, height, 0, 0, 0, 0, depth, 0, x, y, z, 1]);
@@ -162,7 +162,7 @@ const fog = {
 };
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new CrucibleRenderer(canvas, parts, {
   hdr: true,
   depth: true,
   ground: false,
@@ -238,7 +238,7 @@ Resolved depth adds four estimated bytes per rendered pixel, or 2,073,600 bytes 
 
 `part.castShadow: false` excludes a mesh from shadow rendering while keeping it visible and opaque, for example a luminous window that should not block the sun. The flag must be boolean, and changing a part's casting regime needs a new renderer, because `updateParts()` rejects it.
 
-The ambient of the fog can follow a per-point sky visibility and a bounce from the surfaces, instead of one share for the whole box. Pass `fogSkyVisibility` from `src/fog-sky-visibility.js` to `Renderer67` (the agent preview and the reference harness do). In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is the grid's mean light at the cell, and the fog's ambient stands for the sky only. The [volume fog contract](https://github.com/codepawl/67.js/blob/main/docs/volumetric.md) covers these terms, the cost and the limits.
+The ambient of the fog can follow a per-point sky visibility and a bounce from the surfaces, instead of one share for the whole box. Pass `fogSkyVisibility` from `src/fog-sky-visibility.js` to `CrucibleRenderer` (the agent preview and the reference harness do). In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is the grid's mean light at the cell, and the fog's ambient stands for the sky only. The [volume fog contract](https://github.com/codepawl/crucible/blob/main/docs/volumetric.md) covers these terms, the cost and the limits.
 
 This is one bounded medium with one directional scattering source. Point-light scattering, multiple scattering, attenuation toward the source, transparent depth, volume grids, particles, temporal accumulation and half-resolution rendering are not built. Fog runs after bloom extraction, so scattering itself does not feed bloom.
 

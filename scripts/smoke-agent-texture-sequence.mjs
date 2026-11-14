@@ -57,7 +57,7 @@ function dominantFrame(pixel) {
   return -1;
 }
 
-const directory = await mkdtemp(join(tmpdir(), '67js-sequence-smoke-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-sequence-smoke-'));
 const assets = join(directory, 'assets');
 const jobs = join(directory, 'jobs');
 await mkdir(assets);
@@ -67,7 +67,7 @@ const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '192', '--assets', assets, '--jobs', jobs], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-sequence-proof', version: '1' });
+const client = new Client({ name: 'crucible-sequence-proof', version: '1' });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 120000 });
@@ -98,7 +98,7 @@ try {
   const frames = catalog.assets.filter(asset => asset.kind === 'image').sort((left, right) => left.name.localeCompare(right.name)).map(asset => asset.assetId);
   assert.equal(frames.length, 4);
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'quad', type: 'grid', segments: 1 }],
     materials: [{ id: 'screen', roughness: 1, map: { sequence: { frames, fps: FRAMES_PER_SECOND } } }],
     nodes: [{ id: 'screen', geometry: 'quad', material: 'screen', scale: [6, 1, 6] }],

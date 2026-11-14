@@ -1,7 +1,7 @@
 // Flicker viewer (issue #751): fly or orbit through a GLB and see which pixels still change owner between two frames that differ
 // by a sub-pixel camera jitter. Open /bench/flicker/index.html?asset=/path/to/file.glb, or drop a GLB on the page.
 import { vec3 } from 'gl-matrix';
-import { Renderer67 } from '../../src/index.js';
+import { CrucibleRenderer } from '../../src/index.js';
 import { parseGltf } from '../../src/gltf.js';
 import { resolveFlushParts } from '../../src/coplanar-overlap.js';
 import { flushOrderOf } from '../../src/depth-layer.js';
@@ -239,7 +239,7 @@ async function build() {
   bounds = measureBounds(loaded.parts);
   const size = bounds.maximum.map((value, axis) => value - bounds.minimum[axis]);
   extent = Math.max(...size);
-  renderer = new Renderer67(canvas, loaded.parts, {
+  renderer = new CrucibleRenderer(canvas, loaded.parts, {
     ground: false, hdr: !options.triangleIds, samples: options.samples, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
     reversedDepth: options.reversed ? 'auto' : false,
     resolveCoplanar: options.offset ? resolveAndReport : false,

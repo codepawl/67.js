@@ -16,7 +16,7 @@ const SCATTER = { ground: 'hills', density: 0.02, slopeLimit: 30, exclude: [CLEA
 
 function forestRecipe(overrides = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [GROUND, { id: 'marker', type: 'box' }],
     materials: [{ id: 'grass', tag: 'grass', color: [0.2, 0.4, 0.1] }, { id: 'steel', color: [0.6, 0.6, 0.6] }],
     nodes: [
@@ -122,7 +122,7 @@ test('season tints leaves, and bare season drops deciduous foliage but keeps con
 
 test('one tree grows at the node transform and validation names the problem', () => {
   const single = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     nodes: [{ id: 'oak', translation: [4, 0, 2], vegetation: { species: 'broadleaf', seed: 2, height: 9 } }],
     camera: { eye: [4, 4, 20], target: [4, 4, 2] },
   });
@@ -150,7 +150,7 @@ test('an imported tree with a foliage override gets the swaying tag and shares i
   const asset = await parseGltf(skinnedStripAsset(document => { document.materials[0].name = 'Leaves'; }));
   const assets = new Map([[assetCopyKey(id, 0), asset]]);
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     nodes: [
       { id: 'a', asset: { id, materials: [{ name: 'Leaves', tag: 'foliage', color: [0.2, 0.5, 0.1] }] } },
       { id: 'b', translation: [3, 0, 0], asset: { id, materials: [{ name: 'Leaves', tag: 'foliage', color: [0.2, 0.5, 0.1] }] } },

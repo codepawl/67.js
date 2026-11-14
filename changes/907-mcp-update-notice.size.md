@@ -1,1 +1,0 @@
-- entry:mcp-server: the update check module and the notice, a few hundred bytes of server code outside the library entries.

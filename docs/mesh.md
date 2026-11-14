@@ -1,10 +1,10 @@
 # Polygon mesh core
 
-`67js/addons/mesh` is the polygon modeling core for agents, available since 0.11.0. It holds polygon topology, converts to and from renderer geometry, checks meshes and runs the editing operators (extrude, inset, booleans and so on) listed below.
+`crucible/addons/mesh` is the polygon modeling core for agents, available since 0.11.0. It holds polygon topology, converts to and from renderer geometry, checks meshes and runs the editing operators (extrude, inset, booleans and so on) listed below.
 
 ```js
-import { box } from '67js';
-import { meshFromGeometry, editMesh, meshData, validateTopology, extractRender, lintMesh, facesWithTag } from '67js/addons/mesh';
+import { box } from 'crucible';
+import { meshFromGeometry, editMesh, meshData, validateTopology, extractRender, lintMesh, facesWithTag } from 'crucible/addons/mesh';
 
 const mesh = meshFromGeometry(box(0, 1));   // 8 vertices, 12 edges, 6 quads, tagged top/bottom/side/...
 lintMesh(mesh).ok;                          // true: closed, consistently wound, no degenerate faces
@@ -14,7 +14,7 @@ const edit = editMesh(mesh);                // half-edge topology for local edit
 validateTopology(edit);                     // { vertices, edges, faces, loops, euler }
 const back = meshData(edit);                // compact again
 
-const { geometry } = extractRender(back);   // positions, normals, uvs, indices for Renderer67
+const { geometry } = extractRender(back);   // positions, normals, uvs, indices for CrucibleRenderer
 ```
 
 ## MeshData
@@ -179,7 +179,7 @@ an inverted part.
 
 Outside recipes, call `await loadMeshBooleans()` once, then `meshBoolean(mesh, cutter, operation, { cutTag })` or
 `applyMeshEdits(mesh, edits, { resolveCutter })`. The library loads `manifold-3d` as an optional peer dependency,
-like Rapier for physics: install `manifold-3d@3.5.4` next to `@codepawlhq/67js` to use booleans, in the library and
+like Rapier for physics: install `manifold-3d@3.5.4` next to `@codepawlhq/crucible` to use booleans, in the library and
 in the MCP server alike. The MCP runtime serves Manifold's module and binary to its preview page from that
 installation, on the page's own origin; the page policy adds only WebAssembly compilation (`'wasm-unsafe-eval'`).
 Without the peer, a boolean edit fails with the install command and everything else keeps working. Keeping
@@ -455,7 +455,7 @@ with n-gon caps, with creases of sharpness 10, 2 and 0.5. A crease of sharpness 
 Volume differs by under 1% on four cases, because it is measured on bent quads from each quad's first corner.
 
 Timing, measured on this machine: one level on a 100,489-quad grid takes about 225 ms (402k faces out), and about 390 ms
-with a crease on every edge. That is fast enough that 67js does not keep a stencil table; a stack node reuses its cached
+with a crease on every edge. That is fast enough that Crucible does not keep a stencil table; a stack node reuses its cached
 result until an earlier node changes.
 
 ### Decimate, remesh and levels of detail
@@ -476,7 +476,7 @@ cells). The mesh must be closed, and the result carries no tags or attributes.
 decreasing ratios in (0, 1), up to 8. Each level has `triangles`, `error` (the farthest its vertices lie from the input surface, in
 the input's units) and `relativeError` (over the bounds diagonal); the asset form returns a whole asset per level.
 Skinned and morphed parts are refused. `surfaceDeviation(a, b)` gives the vertex Hausdorff distance both ways. Hand the levels to a
-part as `lods` and `Renderer67` picks one per instance by its size on screen: see `docs/culling-lod.md`.
+part as `lods` and `CrucibleRenderer` picks one per instance by its size on screen: see `docs/culling-lod.md`.
 
 Why our own collapse and not meshoptimizer 1.3.0 (npm, MIT, 2026-09-25): on the same sphere, torus and open bowl at
 ratios 0.5, 0.2 and 0.05 our Hausdorff error was 0.25 to 0.85 of its error (0.0088 against 0.0153 at 0.5 and 0.0647 against 0.0773

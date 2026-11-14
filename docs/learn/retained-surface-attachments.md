@@ -5,7 +5,7 @@
 The workflow has five steps:
 
 1. Choose an original triangle number and barycentric coordinates for the contact point.
-2. Bind the target with `createSurfaceAttachment` from `67js/addons/surface-attachment` using `0.4.1` or a current source build.
+2. Bind the target with `createSurfaceAttachment` from `crucible/addons/surface-attachment` using `0.4.1` or a current source build.
 3. Assign `attachment.matrix` to the accessory part before creating the renderer.
 4. Update the target matrix, morph weights and skin palette for the frame.
 5. Call `attachment.update()` before `renderer.updateParts()`.
@@ -15,9 +15,9 @@ The workflow has five steps:
 A ray from the camera side picks the triangle: `createMeshQueryIndex(...).raycast` returns the `triangle` and `barycentric` that the binding takes. The target sphere has one relative morph target that flattens it. The first slider turns the target, and the second one squashes it. The spike follows both, because each frame calls `attachment.update()` and then `renderer.updateParts()`.
 
 ```js live poster=attachment-spike
-import { Renderer67, sphere, box, createMorphPose } from '67js';
-import { createMeshQueryIndex } from '67js/addons/mesh-query';
-import { createSurfaceAttachment } from '67js/addons/surface-attachment';
+import { CrucibleRenderer, sphere, box, createMorphPose } from 'crucible';
+import { createMeshQueryIndex } from 'crucible/addons/mesh-query';
+import { createSurfaceAttachment } from 'crucible/addons/surface-attachment';
 
 // A morph target that flattens the sphere to half its height. Deltas are relative to the base mesh.
 const base = sphere(48, 30);
@@ -61,7 +61,7 @@ const spike = {
 };
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, [target, spike], { ground: false, samples: 4, pixelRatio: 1.25 });
+const renderer = new CrucibleRenderer(canvas, [target, spike], { ground: false, samples: 4, pixelRatio: 1.25 });
 const state = { turn: 0.4, squash: 0 };
 
 function update(logIt) {
@@ -121,7 +121,7 @@ Unknown option fields throw. The target needs Float32 positions and matching uni
 
 The frame follows the posed world triangle: local X runs along edge zero-to-one, local Z is the normalized cross product of edges zero-to-one and zero-to-two, and local Y completes the right-handed frame. The output matrix has unit scale and does not inherit shear or nonuniform scale of the target.
 
-Updates sample the selected triangle without rebuilding a BVH. Static raycast hits can supply binding coordinates, but query indices cannot raycast a visibly skinned or morphed surface, so pick the triangle on the static mesh first. The [attachment contract](https://github.com/codepawl/67.js/blob/main/docs/surface-attachment.md) defines retained identities, world-unit clearance and unsupported shader deformation.
+Updates sample the selected triangle without rebuilding a BVH. Static raycast hits can supply binding coordinates, but query indices cannot raycast a visibly skinned or morphed surface, so pick the triangle on the static mesh first. The [attachment contract](https://github.com/codepawl/crucible/blob/main/docs/surface-attachment.md) defines retained identities, world-unit clearance and unsupported shader deformation.
 
 ## Common mistakes
 

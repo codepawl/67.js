@@ -69,7 +69,7 @@ test('a sky field names the value and an accepted example when it is wrong', () 
 });
 
 test('set-environment changes one sky field and keeps the others', () => {
-  const session = createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
+  const session = createAgentScene({ format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
     environment: { sky: { type: 'physical', sunElevation: 60, turbidity: 5 } } });
   session.apply([{ type: 'set-environment', environment: { sky: { sunElevation: 10 } } }], { expectedRevision: 0 });
   const { sky, lightDirection } = session.environment;
@@ -94,7 +94,7 @@ test('ozone deepens twilight blue and sunDisc adds the solar disc to the sky map
 
 test('environment motion tracks animate physical sky sunElevation, sunRotation and turbidity', () => {
   const session = createAgentScene({
-    format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
+    format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
     environment: { sky: { type: 'physical', sunElevation: 60, sunRotation: 0, turbidity: 2 } },
     motion: {
       duration: 2,
@@ -114,7 +114,7 @@ test('environment motion tracks animate physical sky sunElevation, sunRotation a
   assert.ok(sampled.fogDensity > 0.0025 * 2);
 
   assert.throws(() => createAgentScene({
-    format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
+    format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
     motion: { duration: 1, tracks: [{ kind: 'environment', property: 'sunElevation', keyframes: [{ time: 0, value: 45 }] }] },
   }), /environment\.sky/);
 });

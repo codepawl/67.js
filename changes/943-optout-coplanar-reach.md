@@ -1,1 +1,0 @@
-- With `resolveCoplanar: false`, the near-flush pair report now reaches as far as the flush search (2 mm or more by scene size, never under 1 mm), so a 1.5 mm pair is reported; the pair count in the report stays bounded as before (#943).

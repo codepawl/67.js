@@ -13,7 +13,7 @@ const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwM
 
 function recipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
     materials: [{ id: 'blue', color: [0.1, 0.3, 0.8] }],
     nodes: [{ id: 'mesh', geometry: 'cube', material: 'blue' }],
@@ -109,7 +109,7 @@ async function connect(context) {
     activeSessionId() { return scene ? sessionId : null; },
   };
   const server = createAgentMcpServer(runtime);
-  const client = new Client({ name: '67js-boundary-test', version: '1' });
+  const client = new Client({ name: 'crucible-boundary-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -259,8 +259,8 @@ test('SDK rejects unknown fields, missing revisions, invalid vectors and oversiz
   await rejected(client, 'scene_look', { sessionId, motionTime: -1 });
   await rejected(client, 'scene_apply', { sessionId, expectedRevision: 0, operations: [{ type: 'set-motion' }] });
   await rejected(client, 'scene_asset_catalog', { path: 'C:/private/file.glb' });
-  await rejected(client, 'scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId: '../file.glb' } });
-  await rejected(client, 'scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId: 'a'.repeat(64), root: { javascript: 'run' } } });
+  await rejected(client, 'scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: '../file.glb' } });
+  await rejected(client, 'scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: 'a'.repeat(64), root: { javascript: 'run' } } });
   await rejected(client, 'scene_look', { sessionId, file: 'out.png' });
   await rejected(client, 'scene_restore', { sessionId, checkpointId: randomUUID() });
   await rejected(client, 'scene_apply', { sessionId, operations: [{ type: 'set-camera' }] });
@@ -384,7 +384,7 @@ test('real SDK calls preserve atomic revisions, checkpoints, recipe snapshots an
   const { client, sessionId } = boundary;
   const call = (name, argumentsValue = {}) => client.callTool({ name, arguments: argumentsValue });
   const capabilities = await call('scene_capabilities');
-  assert.equal(capabilities.structuredContent.format, '67js.scene');
+  assert.equal(capabilities.structuredContent.format, 'crucible.scene');
   const created = await call('scene_create', { recipe: recipe() });
   assert.equal(created.structuredContent.sessionId, sessionId);
   const revision = created.structuredContent.revision;
@@ -454,7 +454,7 @@ test('SDK stdio EOF closes the runtime without launching a scene', async () => {
 
 test('branches off leaves the branch field and the variants advice out of the schemas', async context => {
   const server = createAgentMcpServer({ async close() {}, activeSessionId() { return null; } }, { branches: false });
-  const client = new Client({ name: '67js-branches-off-test', version: '1' });
+  const client = new Client({ name: 'crucible-branches-off-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -478,7 +478,7 @@ test('relations off leaves the relations field and the relations capabilities ou
   const clients = {};
   for (const relations of [true, false]) {
     const server = createAgentMcpServer(runtime, { relations });
-    const client = new Client({ name: `67js-relations-${relations}-test`, version: '1' });
+    const client = new Client({ name: `crucible-relations-${relations}-test`, version: '1' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     await client.connect(clientTransport);
@@ -502,7 +502,7 @@ test('relations off leaves the relations field and the relations capabilities ou
 test('SDK dynamic batches create resources, reject dangling edits, and restore scene membership', async context => {
   const { client, sessionId } = await connect(context);
   const call = (name, argumentsValue) => client.callTool({ name, arguments: argumentsValue });
-  await call('scene_create', { recipe: { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] } });
+  await call('scene_create', { recipe: { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] } });
   const initial = (await call('scene_checkpoint', { sessionId })).structuredContent;
   const added = await call('scene_apply', { sessionId, expectedRevision: 0, operations: [
     { type: 'add-geometry', geometry: { id: 'cube', type: 'box' } },

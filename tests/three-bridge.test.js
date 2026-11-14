@@ -61,7 +61,7 @@ test('the addon has no import statement and keeps three.js as a peer dependency 
   const pack = JSON.parse(await readFile(new URL('../packages/three-bridge/package.json', import.meta.url), 'utf8'));
   assert.equal(pack.dependencies, undefined);
   assert.ok(pack.peerDependencies.three);
-  assert.ok(pack.peerDependencies['@codepawlhq/67js']);
+  assert.ok(pack.peerDependencies['@codepawlhq/crucible']);
   const core = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(core.dependencies?.three, undefined, 'the core takes no three.js runtime dependency');
 });
@@ -83,7 +83,7 @@ test('a group is imported with vertex counts, index counts and world matrices', 
   assert.deepEqual(warnings, [], 'a supported tree gives no warnings');
 });
 
-test('material fields map to the 67js material', () => {
+test('material fields map to the Crucible material', () => {
   const { parts } = fromThreeObject(buildSourceGroup());
   const [box, sphere, textured] = parts.map(part => part.material);
   assert.ok(maxDifference(box.color, new THREE.Color(0x2f9e6b).toArray()) < TOLERANCE);
@@ -232,7 +232,7 @@ test('limits are bounded and errors say what to pass', () => {
   assert.throws(() => fromThreeObject(instanced, { maxParts: 1e9 }), /whole number from 1 to 100000/);
   assert.throws(() => fromThreeObject(instanced, { maxPart: 5 }), /Unknown option "maxPart"/);
   assert.throws(() => fromThreeObject({}), /needs a three\.js Object3D/);
-  assert.throws(() => toThreeObject([], THREE), /nonempty array of 67js parts/);
+  assert.throws(() => toThreeObject([], THREE), /nonempty array of Crucible parts/);
   assert.throws(() => toThreeObject([{ name: 'a' }], THREE), /parts\[0\] "a" needs geometry\.positions/);
   assert.throws(() => toThreeObject(fromThreeObject(buildSourceGroup()).parts, {}), /needs the three\.js namespace.*Group/);
   const { parts } = fromThreeObject(buildSourceGroup());

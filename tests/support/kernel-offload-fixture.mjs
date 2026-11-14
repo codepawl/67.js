@@ -7,7 +7,7 @@ import { answerKernelRequest } from '../../src/kernel-registry.js';
 export function kernelRoom() {
   const box = (id, translation, scale, material) => ({ id, geometry: 'box', material, translation, scale });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'box', type: 'box' },
       { id: 'crate', type: 'mesh', base: { type: 'box', bevel: 0 }, stack: [{ op: 'uv_unwrap' }] },

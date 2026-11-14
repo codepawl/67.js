@@ -1,1 +1,0 @@
-- The native `cycles` kernel can read texture mip levels: `textureMips: true` stores a mip chain after level 0 and picks the level from a ray cone (off by default, so pictures match Blender Cycles and every existing scene stays byte-identical) (#896)

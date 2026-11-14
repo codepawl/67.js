@@ -452,7 +452,7 @@ test('a compressed KTX2 texture with a partial mip chain keeps its first level',
   assert.equal(asset.parts[0].material.map.image.compressed.levels.length, 1);
 });
 
-test('a compressed KTX2 format 67js does not upload fails with a clear message', async context => {
+test('a compressed KTX2 format Crucible does not upload fails with a clear message', async context => {
   mockImageBitmap(context);
   const loader = ktx2LoaderReturning(compressedKtx2Texture(8, ETC1_RGB), { bptcSupported: true });
   await assert.rejects(parseGltf(ktx2BaseColorDocument(8), { decoders: { ktx2: loader } }), /does not upload/);

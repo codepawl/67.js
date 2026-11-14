@@ -185,7 +185,7 @@ test('random edit sequences keep a valid topology', () => {
 
 test('recipe mesh geometry renders, reports edits and rejects bad edits atomically', () => {
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'crate', type: 'mesh', base: { type: 'box', bevel: 0 }, smoothAngle: 30, edits: [
       { op: 'inset_individual', select: { tag: 'side' }, thickness: 0.06, name: 'panel' },
     ] }],
@@ -201,10 +201,10 @@ test('recipe mesh geometry renders, reports edits and rejects bad edits atomical
   assert.equal(scene.revision, 1);
   assert.equal(scene.exportRecipe().geometries[0].edits.length, 2);
   assert.throws(() => createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'plain', type: 'box', bevel: 0 }, { id: 'nested', type: 'mesh', base: { type: 'mesh', base: { type: 'box' } } }],
     materials: [], nodes: [],
   }), /geometries\[1\]\.base: got .*expected a primitive or profile record without an id/);
-  const plain = createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'plain', type: 'box', bevel: 0 }], materials: [], nodes: [] });
+  const plain = createAgentScene({ format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'plain', type: 'box', bevel: 0 }], materials: [], nodes: [] });
   assert.throws(() => plain.apply([{ type: 'edit-mesh', geometry: 'plain', edits: [] }], { expectedRevision: 0 }), /geometry: got "plain"; expected the ID of a mesh geometry, but it is a box\. Add a mesh geometry with base/);
 });

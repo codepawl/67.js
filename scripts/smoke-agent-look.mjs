@@ -24,10 +24,10 @@ recipe.shadow = { extent: 5, far: 20 };
 const harness = `<!doctype html><html><head><style>html,body{margin:0;height:100%}canvas{width:100vw;height:100vh;display:block}</style></head><body><canvas></canvas><script type="module">
 import {createAgentScene,loadAllAgentSceneModules} from '/src/agent-scene.js';
 import {resolveAgentShadow} from '/src/agent-look.js';
-import {Renderer67} from '/src/renderer.js';
+import {CrucibleRenderer} from '/src/renderer.js';
 await loadAllAgentSceneModules();
 const session=createAgentScene(${JSON.stringify(recipe)});
-const renderer=new Renderer67(document.querySelector('canvas'),session.parts,{ground:false,hdr:true,depth:true,samples:1,pixelRatio:1,memoryBudgetMiB:192});
+const renderer=new CrucibleRenderer(document.querySelector('canvas'),session.parts,{ground:false,hdr:true,depth:true,samples:1,pixelRatio:1,memoryBudgetMiB:192});
 const counters={buffers:0,textures:0,framebuffers:0,renderbuffers:0};
 const context=renderer.context;
 for(const [method,field] of [['createBuffer','buffers'],['createTexture','textures'],['createFramebuffer','framebuffers'],['createRenderbuffer','renderbuffers']]) {

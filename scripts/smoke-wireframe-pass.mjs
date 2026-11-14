@@ -10,15 +10,15 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-wireframe-'));
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-wireframe-'));
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const backend = process.argv[3] ?? 'cpu';
 const SIZE = 320;
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', backend, '--memory', '128', '--jobs', join(directory, 'jobs')], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-wireframe-proof', version: '1' });
+const client = new Client({ name: 'crucible-wireframe-proof', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 60000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });
@@ -87,7 +87,7 @@ function countNear(png, color) {
 function recipe() {
   const box = edits => ({ type: 'mesh', base: { type: 'box', bevel: 0 }, ...(edits ? { edits } : {}) });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'clean', ...box() },
       { id: 'open', ...box([{ op: 'delete', select: { tag: 'top' } }]) },

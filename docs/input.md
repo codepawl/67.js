@@ -1,10 +1,10 @@
 # Input: sources, actions and axes
 
-`67js/addons/input` reads devices for a live game. Game logic asks for `jump` or `moveX`, never for `Space`. Any source can register, so a MIDI pad, a touch stick, a webcam tracker, a replay file or an agent plugs in the same way as a keyboard. Like the [runtime](runtime.md), it loads only when imported and adds no dependency.
+`crucible/addons/input` reads devices for a live game. Game logic asks for `jump` or `moveX`, never for `Space`. Any source can register, so a MIDI pad, a touch stick, a webcam tracker, a replay file or an agent plugs in the same way as a keyboard. Like the [runtime](runtime.md), it loads only when imported and adds no dependency.
 
 ```js
-import { createRuntime } from '67js/addons/runtime';
-import { createInput, keyboardSource, mouseSource, gamepadSource } from '67js/addons/input';
+import { createRuntime } from 'crucible/addons/runtime';
+import { createInput, keyboardSource, mouseSource, gamepadSource } from 'crucible/addons/input';
 
 const input = createInput({
   sources: [keyboardSource(), mouseSource({ target: canvas }), gamepadSource()],

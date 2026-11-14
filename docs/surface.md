@@ -3,8 +3,8 @@
 Available from version `0.4.0`. The optional addon has its own decal clipper, which follows Three.js DecalGeometry, and imports no Three.js code.
 
 ```js
-import { sphere } from '@codepawlhq/67js';
-import { createSurfacePatch } from '@codepawlhq/67js/addons/surface';
+import { sphere } from '@codepawlhq/crucible';
+import { createSurfacePatch } from '@codepawlhq/crucible/addons/surface';
 
 const target = {
   name: 'Shell',
@@ -20,7 +20,7 @@ const badge = {
   matrix: target.matrix,
   material: { color: [1, 0.2, 0.02], metallic: 0, roughness: 0.5 },
 };
-// Pass [target, badge] to Renderer67.
+// Pass [target, badge] to CrucibleRenderer.
 // Mutate the retained target.matrix, then call renderer.updateParts([target, badge]).
 ```
 

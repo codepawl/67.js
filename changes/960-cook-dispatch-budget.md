@@ -1,1 +1,0 @@
-- Cook native renders split themselves into dispatches that each stay under about half a second, so a heavy scene such as 500 lights at 960x540 and 256 samples no longer loses the Vulkan device, and a lost device now raises an error that names how to lower the work per dispatch (#960)

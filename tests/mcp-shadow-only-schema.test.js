@@ -7,7 +7,7 @@ import { createAgentMcpServer } from '../scripts/mcp-server.mjs';
 
 async function listedTools() {
   const server = createAgentMcpServer({ async close() {}, async capabilities() { return { scene: {}, phase: 'idle' }; } });
-  const client = new Client({ name: '67js-shadow-only-schema-test', version: '1' });
+  const client = new Client({ name: 'crucible-shadow-only-schema-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

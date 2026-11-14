@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { textureRegionOffset, validateTextureRegion } from '../src/texture-update.js';
 
 const MAX_TEXTURE_SIZE = 4096;
@@ -23,7 +23,7 @@ function fakeRenderer(descriptor) {
     texSubImage2D: (...args) => calls.push(['texSubImage2D', ...args.slice(1), state.flipY, state.premultiply, state.colorSpace]),
     generateMipmap: () => calls.push(['generateMipmap']),
   };
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.context = context;
   renderer.textures = new Map([[descriptor, 'texture']]);
   return { renderer, calls, state };

@@ -10,13 +10,13 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 // End to end: a path traced render job has no raster frame and no object ID, depth or normal pass. It still reports the
 // part findings of its first frame, and one `findings-unavailable` entry says what it cannot report and why.
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const hasBrowser = existsSync(chromePath) || Boolean(process.env.CI);
 
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'block', type: 'box' }],
   materials: [{ id: 'stone', color: [0.7, 0.68, 0.64] }],
   nodes: [
@@ -28,7 +28,7 @@ const recipe = {
 
 test('a path traced job reports part findings and says why exposure findings and passes are unavailable',
   { skip: (!hasBuild && 'run npm run build:lib first') || (!hasBrowser && 'no Chrome'), timeout: 300000 }, async context => {
-    const workDirectory = await mkdtemp(join(tmpdir(), '67js-traced-findings-'));
+    const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-traced-findings-'));
     context.after(() => rm(workDirectory, { recursive: true, force: true }));
     const transport = new StdioClientTransport({
       command: process.execPath,

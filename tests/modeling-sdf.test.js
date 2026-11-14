@@ -182,7 +182,7 @@ test('bad input names the field and what to pass', () => {
 
 test('a recipe sdf geometry becomes a part and respects the vertex budget', () => {
   const recipe = (geometry, limits) => createAgentScene({
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     materials: [{ id: 'clay', color: [0.8, 0.5, 0.4], roughness: 0.6 }],
     geometries: [{ id: 'g', type: 'sdf', ...geometry }],

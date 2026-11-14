@@ -1,6 +1,6 @@
-# Writes a 960 px wide preview per scene: Cycles (top left), 67js before (top right) and 67js after (bottom left), with captions.
+# Writes a 960 px wide preview per scene: Cycles (top left), Crucible before (top right) and Crucible after (bottom left), with captions.
 #   uv run --no-project --python 3.12 --with pillow --with numpy python -I bench/reference/before-after-sheet.py <renders directory> <output directory> <scene id> [...]
-# "Before" is the 67js panel of the committed sheet images/<scene id>.jpg; "after" is <renders directory>/<scene id>-gpu.png.
+# "Before" is the Crucible panel of the committed sheet images/<scene id>.jpg; "after" is <renders directory>/<scene id>-gpu.png.
 import os
 import sys
 
@@ -33,6 +33,6 @@ if __name__ == "__main__":
         after = Image.open(os.path.join(renders, f"{scene_id}-gpu.png")).convert("RGB")
         sheet = Image.new("RGB", (PANEL_WIDTH * 2, PANEL_HEIGHT * 2), (20, 20, 20))
         sheet.paste(captioned(cycles, "Cycles"), (0, 0))
-        sheet.paste(captioned(before, "67js before"), (PANEL_WIDTH, 0))
-        sheet.paste(captioned(after, "67js after"), (0, PANEL_HEIGHT))
+        sheet.paste(captioned(before, "Crucible before"), (PANEL_WIDTH, 0))
+        sheet.paste(captioned(after, "Crucible after"), (0, PANEL_HEIGHT))
         sheet.save(os.path.join(output, f"{scene_id}.png"), optimize=True)

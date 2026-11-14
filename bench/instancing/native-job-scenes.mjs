@@ -55,5 +55,5 @@ export function recipeFor(scene) {
     ? [{ id: 'ball', type: 'sphere', segments: 16, rings: 8 }, { id: 'panel', type: 'box', bevel: 0 },
       { id: 'pane-box', type: 'box', bevel: 0 }, { id: 'velvet-ball', type: 'sphere', segments: 20, rings: 10 }, { id: 'glass-ball', type: 'sphere', segments: 24, rings: 12 }]
     : Array.from({ length: 12 }, (_, index) => ({ id: `solid-${index}`, type: index % 2 ? 'box' : 'sphere', ...(index % 2 ? { bevel: 0 } : { segments: 12 + index, rings: 8 }) }));
-  return { format: '67js.scene', schemaVersion: 1, geometries, materials, nodes: scene === 'repeated' ? repeatedRecipe() : distinctRecipe(), camera };
+  return { format: 'crucible.scene', schemaVersion: 1, geometries, materials, nodes: scene === 'repeated' ? repeatedRecipe() : distinctRecipe(), camera };
 }

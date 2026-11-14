@@ -1,6 +1,6 @@
 # Measures shadow depth: how dark the darks are, how far a surface falls from lit to shadowed, how wide shadow edges are and how much
-# a scene darkens where objects meet other surfaces. It compares a 67js render with the Cycles render of the same scene (issue #197).
-#   uv run --no-project --python 3.12 --with numpy --with pillow --with scipy python -I bench/reference/measure-depth.py <work directory> <scene id>,<scene id> [--candidate <directory with 67js pngs>] [--json <file>]
+# a scene darkens where objects meet other surfaces. It compares a Crucible render with the Cycles render of the same scene (issue #197).
+#   uv run --no-project --python 3.12 --with numpy --with pillow --with scipy python -I bench/reference/measure-depth.py <work directory> <scene id>,<scene id> [--candidate <directory with Crucible pngs>] [--json <file>]
 # Images are compared in display space after the tone curve of src/post.js, the same space score.py uses.
 # All measures are on luminance. The surface and edge measures are proxies: the renders carry no object ids, so a surface is a
 # tile of one hue, a shadow edge is a luminance step of one stop or more, and contact darkening is read against the neighbourhood.
@@ -22,14 +22,14 @@ FLOOR = 1e-3
 KEYS = ["p1", "p5", "p25", "p50", "surface_stops", "edge_median_px", "edge_p90_px", "contact_stops"]
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
 
 
 def load_cycles(path):
-    return tone_map_like_67js(np.load(path))
+    return tone_map_like_crucible(np.load(path))
 
 
 def load_png(path):
@@ -113,7 +113,7 @@ GAP_LABELS = ["p1", "p5", "p25", "p50", "surface", "edge", "contact"]
 
 
 def gap_row(cycles, ours):
-    """67js minus Cycles: luminance percentiles in stops (positive is lighter than Cycles), surface and contact in stops, edge width in pixels."""
+    """Crucible minus Cycles: luminance percentiles in stops (positive is lighter than Cycles), surface and contact in stops, edge width in pixels."""
     stops = [float(np.log2((ours[key] + FLOOR) / (cycles[key] + FLOOR))) for key in ("p1", "p5", "p25", "p50")]
     return stops + [ours["surface_stops"] - cycles["surface_stops"], ours["edge_median_px"] - cycles["edge_median_px"], ours["contact_stops"] - cycles["contact_stops"]]
 
@@ -136,7 +136,7 @@ def main():
         for scene_id in scene_ids:
             cycles = cycles_measures[scene_id]
             ours = measure(load_png(candidate / f"{scene_id}-gpu.png"))
-            results.setdefault(candidate.name, {})[scene_id] = {"cycles": cycles, "67js": ours}
+            results.setdefault(candidate.name, {})[scene_id] = {"cycles": cycles, "crucible": ours}
             if summary:
                 gap = gap_row(cycles, ours)
                 gaps.append(gap)
@@ -144,7 +144,7 @@ def main():
                     print(f"{scene_id:<20}" + "".join(f"{value:>10.2f}" for value in gap))
                 continue
             print(f"{scene_id:<20}{'cycles':<8}" + "".join(f"{cycles[key]:>15.4f}" for key in KEYS))
-            print(f"{'':<20}{'67js':<8}" + "".join(f"{ours[key]:>15.4f}" for key in KEYS))
+            print(f"{'':<20}{'crucible':<8}" + "".join(f"{ours[key]:>15.4f}" for key in KEYS))
         if summary:
             mean = np.mean(np.abs(np.array(gaps)), axis=0)
             print(f"{'mean absolute gap':<20}" + "".join(f"{value:>10.2f}" for value in mean))

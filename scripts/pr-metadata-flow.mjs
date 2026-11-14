@@ -10,7 +10,7 @@ export const HOUR_MS = 60 * 60 * 1000;
 export const REMINDER_AFTER_HOURS = 48;
 export const CLOSE_AFTER_HOURS = 72;
 
-const guideUrl = 'https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.md';
+const guideUrl = 'https://github.com/codepawl/crucible/blob/main/CONTRIBUTING.md';
 
 export function buildMarker(name, fields = {}) {
   const pairs = Object.entries(fields)

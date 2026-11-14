@@ -20,7 +20,7 @@ async function askCapabilities(context, topic) {
     activeSessionId() { return null; },
   };
   const server = createAgentMcpServer(runtime);
-  const client = new Client({ name: '67js-error-cause-test', version: '1' });
+  const client = new Client({ name: 'crucible-error-cause-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -65,7 +65,7 @@ test('uvs and scene.terrain stand for the topics meshUv and terrain', async cont
 test('an inspected source node without a mesh of its own lists the parts below it', async () => {
   const bytes = readFileSync(new URL('./fixtures/RobotExpressive.glb', import.meta.url));
   const asset = await parseGltf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), { maxVertices: 500000 });
-  const scene = createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) });
+  const scene = createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) });
   const bare = scene.inspect({ kind: 'hierarchy', limit: 256 }).nodes.find(node => node.meshIds.length === 0 && asset.nodes.some(other => other.parent === node.id));
   assert.ok(bare, 'the robot has a group node without parts');
   const inspected = scene.inspect({ ids: [bare.id], includeBounds: true });
@@ -76,7 +76,7 @@ test('an inspected source node without a mesh of its own lists the parts below i
 test('includeBounds with kind hierarchy is accepted and says where bounds are', async () => {
   const bytes = readFileSync(new URL('./fixtures/RobotExpressive.glb', import.meta.url));
   const asset = await parseGltf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), { maxVertices: 500000 });
-  const scene = createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) });
+  const scene = createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) });
   const report = scene.inspect({ kind: 'hierarchy', includeBounds: true, limit: 4 });
   assert.equal(report.kind, 'hierarchy');
   assert.match(report.note, /without kind/);

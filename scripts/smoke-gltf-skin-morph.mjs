@@ -19,7 +19,7 @@ try {
   }));
   await page.goto('http://127.0.0.1:5173/skin-morph-smoke.html');
   const report = await page.evaluate(async () => {
-    const { Renderer67 } = await import('/build/67.module.js');
+    const { CrucibleRenderer } = await import('/build/67.module.js');
     const { parseGltf } = await import('/build/gltf.js');
     const { skinnedStripAsset } = await import('/tests/fixtures/skinned-strip.js');
     const bytes = skinnedStripAsset((definition, append) => {
@@ -39,7 +39,7 @@ try {
     const asset = await parseGltf(bytes);
     const part = asset.parts[0];
     const canvas = document.querySelector('canvas');
-    const renderer = new Renderer67(canvas, asset.parts, { samples: 4, pixelRatio: 1, memoryBudgetMiB: 96 });
+    const renderer = new CrucibleRenderer(canvas, asset.parts, { samples: 4, pixelRatio: 1, memoryBudgetMiB: 96 });
     const frame = { eye: [1, 3, 6], target: [1, 3, 0], fov: 40, time: 0, effects: { grain: 0 } };
     const palette = part.skin.jointMatrices;
     const weights = part.morph.weights;

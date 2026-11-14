@@ -241,7 +241,7 @@ test('a recipe sheet takes softBody and a stiffness group and bakes them', async
   await import('./support/load-agent-scene-modules.mjs');
   const { createAgentScene } = await import('../src/agent-scene.js');
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'jelly', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: [{ op: 'vertex_group', name: 'soft', weight: 0.2 }] },
       { id: 'floor', type: 'box', bevel: 0 },

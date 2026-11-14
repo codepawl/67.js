@@ -31,7 +31,7 @@ function recipe() {
   }
   const span = columns * 0.6 + 4;
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }, { id: 'sphere', type: 'sphere', segments: 32, rings: 20 }],
     materials: [{ id: 'matte', color: [0.7, 0.7, 0.7], roughness: 0.6 }, { id: 'glow', color: [0.1, 0.3, 0.9], emission: 1 }],
     nodes,
@@ -49,10 +49,10 @@ async function cardMemoryMiB() {
   }
 }
 
-const directory = await mkdtemp(join(tmpdir(), '67js-quality-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-quality-'));
 const transport = new StdioClientTransport({ command: process.execPath,
-  args: [resolve('bin/67js-mcp.mjs'), '--backend', backend, '--memory', '384', '--jobs', join(directory, 'jobs')], cwd: directory, stderr: 'pipe' });
-const client = new Client({ name: '67js-quality-measure', version: '1' });
+  args: [resolve('bin/crucible-mcp.mjs'), '--backend', backend, '--memory', '384', '--jobs', join(directory, 'jobs')], cwd: directory, stderr: 'pipe' });
+const client = new Client({ name: 'crucible-quality-measure', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 120000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });

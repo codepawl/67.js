@@ -22,7 +22,7 @@
   <text x="342" y="136" fill="#8a8a93" font-size="14" text-anchor="middle">one time</text>
   <g>
     <rect x="394" y="56" width="220" height="188" rx="18" fill="#212121"/>
-    <text x="420" y="96" fill="#ececec" font-size="22" font-weight="600">Renderer67</text>
+    <text x="420" y="96" fill="#ececec" font-size="22" font-weight="600">CrucibleRenderer</text>
     <g font-size="15" fill="#b4b4b4">
       <text x="420" y="134">uploads geometry</text>
       <text x="420" y="162">and textures</text>

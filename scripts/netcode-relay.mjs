@@ -1,4 +1,4 @@
-// A reference WebSocket relay for 67js/addons/netcode. Players connect to ws://host:port/?id=<peerId>; the relay forwards
+// A reference WebSocket relay for crucible/addons/netcode. Players connect to ws://host:port/?id=<peerId>; the relay forwards
 // { to, data } from one player to { from, data } on another and tells the rest { from, left: true } when a player leaves.
 // It keeps no game state, so the authority (a host player or a server process) stays one of the connected peers.
 //

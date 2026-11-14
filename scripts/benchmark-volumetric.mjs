@@ -10,7 +10,7 @@ try {
   await page.route('**/volume-benchmark.html', route => route.fulfill({ contentType: 'text/html', body: '<canvas style="width:960px;height:540px;display:block"></canvas>' }));
   await page.goto('http://127.0.0.1:5173/volume-benchmark.html');
   const results = await page.evaluate(async () => {
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     await import('/src/fog-shader.js');
     const { createFilmScenes, sampleFilm } = await import('/src/film.js');
     const canvas = document.querySelector('canvas');
@@ -18,7 +18,7 @@ try {
     const sample = sampleFilm(36);
     const frame = { ...sample.camera, time: sample.sceneTime, effects: { grain: 0 } };
     scene.animate(sample.sceneTime);
-    const renderer = new Renderer67(canvas, scene.parts, { hdr: true, depth: true, world: true, ground: false, pixelRatio: 1, samples: 4, environment: scene.environment, shadowBounds: scene.shadowBounds });
+    const renderer = new CrucibleRenderer(canvas, scene.parts, { hdr: true, depth: true, world: true, ground: false, pixelRatio: 1, samples: 4, environment: scene.environment, shadowBounds: scene.shadowBounds });
     const context = renderer.context;
     const timer = context.getExtension('EXT_disjoint_timer_query_webgl2');
     if (!timer) throw new Error('Native GPU timer unavailable');

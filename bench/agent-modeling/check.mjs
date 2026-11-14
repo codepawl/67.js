@@ -436,7 +436,7 @@ export function recipeFeatures(recipe) {
 export async function gradeRecipe(task, recipe) {
   let measures;
   try {
-    measures = recipe.format === '67js.asset' ? await measureAssetRecipe(recipe) : await measureRecipe(recipe);
+    measures = recipe.format === 'crucible.asset' ? await measureAssetRecipe(recipe) : await measureRecipe(recipe);
   } catch (error) {
     const results = task.checks.map(check => ({ kind: check.kind, label: check.label, pass: false, detail: `recipe failed: ${error.message}` }));
     return { pass: false, passed: 0, total: results.length, results };

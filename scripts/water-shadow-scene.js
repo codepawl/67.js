@@ -1,6 +1,6 @@
 // The water shadow test scene, shared by scripts/measure-water-shadows.mjs and the preview. It runs in the browser page:
 // a post stands in a pool, its shadow falls on the bed, and the camera looks straight down (or along the water for the reflection).
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { box } from '../src/geometry.js';
 import '../src/world-material-shader.js';
 
@@ -27,7 +27,7 @@ export function poolParts(depth, water, { visible = false } = {}) {
 }
 
 function drawFrame(canvas, parts, { eye, target, up = [0, 1, 0], fov = 30, hdr = false }) {
-  const renderer = new Renderer67(canvas, parts, { hdr, depth: false, world: false, ground: false, pixelRatio: 1, samples: 1, environment: { lightDirection: SUN_DIRECTION, keyColor: [3, 3, 3] } });
+  const renderer = new CrucibleRenderer(canvas, parts, { hdr, depth: false, world: false, ground: false, pixelRatio: 1, samples: 1, environment: { lightDirection: SUN_DIRECTION, keyColor: [3, 3, 3] } });
   renderer.render({ eye, target, up, fov, time: 0, environment: { lightDirection: SUN_DIRECTION } });
   return renderer;
 }

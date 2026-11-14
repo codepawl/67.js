@@ -1,4 +1,4 @@
-# Scores the 67js water shadow pool against the Cycles reference: FLIP of the two pictures, and the bed shadow contrast
+# Scores the Crucible water shadow pool against the Cycles reference: FLIP of the two pictures, and the bed shadow contrast
 # (lit minus shadowed, against the same pool dry) of each, next to exp(-absorption * depth).
 #   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/water-shadows-score.py <work directory>
 import json
@@ -71,7 +71,7 @@ def main():
             "case": case["name"],
             "flip": flip(aces(cycles) ** (1 / GAMMA), js_picture),
             "flipDry": flip(aces(cycles_dry) ** (1 / GAMMA), js_dry_picture),
-            "contrast67js": contrast(inverse_aces(js_picture ** GAMMA), inverse_aces(js_dry_picture ** GAMMA), depth),
+            "contrastcrucible": contrast(inverse_aces(js_picture ** GAMMA), inverse_aces(js_dry_picture ** GAMMA), depth),
             "contrastCycles": contrast(cycles, cycles_dry, depth),
             "beer": [round(math.exp(-sigma * depth), 3) for sigma in case["absorption"]],
         })

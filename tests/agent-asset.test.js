@@ -4,7 +4,7 @@ import { parseGltf } from '../src/gltf.js';
 import { createAgentAssetScene } from '../src/agent-asset.js';
 import { skinnedStripAsset } from './fixtures/skinned-strip.js';
 
-const recipe = () => ({ format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) });
+const recipe = () => ({ format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) });
 
 async function fixture(edit) {
   return parseGltf(skinnedStripAsset(edit));

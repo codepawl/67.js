@@ -29,7 +29,7 @@ The table below this section, and the equal-error section after it, are the earl
 
 One scene, as the first step. The other five scenes of `bench/reference/scenes.js` export and render, but were not run (see "Not done"). The card was shared the whole time (see "Conditions").
 
-| Tier | For | What runs it today | 67js time | Blender equivalent and its time | Quality (FLIP vs Cycles 4096 spp, lower is better) | VRAM (card wide, shared) |
+| Tier | For | What runs it today | Crucible time | Blender equivalent and its time | Quality (FLIP vs Cycles 4096 spp, lower is better) | VRAM (card wide, shared) |
 | --- | --- | --- | --- | --- | --- | --- |
 | draft (planned name) | A quick look while editing | Glaze, 0.5 render scale, 1 sample, light shading (measured before the 8 bit target and level of detail change below) | 1.20 ms a frame (0.88 to 2.43), first frame 11.9 ms | EEVEE 5.3, 1 sample: 99 ms a render call (76 to 157) | Glaze 0.188, EEVEE 0.562 | Glaze +62 MiB (render targets 39 MB), EEVEE +2,218 MiB |
 | realtime | Interactive use | Glaze, default settings | 1.11 ms a frame (1.05 to 1.24), first frame 9.7 ms | EEVEE 5.3 defaults, 64 samples: 1,127 ms a render call (716 to 1,891) | Glaze 0.197, EEVEE 0.562 | Glaze +119 MiB (render targets 65.7 MB), EEVEE +2,503 MiB |

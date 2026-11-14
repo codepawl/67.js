@@ -32,7 +32,7 @@ function levelCountFor(width, height) {
   return Math.floor(Math.log2(Math.max(width, height))) + 1;
 }
 
-/** The format entry for a three.js style compressed texture format enum, or null when 67js does not take it. */
+/** The format entry for a three.js style compressed texture format enum, or null when Crucible does not take it. */
 export function compressedFormatInfo(glFormat) {
   return FORMATS.get(glFormat) ?? null;
 }
@@ -43,7 +43,7 @@ export function compressedFormatInfo(glFormat) {
  */
 export function describeCompressedImage(glFormat, levels, field, colorSpace) {
   const info = compressedFormatInfo(glFormat);
-  if (!info) throw new Error(`${field} decoded to GPU format ${glFormat}, which 67js does not upload. Use BC7, BC1, BC3, ASTC 4x4 or ETC2, or transcode to RGBA8 (see docs/gltf.md).`);
+  if (!info) throw new Error(`${field} decoded to GPU format ${glFormat}, which Crucible does not upload. Use BC7, BC1, BC3, ASTC 4x4 or ETC2, or transcode to RGBA8 (see docs/gltf.md).`);
   if (!Array.isArray(levels) || !levels.length) throw new Error(`${field} compressed texture has no mip levels.`);
   const [base] = levels;
   if (info.strictBlocks && (base.width % BLOCK_SIZE || base.height % BLOCK_SIZE)) {

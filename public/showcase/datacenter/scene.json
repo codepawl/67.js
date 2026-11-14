@@ -389,7 +389,7 @@
       "model": "Racks, busways, cooling, pipework, hall shell, swap cart, the surrounding campus (halls with facade detail and signs, substation yard, generators, fuel tanks, fence, gate pillars, roads, parking and hills), perforated rack panels and lamp pools",
       "author": "CodePawl",
       "licence": "MIT",
-      "source": "https://github.com/codepawl/67.js"
+      "source": "https://github.com/codepawl/crucible"
     },
     {
       "model": "Metal029, Metal027, Metal038 (rack frames, steel, panels, cowls)",
@@ -413,7 +413,7 @@
       "model": "Texture sets packed and resized from the maps above (colour, normal, roughness and metalness)",
       "author": "CodePawl",
       "licence": "MIT",
-      "source": "https://github.com/codepawl/67.js"
+      "source": "https://github.com/codepawl/crucible"
     }
   ],
   "waterReflection": true

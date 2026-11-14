@@ -4,7 +4,7 @@ import { describeApplication } from '../src/agent-apply-report.js';
 
 function recipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'paint', color: [0.2, 0.4, 0.6], roughness: 0.5 }],
     nodes: [{ id: 'cube', geometry: 'box', material: 'paint', translation: [0, 0, 0] }],

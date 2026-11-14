@@ -158,7 +158,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       const history = historyWithJob(await readRenderHistory(), { settings, backend, estimate, report });
       await writeFile(join(jobRoot, RENDER_HISTORY_FILE), JSON.stringify(history), { mode: 0o600 });
     } catch (error) {
-      console.error(`67js could not save the render history: ${error.message}`);
+      console.error(`Crucible could not save the render history: ${error.message}`);
     }
   }
   const savedGlbPaths = [];
@@ -354,7 +354,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       } catch (error) {
         const reason = String(error.message).replace(/^page\.evaluate: /, '').split('\n')[0];
         refusedAddons.push({ name: addon.name, reason });
-        console.error(`67js addon ${addon.name} skipped: ${reason}`);
+        console.error(`Crucible addon ${addon.name} skipped: ${reason}`);
       }
     }
   }
@@ -441,13 +441,13 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         return url.origin === origin ? route.continue() : route.abort();
       });
       page.setDefaultTimeout(15000);
-      if (backend === 'gpu') await page.exposeFunction('__67jsNativeBake', answerNativeBake);
+      if (backend === 'gpu') await page.exposeFunction('__crucibleNativeBake', answerNativeBake);
       if (!kernelWorkers) {
-        await page.addInitScript(() => { globalThis.__67jsKernelWorkers = 'off'; });
+        await page.addInitScript(() => { globalThis.__crucibleKernelWorkers = 'off'; });
       }
       // A kernel that fell back to the main thread says so on the page console; keep that note in the server's stderr.
       page.on?.('console', message => {
-        if (message.text().startsWith('67js kernel fallback')) console.error(message.text());
+        if (message.text().startsWith('Crucible kernel fallback')) console.error(message.text());
       });
       await page.goto(origin);
       await page.waitForFunction(() => Boolean(window.__agentPreview));
@@ -929,7 +929,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           commands: ['set-root', 'set-asset-node', 'set-motion', 'set-animation', 'set-material', 'set-camera', 'set-environment', 'set-effects', 'set-shadow'],
         },
         packs: {
-          configured: Boolean(packsRoot), format: '67js.pack', manifest: '67js-pack.json', contentKinds: Object.keys(PACK_CONTENT_KINDS),
+          configured: Boolean(packsRoot), format: 'crucible.pack', manifest: 'crucible-pack.json', contentKinds: Object.keys(PACK_CONTENT_KINDS),
           extensions: PACK_CONTENT_KINDS, maximumPacks: MAXIMUM_INSTALLED_PACKS, maximumFiles: MAXIMUM_PACK_FILES, maximumBytes: MAXIMUM_PACK_BYTES,
           maximumFileBytes: MAXIMUM_PACK_FILE_BYTES, maximumJsonBytes: MAXIMUM_PACK_JSON_BYTES, maximumItemsPerKind: MAXIMUM_PACK_ITEMS_PER_KIND,
           use: 'scene_asset_catalog lists packs: name, version, license, author, description and item ids. GLBs, images, looks and environments carry assetId values that work in scene_create_asset, look, hdri and texture fields. Materials and recipes are read with scene_asset_catalog { pack, material } or { pack, recipe }: pass a recipe to scene_create, and a material as a materials entry or a scene_apply set-material. Packs are installed by the user (unzip into the --packs folder); a tool call never downloads one. Invalid packs are skipped and listed under packs.rejected with the reason.',
@@ -1070,7 +1070,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       });
       const session = await runAnnotateSession({ png: frame.data, width: frame.width, height: frame.height, prompt: input.prompt ?? '',
         maxMarks, waitMs: timeoutSeconds * 1000, open: async url => {
-          console.error(`67js annotate page: ${url}`);
+          console.error(`Crucible annotate page: ${url}`);
           await openPage(url);
         } });
       const base = { sessionId: input.sessionId, revision: frame.metadata.revision, view: { width: frame.width, height: frame.height, camera: frame.camera } };
@@ -1102,7 +1102,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         for (const name of settings.branchNames) {
           branchRecipes.set(name, await invoke('branchRecipe', { sessionId: settings.sessionId, name }));
         }
-        const assetBytes = snapshot.recipe.format === '67js.asset' ? await (await catalog()).read(snapshot.recipe.assetId) : undefined;
+        const assetBytes = snapshot.recipe.format === 'crucible.asset' ? await (await catalog()).read(snapshot.recipe.assetId) : undefined;
         let privateSessionId;
         const started = performance.now();
         let suspended = false;
@@ -1292,7 +1292,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           await audioLibrary.resolve(settings.audio.file);
         }
         const snapshot = await invoke('snapshot', { sessionId, expectedRevision });
-        const assetBytes = snapshot.recipe.format === '67js.asset' ? await (await catalog()).read(snapshot.recipe.assetId) : undefined;
+        const assetBytes = snapshot.recipe.format === 'crucible.asset' ? await (await catalog()).read(snapshot.recipe.assetId) : undefined;
         phase = 'rendering';
         try {
           // The estimate is made before the job exists, because the job suspends the scene and starts at once.

@@ -1,0 +1,14 @@
+{
+  "name": "sunset-with-lamp",
+  "skills": ["build-crucible-scene"],
+  "prompt": "Using the Crucible MCP tools and the build-crucible-scene skill: build a small room-like scene (a floor slab and a box on it) with two point lights and one spot light. Animate it over 4 seconds as a sunset: the sun drops to the horizon, the first lamp fades up from 0, and the exposure rises a little. Look at frame time 2 without changing the scene, then finish by calling scene_export_recipe. Keep it short.",
+  "expected": "The recipe has 2 point lights and 1 spot light, and a motion with sun, light (an id such as point:0) and effects tracks. The agent used scene_look with a motionTime.",
+  "checks": [
+    { "label": "two point lights", "path": "environment.pointLights", "op": "minLength", "value": 2 },
+    { "label": "a spot light", "path": "environment.spotLights", "op": "minLength", "value": 1 },
+    { "label": "a sun track", "path": "motion.tracks", "op": "someMatches", "match": { "kind": "sun" } },
+    { "label": "a light track on point:0", "path": "motion.tracks", "op": "someMatches", "match": { "kind": "light", "id": "point:0" } },
+    { "label": "an effects exposure track", "path": "motion.tracks", "op": "someMatches", "match": { "kind": "effects", "property": "exposure" } },
+    { "label": "scene_look with motionTime", "toolInputIncludes": { "tool": "scene_look", "text": "motionTime" } }
+  ]
+}

@@ -7,7 +7,7 @@ const MCP_WRITE_TOOLS = ['scene_apply', 'scene_create_asset'];
 const CODE_WRITE_TOOLS = ['Write', 'Edit'];
 const CODE_RENDER_COMMAND = /build\.mjs|\bnode\b/;
 
-/** The tool name of a 67js MCP call, with or without the `mcp__<server>__` prefix. */
+/** The tool name of a Crucible MCP call, with or without the `mcp__<server>__` prefix. */
 function mcpToolName(step) {
   return step.name.replace(/^mcp__.*?__/, '');
 }

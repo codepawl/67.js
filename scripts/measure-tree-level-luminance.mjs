@@ -43,7 +43,7 @@ try {
   await page.goto(`http://127.0.0.1:${port}/`);
   const result = await page.evaluate(async ({ speciesList, seed, pictureDirectory, fit, plainMeanMode }) => {
     const { createTree, vegetationParts } = await import('/src/vegetation.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { matchMeanVisibility, scaleVisibility } = await import('/src/tree-sky.js');
     const { TREE_LEVEL_GAINS } = await import('/src/tree-level-gains.js');
     const { constantLighting, environment, SUN_COLOR } = await import('/bench/reference/scenes.js');
@@ -73,7 +73,7 @@ try {
     };
 
     function drawPixels(parts, frame) {
-      const renderer = new Renderer67(canvas, parts, { ground: false, world: true, samples: 1, pixelRatio: 1 });
+      const renderer = new CrucibleRenderer(canvas, parts, { ground: false, world: true, samples: 1, pixelRatio: 1 });
       renderer.render(frame);
       renderer.render(frame);
       const context = renderer.context;

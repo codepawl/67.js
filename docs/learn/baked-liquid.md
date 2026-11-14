@@ -1,14 +1,14 @@
 # Baked liquid
 
-`67js/addons/spume` plays back liquid that the Spume GPU solver baked offline. It is available from version `0.10.0`. The browser does not simulate anything: it loads a cache of frames and shows the frame for a time, so scrubbing and looping are free.
+`crucible/addons/spume` plays back liquid that the Spume GPU solver baked offline. It is available from version `0.10.0`. The browser does not simulate anything: it loads a cache of frames and shows the frame for a time, so scrubbing and looping are free.
 
 ## Cache, frame, time
 
 The docs host has no baked cache to serve, so the example writes a small one in memory in Spume's own file format: a `meta.json` and one `frame_NNNN.glb` per frame, with positions packed as int16 over each frame's own bounding box and normals as int8. It then loads that cache with `loadSpumeCache` through a reader function, which is the same call that loads a folder from a server, and plays it with `createSpumePlayer`. The cache is a rippling water surface over a stone slab. Drag the slider to scrub. Tick Loop to wrap time instead of holding the last frame. The console prints the cache size, the frame index for a time and how long each `replaceParts` took.
 
 ```js live poster=spume-playback
-import { Renderer67, box } from '67js';
-import { loadSpumeCache, createSpumePlayer } from '67js/addons/spume';
+import { CrucibleRenderer, box } from 'crucible';
+import { loadSpumeCache, createSpumePlayer } from 'crucible/addons/spume';
 
 // Bake: a ripple that spreads from the middle. In the real workflow the Spume solver does this offline.
 const fps = 20;
@@ -106,7 +106,7 @@ console.log(`cache: ${player.frameCount} frames at ${player.fps} fps, ${player.d
 
 const scenery = [{ name: 'Slab', geometry: box(0.1, 3), matrix: new Float32Array([6.4, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 6.4, 0, 0, -0.1, 0, 1]), material: { color: [0.45, 0.43, 0.4], metallic: 0, roughness: 0.8 } }];
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, [...scenery, ...player.partsAt(0)]);
+const renderer = new CrucibleRenderer(canvas, [...scenery, ...player.partsAt(0)]);
 const timings = [];
 const state = { seconds: 0.5, playing: true, loop: false };
 let last = performance.now();
@@ -174,16 +174,16 @@ The player is made with `loop: false`, so time past the last frame holds it, and
 uv run python run.py --out out/geyser --name geyser --pressure cg --iterations 20
 ```
 
-A low-resolution check takes seconds after the first kernel compile: `uv run python run.py --out out/test --cell 0.2 --width 6 --height 12 --frames 40 --mesh-cell 0.25`. Units are metres with +Y up and the floor at y = 0, which matches 67js. Serve the output folder next to the page. It holds `meta.json`, one `frame_NNNN.glb` per frame and the whitewater files `spray.bin`, `spray_ids.bin` and `spray_kinds.bin`.
+A low-resolution check takes seconds after the first kernel compile: `uv run python run.py --out out/test --cell 0.2 --width 6 --height 12 --frames 40 --mesh-cell 0.25`. Units are metres with +Y up and the floor at y = 0, which matches Crucible. Serve the output folder next to the page. It holds `meta.json`, one `frame_NNNN.glb` per frame and the whitewater files `spray.bin`, `spray_ids.bin` and `spray_kinds.bin`.
 
 ```js
 const cache = await loadSpumeCache('/caches/geyser/');
 const player = createSpumePlayer(cache, { matrix: placeAt(0, 0, 0), loop: true });
 ```
 
-`loadSpumeCache(source)` accepts a folder URL or an `async (fileName) => ArrayBuffer | null` reader, so the same cache loads from a server, from disk in Node or from a dropped folder. It validates `meta.json`, reads every frame file and keeps frames int16-packed until they are played, which is about a fifth of the decoded size. The frame files are not general glTF: positions are int16 spread over each frame's own min..max box, so standard loaders, including `67js/addons/gltf`, read them at the wrong scale. Use `decodeSpumeFrame(bytes)` for one frame.
+`loadSpumeCache(source)` accepts a folder URL or an `async (fileName) => ArrayBuffer | null` reader, so the same cache loads from a server, from disk in Node or from a dropped folder. It validates `meta.json`, reads every frame file and keeps frames int16-packed until they are played, which is about a fifth of the decoded size. The frame files are not general glTF: positions are int16 spread over each frame's own min..max box, so standard loaders, including `crucible/addons/gltf`, read them at the wrong scale. Use `decodeSpumeFrame(bytes)` for one frame.
 
-Skinned and morphed parts may stay in the list unchanged while frames are replaced. Adding or removing them needs a new renderer. Textured parts can be added and removed once `import '@codepawlhq/67js/addons/replace-textured-parts'` has run. Without it they must stay unchanged. The addon deletes a texture when no part uses it any more and keeps one another part still binds.
+Skinned and morphed parts may stay in the list unchanged while frames are replaced. Adding or removing them needs a new renderer. Textured parts can be added and removed once `import '@codepawlhq/crucible/addons/replace-textured-parts'` has run. Without it they must stay unchanged. The addon deletes a texture when no part uses it any more and keeps one another part still binds.
 
 ## Options
 
@@ -210,7 +210,7 @@ Measured on the slab bake (the README example at 10 cm cells, 60 frames, 79 thou
 - Frames are shown as stored, without interpolation between them.
 - The addon does not run, schedule or cancel bakes. Bake with Spume's command line or its Blender add-on.
 
-The [Spume contract](https://github.com/codepawl/67.js/blob/main/docs/spume.md) covers the cache format, whitewater options, placement and measured cost.
+The [Spume contract](https://github.com/codepawl/crucible/blob/main/docs/spume.md) covers the cache format, whitewater options, placement and measured cost.
 
 ## Common mistakes
 

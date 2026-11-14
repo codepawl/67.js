@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { gamePhysicsProblem, hasTexturedMaterial } from '../src/game-needs.js';
 
 // Writes a playable game as one folder that any static host can serve: index.html, game.json (the recipe with its game
-// section) and engine/ (the built 67js modules that index.html imports, found by following the import statements from
+// section) and engine/ (the built Crucible modules that index.html imports, found by following the import statements from
 // build/game.js). There is no server code. The folder is bounded, so an export never fills the disk.
 
 export const WEB_EXPORT_LIMITS = Object.freeze({ maxEngineBytes: 12 * 1024 * 1024, maxEngineFiles: 400, maxTitleLength: 64, maxRecipeBytes: 1024 * 1024, maxAssetBytes: 64 * 1024 * 1024, maxPhysicsBytes: 8 * 1024 * 1024 });
@@ -104,7 +104,7 @@ export async function writeWebBuild({ recipe, buildDirectory, outputDirectory, t
   if (recipe.nodes?.some(node => node.vegetation)) throw new Error('The web export does not carry grown vegetation yet. Remove it, or build the plants from geometry.');
   const missing = (recipe.nodes ?? []).filter(node => node.asset && !assets.has(node.asset.id)).map(node => node.id);
   if (missing.length) throw new Error(`The web export needs the bytes of the catalog assets placed by ${missing.join(', ')}. Pass them as assets (asset id to Buffer).`);
-  if (recipe.format !== '67js.scene') throw new Error('The web export needs a 67js.scene recipe. Create the scene with scene_create.');
+  if (recipe.format !== 'crucible.scene') throw new Error('The web export needs a crucible.scene recipe. Create the scene with scene_create.');
   const recipeText = JSON.stringify(recipe);
   if (Buffer.byteLength(recipeText) > WEB_EXPORT_LIMITS.maxRecipeBytes) throw new RangeError(`The recipe is larger than ${WEB_EXPORT_LIMITS.maxRecipeBytes} bytes. Simplify the scene.`);
 

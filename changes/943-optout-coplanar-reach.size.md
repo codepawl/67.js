@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: +86 bytes gzip so an agent that sets resolveCoplanar: false is still warned about every near-flush pair the flush pass would have fixed (#943). Accepted by the lead: the gain is a missed flicker warning, at under 0.02 percent of the bundle.

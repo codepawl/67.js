@@ -4,7 +4,7 @@
 // A world is whole before it is shown: the loop never draws the first part of a split world on its own. The one exception is a
 // description with a first view (`glbFirstView`, `hdriPreview`): the whole world as a small, coarse copy that is drawn first and
 // replaced by the full world through world.upgrade() once the full files have arrived and been prepared.
-import { Renderer67, shaderFeatureRepresentatives } from '../../renderer.js';
+import { CrucibleRenderer, shaderFeatureRepresentatives } from '../../renderer.js';
 import { createSharedTextures, loadGltf } from '../../gltf.js';
 import { loadHdri } from '../../hdri.js';
 import { createCascadedShadows } from '../../cascaded-shadows.js';
@@ -246,7 +246,7 @@ export async function buildWorld(download, canvas, overrides = {}) {
   // whole world drew nothing after its first frame).
   const frame = { ...description.frame, exposure: description.exposure ?? 1 };
   const whole = wholeOf(parsedFirst.files, effects);
-  const renderer = new Renderer67(canvas, [...new Set([...shaderFeatureRepresentatives(whole.parts), ...whole.parts.filter(isPinnedPart)])], {
+  const renderer = new CrucibleRenderer(canvas, [...new Set([...shaderFeatureRepresentatives(whole.parts), ...whole.parts.filter(isPinnedPart)])], {
     ...options,
     ...overrides,
     pixelRatio: Math.min(devicePixelRatio, 1.25),

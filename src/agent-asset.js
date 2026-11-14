@@ -1,3 +1,4 @@
+import { currentFormatName } from './legacy-names.js';
 import { mat4, mat3 } from 'gl-matrix';
 import { createAgentScene, REVISION_HISTORY_LIMIT } from './agent-scene.js';
 import { environmentPatchWithSetup } from './agent-look.js';
@@ -33,7 +34,7 @@ const LOOK_OPERATIONS = Object.freeze({
 });
 
 export const AGENT_ASSET_CAPABILITIES = Object.freeze({
-  format: '67js.asset', schemaVersion: 1, fixedTopology: false,
+  format: 'crucible.asset', schemaVersion: 1, fixedTopology: false,
   operations: Object.freeze([
     'set-camera', 'set-environment', 'set-effects', 'set-shadow',
     'set-root', 'set-animation', 'set-material', 'set-asset-node', 'set-motion', 'set-physics', 'edit-mesh',
@@ -154,7 +155,7 @@ function rootFrom(input = {}, path = 'root') {
 }
 
 function viewRecipe(input, materials = []) {
-  const recipe = { format: '67js.scene', schemaVersion: 1, geometries: [], materials, nodes: [] };
+  const recipe = { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials, nodes: [] };
   for (const field of ['camera', ...LOOK_FIELDS]) {
     if (Object.hasOwn(input, field)) {
       recipe[field] = input[field];
@@ -478,10 +479,11 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   function normalize(input) {
     const candidate = copiedJson(input);
     knownKeys(candidate, ['format', 'schemaVersion', 'assetId', 'camera', ...LOOK_FIELDS, 'root', 'animation', 'materialOverrides', 'nodeOverrides', 'motion', 'physics', 'meshEdits'], 'asset recipe');
-    if (candidate.format !== '67js.asset' || candidate.schemaVersion !== 1 ||
+    candidate.format = currentFormatName(candidate.format);
+    if (candidate.format !== 'crucible.asset' || candidate.schemaVersion !== 1 ||
         typeof candidate.assetId !== 'string' || candidate.assetId.toLowerCase() !== canonicalAssetId) {
-      const wrongField = candidate.format !== '67js.asset' ? 'format' : candidate.schemaVersion !== 1 ? 'schemaVersion' : 'assetId';
-      const expectedValue = wrongField === 'format' ? '"67js.asset"' : wrongField === 'schemaVersion' ? '1' : `the bound asset ID, such as "${canonicalAssetId.slice(0, 8)}..."`;
+      const wrongField = candidate.format !== 'crucible.asset' ? 'format' : candidate.schemaVersion !== 1 ? 'schemaVersion' : 'assetId';
+      const expectedValue = wrongField === 'format' ? '"crucible.asset"' : wrongField === 'schemaVersion' ? '1' : `the bound asset ID, such as "${canonicalAssetId.slice(0, 8)}..."`;
       throw invalidField(wrongField, candidate[wrongField], expectedValue);
     }
     const overrides = candidate.materialOverrides === undefined ? [] : candidate.materialOverrides;
@@ -541,7 +543,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       return { id: override.id, ...Object.fromEntries(fields.map(field => [field, transform[field]])) };
     });
     const result = copiedJson({
-      format: '67js.asset', schemaVersion: 1, assetId: canonicalAssetId,
+      format: 'crucible.asset', schemaVersion: 1, assetId: canonicalAssetId,
       camera: view.camera, environment: view.environment, effects: view.effects, shadow: view.shadow,
       root: rootFrom(candidate.root), animation, materialOverrides: normalizedOverrides, nodeOverrides: normalizedNodes,
     });

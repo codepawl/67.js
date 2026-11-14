@@ -1,5 +1,5 @@
 // The agent bench in one command: every task in suite.mjs, k runs each, on each model, through headless
-// `claude -p` with the 67js MCP config (run.mjs does the per-run work: clean temp folder, MCP server only, grader).
+// `claude -p` with the Crucible MCP config (run.mjs does the per-run work: clean temp folder, MCP server only, grader).
 // Runs use the Claude Code subscription, so the summary has tokens, calls and time and never dollars.
 //
 // node bench/agent-modeling/bench.mjs --claude <claude executable> --models haiku,sonnet,opus --runs 3 --label baseline

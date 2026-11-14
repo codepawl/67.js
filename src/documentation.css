@@ -136,7 +136,7 @@
 /* Live examples: the result on top, then the toolbar and the editable code. */
 .live-example { margin:28px 0 32px; border-radius:var(--panel-radius); background:var(--bg); overflow:hidden; }
 .live-stage { position:relative; display:grid; place-items:center; width:100%; background:#101014; overflow:hidden; }
-/* Renderer67 shifts the studio view to the right on canvases wider than 700 px, so examples stay at 700 px to keep the subject centred. */
+/* CrucibleRenderer shifts the studio view to the right on canvases wider than 700 px, so examples stay at 700 px to keep the subject centred. */
 .live-poster, .live-frame { position:absolute; top:0; left:50%; translate:-50% 0; width:min(100%, 700px); height:100%; border:0; }
 .live-poster { object-fit:cover; }
 .live-frame { background:#101014; }

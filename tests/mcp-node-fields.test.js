@@ -25,7 +25,7 @@ function findOperationSchema(node, type) {
 
 test('the scene_apply set-node schema accepts every node field the backend does', async () => {
   const server = createAgentMcpServer({ async close() {} });
-  const client = new Client({ name: '67js-node-fields-test', version: '1' });
+  const client = new Client({ name: 'crucible-node-fields-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

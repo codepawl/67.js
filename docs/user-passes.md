@@ -2,7 +2,7 @@
 
 A scene can add its own full-screen passes: a GLSL fragment that reads the finished frame, the depth and a normal, and writes a new frame. Use it for a pixel-art downscale, an ordered dither, a colour quantise, an outline of your own or a PS2-style look.
 
-The same field works from three places: the `67js/addons/user-pass` addon, the `postPasses` section of a recipe, and MCP (`scene_create`, `scene_apply` with `set-post-passes`). MCP accepts no host JavaScript. It accepts GLSL fragment snippets that pass a strict check before anything compiles; the rules are below.
+The same field works from three places: the `crucible/addons/user-pass` addon, the `postPasses` section of a recipe, and MCP (`scene_create`, `scene_apply` with `set-post-passes`). MCP accepts no host JavaScript. It accepts GLSL fragment snippets that pass a strict check before anything compiles; the rules are below.
 
 ## Where a pass runs
 
@@ -49,7 +49,7 @@ The check runs on the text before any compile. A snippet that breaks a rule is r
 ## JavaScript
 
 ```js
-import { installUserPasses } from '@codepawlhq/67js/addons/user-pass';
+import { installUserPasses } from '@codepawlhq/crucible/addons/user-pass';
 
 installUserPasses(renderer); // needs depth: true for sceneDepth
 renderer.userPasses.set([{ name: 'soft', uniforms: { amount: 0.5 }, fragment: `

@@ -5,7 +5,7 @@ import { createAgentScene } from '../src/agent-scene.js';
 
 function stillLife(chromeRoughness = 0.05, extraEnvironment = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }, { id: 'ball', type: 'sphere' }],
     materials: [
       { id: 'floor', color: [0.6, 0.6, 0.65], roughness: 0.9 },

@@ -1,12 +1,12 @@
-// Page of the Gaussian splat benchmark for 67js: a recipe part (a plinth with a sphere and a torus) drawn in front of splats.
+// Page of the Gaussian splat benchmark for Crucible: a recipe part (a plinth with a sphere and a torus) drawn in front of splats.
 // window.runCase(options) draws the case, times the frames and returns a picture. run.mjs drives it.
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { createAgentScene } from '/src/agent-scene.js';
 import { attachGaussianSplats, createGaussianSplats, parseGaussianSplatPly } from '/src/gaussian-splats.js';
 import { millipedeMatrix, syntheticRoom } from './scene-data.js';
 
 const RECIPE = {
-  format: '67js.scene',
+  format: 'crucible.scene',
   schemaVersion: 1,
   geometries: [{ id: 'plinth', type: 'box', bevel: 0.02 }, { id: 'ball', type: 'sphere' }, { id: 'ring', type: 'torus', tubeRadius: 0.08 }],
   materials: [{ id: 'stone', color: [0.62, 0.6, 0.56], roughness: 0.8 }, { id: 'metal', color: [0.9, 0.55, 0.2], metallic: 1, roughness: 0.25 }],
@@ -62,7 +62,7 @@ async function runCase({ source = 'synthetic', count = 100000, withPart = true, 
   canvas.style.height = `${height}px`;
   const scene = createAgentScene(RECIPE);
   const environment = { ...scene.environment, world: true };
-  const renderer = new Renderer67(canvas, withPart ? scene.parts : [], { ground: false, hdr, depth: true, samples: 4, pixelRatio: 1, world: true, environment });
+  const renderer = new CrucibleRenderer(canvas, withPart ? scene.parts : [], { ground: false, hdr, depth: true, samples: 4, pixelRatio: 1, world: true, environment });
   renderer.resize();
   const context = renderer.context;
   const heapBefore = performance.memory?.usedJSHeapSize ?? 0;

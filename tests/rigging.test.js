@@ -54,7 +54,7 @@ test('automatic weights give four influences that sum to one, and seams share we
 
 test('scene_inspect reports unweighted vertices, bones with no vertices and joint axis problems', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint' }],
     armatures: [{ id: 'rig', bones: [
@@ -98,7 +98,7 @@ test('a preset armature maps to humanoid bones without overrides', () => {
 
 test('a quadruped preset fits the bounds of a mesh node', () => {
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }], materials: [{ id: 'paint' }],
     armatures: [{ id: 'dog', preset: 'quadruped', fit: { node: 'body' } }],
     nodes: [{ id: 'body', geometry: 'block', material: 'paint', translation: [0, 0.4, 0], scale: [0.4, 0.8, 1.2], skin: { armature: 'dog' } }],

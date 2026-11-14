@@ -4,7 +4,7 @@ import { exportNativeSceneTables, nativeTexelTracerIfAvailable, readExportChunk,
 let heldNativeExportTables = null;
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
 import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, needsBuoyancy, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { skyOpenness } from '../src/closed-room.js';
 import { fogSkyVisibility } from '../src/fog-sky-visibility.js';
 import { installCameraEffects, effectsWithFStop } from '../src/camera-effects.js';
@@ -171,7 +171,7 @@ function candidateCamera(record, operations) {
       applyCameraFields(camera, operation);
     }
   }
-  return createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], camera }).camera;
+  return createAgentScene({ format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], camera }).camera;
 }
 
 const EXPOSURE_PROBE_SIZE = 64;
@@ -533,7 +533,7 @@ function cascadesFor(scene) {
 function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = false, tier = 'realtime' }) {
   probeSnippets(scene);
   const placement = automaticGroundPlacement(scene);
-  const renderer = installCoplanarDiagnostics(installRenderPasses(installCameraEffects(new Renderer67(canvas, scene.parts, {
+  const renderer = installCoplanarDiagnostics(installRenderPasses(installCameraEffects(new CrucibleRenderer(canvas, scene.parts, {
     ground: placement ? createAgentGround(placement) : false,
     hdr: true,
     depth: true,
@@ -556,7 +556,7 @@ function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = fal
 
 // Camera fields from a timeline shot on top of the sampled camera, checked with the scene's own camera rules.
 function withCameraOverrides(camera, overrides) {
-  const merged = createAgentScene({ format: '67js.scene', schemaVersion: 1,
+  const merged = createAgentScene({ format: 'crucible.scene', schemaVersion: 1,
     geometries: [], materials: [], nodes: [], camera: { ...camera, ...overrides } }).camera;
   validatePreviewCamera(merged);
   return merged;
@@ -705,7 +705,7 @@ function kernelReport() {
 
 // The runtime can switch workers off (createAgentRuntime kernelWorkers: false) to measure what they buy.
 function useKernelWorkers() {
-  return kernelWorkersAvailable() && globalThis.__67jsKernelWorkers !== 'off';
+  return kernelWorkersAvailable() && globalThis.__crucibleKernelWorkers !== 'off';
 }
 
 // A recipe bake runs on the native tracer when the host offers it, on the GPU when the page has float render targets, and on
@@ -894,7 +894,7 @@ async function loadAddonModule({ url, name, extensionPoints }) {
   if (undeclared.length > 0) {
     takeBackKinds(before, kindRegistries);
     const used = undeclared.map(registry => `${registry.point} (${added[registry.field].join(', ')})`).join(', ');
-    throw new RangeError(`${name} registered ${used} but its package.json "67js".extensionPoints does not declare it. Add the point to extensionPoints, or stop registering it.`);
+    throw new RangeError(`${name} registered ${used} but its package.json "crucible".extensionPoints does not declare it. Add the point to extensionPoints, or stop registering it.`);
   }
   return added;
 }
@@ -920,7 +920,7 @@ window.__agentPreview = {
       if (shot.animation !== undefined) throw new RangeError('Imported animation requires an asset scene.');
       record.scene.sampleMotion(shot.motionTime);
     }
-    const camera = createAgentScene({ format: '67js.scene', schemaVersion: 1,
+    const camera = createAgentScene({ format: 'crucible.scene', schemaVersion: 1,
       geometries: [], materials: [], nodes: [], camera: { ...record.scene.camera, ...shot.camera } }).camera;
     validatePreviewCamera(camera);
     draw(record, shot.rendererTime, camera);

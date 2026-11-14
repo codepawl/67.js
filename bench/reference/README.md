@@ -1,6 +1,6 @@
 # Reference renders
 
-This suite scores how close a 67js render is to Blender on 23 fixed scenes. Later work uses these scores as its starting point.
+This suite scores how close a Crucible render is to Blender on 23 fixed scenes. Later work uses these scores as its starting point.
 
 ## Run it
 
@@ -18,9 +18,9 @@ CI does not run this suite. `tests/reference-baseline.test.js` checks that the c
 
 ## Scores now (2026-11-03)
 
-All of them are against the Blender 5.2.2 renders taken on 2026-11-03 with the sky capped at radiance 16 (one sun, see "One sun" below); the metric is [FLIP](https://github.com/NVlabs/flip) for LDR images, mean error, 0 means identical and a higher score means a larger visible difference. The first three columns are `baseline.json` (RTX 3060 as the 67js side, unchanged by this rerun), the baked column is `bake.json` (default bake of the scene, 3 bounces, `temple-hall` with its own `bakeOptions`), and the path tracer column is `path-tracer.json` (64 samples at most, 16 scenes; the tracer skips the six newest scenes). An empty cell was not measured.
+All of them are against the Blender 5.2.2 renders taken on 2026-11-03 with the sky capped at radiance 16 (one sun, see "One sun" below); the metric is [FLIP](https://github.com/NVlabs/flip) for LDR images, mean error, 0 means identical and a higher score means a larger visible difference. The first three columns are `baseline.json` (RTX 3060 as the Crucible side, unchanged by this rerun), the baked column is `bake.json` (default bake of the scene, 3 bounces, `temple-hall` with its own `bakeOptions`), and the path tracer column is `path-tracer.json` (64 samples at most, 16 scenes; the tracer skips the six newest scenes). An empty cell was not measured.
 
-| Scene | 67js against Cycles | EEVEE against Cycles | 67js against EEVEE | Baked 67js against Cycles | Path tracer against Cycles |
+| Scene | Crucible against Cycles | EEVEE against Cycles | Crucible against EEVEE | Baked Crucible against Cycles | Path tracer against Cycles |
 | --- | --- | --- | --- | --- | --- |
 | `brick-flat` | 0.0547 | 0.1098 | 0.0961 |  | 0.1152 |
 | `brick-graph` | 0.0933 | 0.1221 | 0.0994 |  | 0.1476 |
@@ -46,9 +46,9 @@ All of them are against the Blender 5.2.2 renders taken on 2026-11-03 with the s
 | `spot-area` | 0.1242 | 0.1935 | 0.1707 |  | 0.0658 |
 | `temple-hall` | 0.0659 | 0.2341 | 0.2394 | 0.0554 |  |
 
-The mean of the 23 baseline scenes is 0.1746 for 67js and 0.1986 for EEVEE. The Khronos assets (`khronos.json`, own work directory) are scored over the pixels the asset changes, since the sky fills the frame and both sides draw it alike:
+The mean of the 23 baseline scenes is 0.1746 for Crucible and 0.1986 for EEVEE. The Khronos assets (`khronos.json`, own work directory) are scored over the pixels the asset changes, since the sky fills the frame and both sides draw it alike:
 
-| Asset | Pixels covered | 67js against Cycles (asset only) | 67js against EEVEE (asset only) | EEVEE against Cycles (asset only) |
+| Asset | Pixels covered | Crucible against Cycles (asset only) | Crucible against EEVEE (asset only) | EEVEE against Cycles (asset only) |
 | --- | --- | --- | --- | --- |
 | `AnisotropyBarnLamp` | 0.0732 | 0.3355 | 0.3891 | 0.3291 |
 | `AnisotropyDiscTest` | 0.1074 | 0.2864 | 0.2771 | 0.1532 |
@@ -64,7 +64,7 @@ Dated notes below, kept where they explain a decision. Numbers in them are from 
 
 `environment.viewTransform: 'agx' | 'neutral'` (#319) against Blender's AgX and Khronos PBR Neutral view transforms.
 
-Colour ramp (`scripts/blender-view-transform-golden.py`, rerun on 5.2.2: the output matches the committed `tests/fixtures/blender/view-transform-golden.json` byte for byte). 27 patches: 15 greys from 0 to 16 and 12 colours up to 5.0. Each is an emissive plane; the error is |67js - Blender| per channel in sRGB-encoded display units (0 to 1; 0.01 is 2.6 of 255 steps). `tests/view-transform.test.js` fails above the threshold.
+Colour ramp (`scripts/blender-view-transform-golden.py`, rerun on 5.2.2: the output matches the committed `tests/fixtures/blender/view-transform-golden.json` byte for byte). 27 patches: 15 greys from 0 to 16 and 12 colours up to 5.0. Each is an emissive plane; the error is |Crucible - Blender| per channel in sRGB-encoded display units (0 to 1; 0.01 is 2.6 of 255 steps). `tests/view-transform.test.js` fails above the threshold.
 
 | Transform | Threshold (max) | Max error | Mean error | Max per channel R, G, B | Within |
 | --- | --- | --- | --- | --- | --- |
@@ -73,7 +73,7 @@ Colour ramp (`scripts/blender-view-transform-golden.py`, rerun on 5.2.2: the out
 
 `agx` was 0.0885 at most (mean 0.0252) before 2026-11-03, measured the same way. Blender 5.2's AgX is the EaryChow version, not the Troy Sobotka one the Filament/three.js polynomial copies: E-Gamut input, log2 over -12.47393 to +4.026 EV (the same range as before), a per-channel sigmoid with pivot at 0.18 grey (output 0.488, slope 2.39, toe and shoulder power about 1.5), a 2.4 power, then a matrix back to Rec.709 applied to the linear value. The differing steps were the sigmoid (the 6th-degree polynomial was too bright in the mid-tones: grey 0.18 gave 0.501 against Blender's 0.461), the matrices (Rec.2020 inset and outset against Blender's gamut-specific LUT) and the output power (2.2 against 2.4 before the matrix). `src/view-transform.js` now holds a fit of `AgX_Base_sRGB.cube`: the sigmoid is fitted to the LUT's grey diagonal (within 0.0013 in the 2.4-encoded value), the two matrices to random colours. Grey 0.18 maps to 0.460 (Blender 0.461); the grey patches are within 0.0012. The rest of the error is saturated colour (worst patch 2.0, 0.8, 0.1, green channel), which a per-channel sigmoid and two matrices cannot follow exactly, so the threshold is 0.026. `neutral` follows Blender to within 2 steps of 255 (the Khronos formula is the same).
 
-Scenes: `npm run reference -- --view-transform agx --scene <id>,<id>` draws 67js with `viewTransform: 'agx'`, renders Cycles with the AgX view transform (same samples, denoising and scene description as the suite; 8-bit sRGB PNG, so both sides are quantised), and scores them with FLIP. Blender's sRGB picture is decoded and encoded with the 2.2 power 67js uses, so the score measures the curve and the lighting, not the transfer function. The standard column is the suite's own score (Cycles with the `Raw` transform, then the ACES fit on both sides, `baseline.json`).
+Scenes: `npm run reference -- --view-transform agx --scene <id>,<id>` draws Crucible with `viewTransform: 'agx'`, renders Cycles with the AgX view transform (same samples, denoising and scene description as the suite; 8-bit sRGB PNG, so both sides are quantised), and scores them with FLIP. Blender's sRGB picture is decoded and encoded with the 2.2 power Crucible uses, so the score measures the curve and the lighting, not the transfer function. The standard column is the suite's own score (Cycles with the `Raw` transform, then the ACES fit on both sides, `baseline.json`).
 
 | Scene | `agx` before (2026-11-03, #343) | `agx` after (2026-11-03) | Standard (ACES fit both sides) |
 | --- | --- | --- | --- |
@@ -81,17 +81,17 @@ Scenes: `npm run reference -- --view-transform agx --scene <id>,<id>` draws 67js
 | `material-spheres` | 0.1467 | 0.0903 | 0.1293 |
 | `character` | 0.1238 | 0.0581 | 0.0799 |
 
-AgX now scores better than the standard row on all three (the mid-tone gap was the cause; the Cycles pictures were reused, only 67js was redrawn). The scores are in `view-transform.json`; Cycles ran on OptiX as in the suite, 67js on the RTX 3060.
+AgX now scores better than the standard row on all three (the mid-tone gap was the cause; the Cycles pictures were reused, only Crucible was redrawn). The scores are in `view-transform.json`; Cycles ran on OptiX as in the suite, Crucible on the RTX 3060.
 
 ## One sun (2026-11-01)
 
-The HDRI holds its own sun: 6 of its 524,288 pixels carry 48.1 percent of the sky light, at 48 degrees of elevation. Most scenes also add a sun light. Cycles and EEVEE therefore drew two shadows of each object, and 67js drew one because its environment casts no shadow. `scenes.js` and `render-blender.py` now cap the image at radiance 16 on both sides, which removes the sun and its halo and keeps the clouds. The sky keeps 49.2 percent of its light. A scene with a sky now has only its own sun light.
+The HDRI holds its own sun: 6 of its 524,288 pixels carry 48.1 percent of the sky light, at 48 degrees of elevation. Most scenes also add a sun light. Cycles and EEVEE therefore drew two shadows of each object, and Crucible drew one because its environment casts no shadow. `scenes.js` and `render-blender.py` now cap the image at radiance 16 on both sides, which removes the sun and its halo and keeps the clouds. The sky keeps 49.2 percent of its light. A scene with a sky now has only its own sun light.
 
 `baseline.json`, `khronos.json`, `path-tracer.json`, `bake.json` and `images/` use the cap (the last three were rerun on 2026-11-03). Scores in the notes below that were measured before 2026-11-01 use the sky with two suns. Scenes with a constant world did not move when the cap went in.
 
 ## No shadow floor (2026-11-01)
 
-A key shadow in 67js kept 18 percent of the sun (`src/shaders.js`, `src/cascaded-shadows.js`). A sealed hall was evenly lit, and every shadow was too light. A key shadow now blocks the sun fully. `fog` (+0.0031) and `megacity-dusk` (+0.0044) got worse, and all other scenes stayed level or improved.
+A key shadow in Crucible kept 18 percent of the sun (`src/shaders.js`, `src/cascaded-shadows.js`). A sealed hall was evenly lit, and every shadow was too light. A key shadow now blocks the sun fully. `fog` (+0.0031) and `megacity-dusk` (+0.0044) got worse, and all other scenes stayed level or improved.
 
 Scores against Cycles, with each change in turn:
 
@@ -115,11 +115,11 @@ The mean over the 16 older scenes went from 0.2001 to 0.1751 to 0.1732. EEVEE is
 
 Three scenes test what people want to make, not one feature. Each one is built with engine code, and Blender gets the same geometry.
 
-| Scene | Parts | Triangles drawn | 67js against Cycles | EEVEE against Cycles | Largest visible gap |
+| Scene | Parts | Triangles drawn | Crucible against Cycles | EEVEE against Cycles | Largest visible gap |
 | --- | --- | --- | --- | --- | --- |
 | `megacity-dusk` | 4,300 | 51.6 thousand | 0.1627 | 0.1524 | Window bands are sharper, and facades get no light from the windows |
 | `mountain-valley` | 7,698 | 9.72 million | 0.1792 | 0.1879 | The valley floor and the trees are 1.3 to 1.7 times as bright as in Cycles, and shadowed rock is brighter (see "Sky visibility in crowns and valleys") |
-| `temple-hall` | 155 | 11 thousand | 0.2126 | 0.2341 | The fog shafts are stronger in 67js, and the floor gets no bounce light |
+| `temple-hall` | 155 | 11 thousand | 0.2126 | 0.2341 | The fog shafts are stronger in Crucible, and the floor gets no bounce light |
 
 With the shadow floor `temple-hall` scored 0.5841, `mountain-valley` 0.3658 and `megacity-dusk` 0.1583.
 
@@ -129,7 +129,7 @@ With the shadow floor `temple-hall` scored 0.5841, `mountain-valley` 0.3658 and 
 
 The three scenes measure well and look plain, so `grand-scenes.js` holds three options of each, `-a`, `-b` and `-c`, each a different composition, light and time of day. `npm run reference -- --grand` draws them on both sides into `grand.json` and `images/grand-<id>.jpg`; `baseline.json` and the other images are unchanged. `python bench/reference/grand-sheets.py <directory>` (command in its header) writes one comparison sheet per scene. An picks by letter, and a later change moves the pick into `REFERENCE_SCENES`. Blender draws the same geometry; the sky is the same equirectangular gradient on both sides (`gradient` world type), and every window, lamp and sky panel is Emission.
 
-| Option | What it is | 67js against Cycles | Cycles seconds |
+| Option | What it is | Crucible against Cycles | Cycles seconds |
 | --- | --- | --- | --- |
 | `mountain-valley-a` | Golden hour at a lake, sun from the left, rocky shore in the foreground | 0.3530 | 26.3 |
 | `mountain-valley-b` | Midday from a high slope, a river winding down a flat valley floor | 0.1839 | 24.5 |
@@ -141,7 +141,7 @@ The three scenes measure well and look plain, so `grand-scenes.js` holds three o
 | `megacity-dusk-b` | Sunrise across a bay from a pier, skyline and its reflection | 0.1575 | 33.2 |
 | `megacity-dusk-c` | Night, high view over an avenue grid of car lights and dense lit towers | 0.1149 | 35.9 |
 
-Known gaps in the 67js side: a lake or bay shows the sky only, where Cycles also mirrors the shore, the trees and the towers; the dark halls have no bounced light.
+Known gaps in the Crucible side: a lake or bay shows the sky only, where Cycles also mirrors the shore, the trees and the towers; the dark halls have no bounced light.
 
 ## Dark spaces (2026-11-01, part of issue #159)
 
@@ -149,11 +149,11 @@ Known gaps in the 67js side: a lake or bay shows the sky only, where Cycles also
 
 A whole-frame score hides a mostly black frame, so a scene can declare `brightRegion: { luminance, dilation }` in `scenes.js`. `score.py` takes the pixels where the Cycles image is brighter than `luminance` in display space (0.1), grows them by `dilation` pixels (4), and also scores the FLIP error inside them: `region-pixels` (share of the frame), `region-gpu-vs-cycles`, `region-gpu-vs-eevee` and `region-eevee-vs-cycles`. Cycles picks the region, so neither renderer under test decides what is scored. `dark-shaft` and `temple-hall` declare one (9.9 and 9.6 percent of the frame); every other column is unchanged.
 
-Gap 2 of the issue, measured: `node bench/reference/run.mjs --scene <id> --skip-blender --ambient 0` draws a scene in 67js with the world's light removed from every surface. In `dark-shaft` the region score goes from 0.2157 to 0.1676 and the whole frame from 0.2321 to 0.2310, so the world light does reach inside the closed room and the walls were lighter than in Cycles. In `temple-hall` the whole frame improves (0.2126 to 0.2028) and the region gets worse (0.2512 to 0.3012): the hall has open roof slots, and the world light is right there. So the leak is real, and removing the world is not the fix.
+Gap 2 of the issue, measured: `node bench/reference/run.mjs --scene <id> --skip-blender --ambient 0` draws a scene in Crucible with the world's light removed from every surface. In `dark-shaft` the region score goes from 0.2157 to 0.1676 and the whole frame from 0.2321 to 0.2310, so the world light does reach inside the closed room and the walls were lighter than in Cycles. In `temple-hall` the whole frame improves (0.2126 to 0.2028) and the region gets worse (0.2512 to 0.3012): the hall has open roof slots, and the world light is right there. So the leak is real, and removing the world is not the fix.
 
 The fix is in the bake. It already shoots cosine rays from every texel, and a ray that leaves the scene on its first leg has seen the sky. The share of those rays is the sky visibility of the texel, and it costs no extra ray. A part that sees less than 98 percent of the sky on average gets that visibility as an `occlusionMap` (linear, one byte, read through the lightmap UVs), which the shader already multiplies into the world's diffuse light and into its reflections. A part that sees the sky (open scenes, ground) gets no map and draws exactly as before. A part with an `occlusionMap` of its own keeps it. There is no new recipe field and no shader change.
 
-Compared on 2026-11-01 (RTX 3060, 67js side only; Cycles and EEVEE images are the earlier ones):
+Compared on 2026-11-01 (RTX 3060, Crucible side only; Cycles and EEVEE images are the earlier ones):
 
 | Option | `dark-shaft` whole | `dark-shaft` region | `temple-hall` whole | `temple-hall` region |
 | --- | --- | --- | --- | --- |
@@ -172,14 +172,14 @@ Frame cost of a baked room (`node bench/reference/frame-time.mjs dark-shaft gpu`
 
 ## Fog shafts (2026-11-02, part of issue #159)
 
-Gap 3 of the issue, measured on the 67js renders against the Cycles arrays (`volumeFog` in `src/post.js`). The phase function and the units were checked first and are correct: `volumeLightColor` is the sun irradiance, the Henyey-Greenstein term has its 1/4 pi, and the sign of `anisotropy` matches Blender's Volume Scatter, so no tuning constant sits on a bug. Step placement was tried and does not matter: spacing the steps by distance squared moved `dark-shaft` from 0.1292 to 0.1295 and `temple-hall` from 0.2381 to 0.2378, so that change was dropped.
+Gap 3 of the issue, measured on the Crucible renders against the Cycles arrays (`volumeFog` in `src/post.js`). The phase function and the units were checked first and are correct: `volumeLightColor` is the sun irradiance, the Henyey-Greenstein term has its 1/4 pi, and the sign of `anisotropy` matches Blender's Volume Scatter, so no tuning constant sits on a bug. Step placement was tried and does not matter: spacing the steps by distance squared moved `dark-shaft` from 0.1292 to 0.1295 and `temple-hall` from 0.2381 to 0.2378, so that change was dropped.
 
 Two errors carry the score:
 
-- **A constant ambient term in a closed room.** The fog adds `ambient` (0.02) everywhere, as if the world lit it. In `dark-shaft` the 67js frame is 0.0125 in linear luminance away from the shaft, where Cycles has 0.002 to 0.006, because a closed room does not see the world. With the fog ambient set to zero the whole frame goes from 0.2321 to 0.1144 and the region from 0.2157 to 0.1728. The ambient now keeps 15 percent of its value where the sun's shadow map says the fog is in shadow, and all of it where the sun reaches the fog.
-- **No glow around a bright source.** Cycles scatters the light of bright pixels sideways. Around the lit door of `temple-hall`, the mean linear luminance in a ring 30 to 45 pixels from the door is 0.1055 in Cycles and 0.0373 in 67js (EEVEE 0.0526). The fog now adds a blur of the frame: 24 taps over about 14 percent of the frame height, weighted by the fog's opacity along the ray (`1 - transmittance`) and tinted by the fog colour. The taps are rotated by the same per-pixel jitter as the steps. The same ring now reads 0.0974, and every ring out to 300 pixels is within 0.008 of Cycles. The blur radius and the weight (0.009) are fitted to that profile and to the two region scores; they are not a recipe field.
+- **A constant ambient term in a closed room.** The fog adds `ambient` (0.02) everywhere, as if the world lit it. In `dark-shaft` the Crucible frame is 0.0125 in linear luminance away from the shaft, where Cycles has 0.002 to 0.006, because a closed room does not see the world. With the fog ambient set to zero the whole frame goes from 0.2321 to 0.1144 and the region from 0.2157 to 0.1728. The ambient now keeps 15 percent of its value where the sun's shadow map says the fog is in shadow, and all of it where the sun reaches the fog.
+- **No glow around a bright source.** Cycles scatters the light of bright pixels sideways. Around the lit door of `temple-hall`, the mean linear luminance in a ring 30 to 45 pixels from the door is 0.1055 in Cycles and 0.0373 in Crucible (EEVEE 0.0526). The fog now adds a blur of the frame: 24 taps over about 14 percent of the frame height, weighted by the fog's opacity along the ray (`1 - transmittance`) and tinted by the fog colour. The taps are rotated by the same per-pixel jitter as the steps. The same ring now reads 0.0974, and every ring out to 300 pixels is within 0.008 of Cycles. The blur radius and the weight (0.009) are fitted to that profile and to the two region scores; they are not a recipe field.
 
-Scores against Cycles on 2026-11-02, whole frame (shaft region), RTX 3060, 67js side only:
+Scores against Cycles on 2026-11-02, whole frame (shaft region), RTX 3060, Crucible side only:
 
 | Scene | No bake before | No bake now | Baked before | Baked now | EEVEE |
 | --- | --- | --- | --- | --- | --- |
@@ -187,7 +187,7 @@ Scores against Cycles on 2026-11-02, whole frame (shaft region), RTX 3060, 67js 
 | `temple-hall` | 0.2126 (0.2512) | 0.1438 (0.2341) | 0.1129 (0.2528) | 0.0716 (0.2575) | 0.2341 (0.2455) |
 | `fog` | 0.2643 | 0.2238 | | | 0.2662 |
 
-The region of `dark-shaft` improved clearly without a bake (0.2157 to 0.1219). The region of `temple-hall` moved less (0.2512 to 0.2341). What is left there is haze outside the shafts, where 67js is 0.0095 and Cycles 0.0033. A higher ambient floor lowers the region score (0.2100 at a floor of 0.4) but raises the region of `dark-shaft` (0.1676) and both whole-frame scores, so one constant cannot serve both scenes. The baked rows improved as a whole frame and got slightly worse in the region (0.1710 to 0.1814, 0.2528 to 0.2575): the bake already darkens the walls, and the fog change takes light from the same pixels. `fog` improved by 0.0405, well inside the limit. Every other scene has the same scores to four digits, and a scene without `volumeFog` runs the same post shader as before.
+The region of `dark-shaft` improved clearly without a bake (0.2157 to 0.1219). The region of `temple-hall` moved less (0.2512 to 0.2341). What is left there is haze outside the shafts, where Crucible is 0.0095 and Cycles 0.0033. A higher ambient floor lowers the region score (0.2100 at a floor of 0.4) but raises the region of `dark-shaft` (0.1676) and both whole-frame scores, so one constant cannot serve both scenes. The baked rows improved as a whole frame and got slightly worse in the region (0.1710 to 0.1814, 0.2528 to 0.2575): the bake already darkens the walls, and the fog change takes light from the same pixels. `fog` improved by 0.0405, well inside the limit. Every other scene has the same scores to four digits, and a scene without `volumeFog` runs the same post shader as before.
 
 Cost: `frame-time.mjs dark-shaft gpu`, plain frame, two runs each on a loaded machine: 1.9 and 2.1 ms before, 2.1 and 2.3 ms after, so about 0.1 to 0.3 ms for the 24 extra taps. The core entry grows by 115 bytes gzip (83,853 to 83,968), and six size budgets rose by 50 to 100 bytes because their bundles contain the post shader. `images/dark-shaft-baked.jpg` and `images/temple-hall-baked.jpg` come from `npm run reference -- --bake dark-shaft,temple-hall`.
 
@@ -199,7 +199,7 @@ FLIP does not punish two defects that show at a glance in the baked frames and a
 
 **Glow speckle.** Cause, measured: the 24 taps of the fog's glow each read one pixel of the frame, rotated by the per-pixel step jitter, so the sum is a different 24 samples per pixel. Without the jitter the same taps draw ghost copies of the door. Each tap now reads the frame's mip chain at the level that covers the gap between neighbouring taps (`log2(0.7 * radius in pixels)`), with no jitter, so the 24 taps add up to a smooth blur. The renderer builds the mips only for a frame with `volumeFog`, and puts the texture back to a plain linear filter when the fog goes away. The ring profile is kept: the mean display luminance 30 to 45 px from the door is 0.0889 before and 0.0903 after, against 0.1000 in Cycles.
 
-High frequency energy against Cycles (`dark` / `glow`; lower is smoother), 67js render on 2026-11-02:
+High frequency energy against Cycles (`dark` / `glow`; lower is smoother), Crucible render on 2026-11-02:
 
 | Scene | Cycles | Before | After |
 | --- | --- | --- | --- |
@@ -277,7 +277,7 @@ A mirror sphere and a steel cylinder showed only the sky and a flat horizon, whe
 
 FLIP error by region, before the change, on the existing 960 by 540 renders. The regions are discs projected from the object bounds, so a share of each shadow counts toward the object. The renders used here score 0.1336 against Cycles (the committed baseline said 0.1294), so read the columns against each other and not against the table above. Each cell is the region's share of the whole image mean, mean error times the share of pixels.
 
-| Region | Pixels | 67js before | 67js with probes | EEVEE |
+| Region | Pixels | Crucible before | Crucible with probes | EEVEE |
 | --- | --- | --- | --- | --- |
 | Chrome sphere | 5.6% | 0.0184 | 0.0145 | 0.0116 |
 | Gold torus | 1.6% | 0.0016 | 0.0016 | 0.0016 |
@@ -362,15 +362,15 @@ The other 19 default scenes and the other 4 grand options re-scored identically 
 
 ### Size
 
-The core grew by 374 bytes gzip in a `lit-box` scene (limit 400): a material field that batches parts, a feature name, a slot in the shader, and the second draw's target and early return. The reflection itself is the addon `67js/addons/water-reflection` (25,403 bytes gzip as an entry, budget 26,000). The shipped archive is 709,306 bytes.
+The core grew by 374 bytes gzip in a `lit-box` scene (limit 400): a material field that batches parts, a feature name, a slot in the shader, and the second draw's target and early return. The reflection itself is the addon `crucible/addons/water-reflection` (25,403 bytes gzip as an entry, budget 26,000). The shipped archive is 709,306 bytes.
 
 ### Use
 
 ```js
-import { applyWaterReflection, attachWaterReflection } from '@codepawlhq/67js/addons/water-reflection';
+import { applyWaterReflection, attachWaterReflection } from '@codepawlhq/crucible/addons/water-reflection';
 
 const water = applyWaterReflection(parts);
-const renderer = new Renderer67(canvas, water.parts, options);
+const renderer = new CrucibleRenderer(canvas, water.parts, options);
 attachWaterReflection(renderer, water.surface);
 ```
 
@@ -395,13 +395,13 @@ Whole frame FLIP against Cycles, GPU, the three water options (the Cycles arrays
 
 The shipped picture is three quarters of the canvas in each direction with a blur of 0.0015 across and 0.0045 down. Every option that helps the river hurts the bay by about as much, so the pick is the one that gives the largest total gain (0.0073, 0.0217 and 0.0022 against #202); the river is 0.0085 better than no reflection, not the 0.03 of the unblurred full-size picture. GPU `megacity-dusk-a` 0.2072 to 0.1999 and CPU 0.2066 to 0.1992. Frame time on the RTX 3060 (`frame-time.mjs <id> gpu --water --grand`, one run each, shared with other jobs; the machine's spread is about 0.2 ms) shows no cost for the larger picture: `megacity-dusk-a` 0.8 ms off, 1.32 ms with the half-size picture and 1.35 ms with three quarters; `megacity-dusk-b` 2.39, 3.84 and 3.56 ms; `mountain-valley-a` 3.96, 6.35 and 6.30 ms. `grand.json` holds the new GPU and CPU scores against Cycles for these three rows; its EEVEE columns are the old ones, because the EEVEE renders of these scenes are not in the folder.
 
-Still open, and not fixed here: the river's water is brighter than Cycles'. Scaling the reflection by 0.7 takes `megacity-dusk-a` to 0.1800 and costs the other two, so it is not a global gain: in Cycles the stretch of water between the towers is dark where 67js shows a light patch of sky. Nothing in the mirror image explains it, so it is likely the Fresnel curve or the haze on the Cycles side (the `FRESNEL_BASE` of 0 scores 0.1947, 0.1294 and 0.1925). The water's body colour and depth near the shore are untouched. The issue stays open.
+Still open, and not fixed here: the river's water is brighter than Cycles'. Scaling the reflection by 0.7 takes `megacity-dusk-a` to 0.1800 and costs the other two, so it is not a global gain: in Cycles the stretch of water between the towers is dark where Crucible shows a light patch of sky. Nothing in the mirror image explains it, so it is likely the Fresnel curve or the haze on the Cycles side (the `FRESNEL_BASE` of 0 scores 0.1947, 0.1294 and 0.1925). The water's body colour and depth near the shore are untouched. The issue stays open.
 
 The default suite does not hold a water scene any more on this main: `foliage` and `mountain-valley` draw the same pixels with and without the reflection (identical PNGs), and a full `--skip-blender` run before and after the change scored all 23 rows the same to four digits, GPU and CPU.
 
 ## The Fresnel curve is not why the river is bright (2026-11-03, issue #195)
 
-Tried and not kept. The Cycles water in these scenes is a plain Principled BSDF (`WATER` in `grand-scenes.js`: colour 0.02, 0.05, 0.08, roughness 0.04, nothing else). `render-blender.py` leaves IOR at the default 1.5 and the specular level at 0.5, so it reflects 4 percent head on with the exact dielectric curve (inferred from those inputs). It has no transmission, no volume absorption and no body colour beyond that diffuse colour, and 67js gives the surface the same colour, so there is no body or shore depth term to add. The reflection's weight was Schlick from 0.02. Computed numerically, the exact curve for IOR 1.5 and that Schlick weight differ by under 0.04 at every angle in frame (elevation 1, 3, 5, 12 and 30 degrees: 0.904 against 0.917, 0.742 against 0.769, 0.613 against 0.641, 0.326 against 0.326, 0.089 against 0.051), so a curve cannot explain a river that is 60 to 70 percent brighter.
+Tried and not kept. The Cycles water in these scenes is a plain Principled BSDF (`WATER` in `grand-scenes.js`: colour 0.02, 0.05, 0.08, roughness 0.04, nothing else). `render-blender.py` leaves IOR at the default 1.5 and the specular level at 0.5, so it reflects 4 percent head on with the exact dielectric curve (inferred from those inputs). It has no transmission, no volume absorption and no body colour beyond that diffuse colour, and Crucible gives the surface the same colour, so there is no body or shore depth term to add. The reflection's weight was Schlick from 0.02. Computed numerically, the exact curve for IOR 1.5 and that Schlick weight differ by under 0.04 at every angle in frame (elevation 1, 3, 5, 12 and 30 degrees: 0.904 against 0.917, 0.742 against 0.769, 0.613 against 0.641, 0.326 against 0.326, 0.089 against 0.051), so a curve cannot explain a river that is 60 to 70 percent brighter.
 
 Whole frame / water pixels FLIP against Cycles (water pixels are the ones the shipped reflection changes: 25, 31 and 16 percent of the frame), GPU, one change at a time:
 
@@ -413,21 +413,21 @@ Whole frame / water pixels FLIP against Cycles (water pixels are the ones the sh
 
 Blender's own curve helps the bay and costs the river 0.0057, over the 0.002 allowed; real water's curve does the opposite and costs the bay 0.0178. The two scenes ask for opposite weights from the same code, so the weight is not the cause, nothing was kept, and `src/water-reflection.js` is unchanged.
 
-Where the brightness comes from: mean display luminance over the river pixels of `megacity-dusk-a` in six horizontal bands (rows 305, 344, 383, 422, 461, 500 on), Cycles against 67js. In the lower bands the reflection adds almost nothing, so they do not depend on it.
+Where the brightness comes from: mean display luminance over the river pixels of `megacity-dusk-a` in six horizontal bands (rows 305, 344, 383, 422, 461, 500 on), Cycles against Crucible. In the lower bands the reflection adds almost nothing, so they do not depend on it.
 
 | Rows from | 305 | 344 | 383 | 422 | 461 | 500 |
 | --- | --- | --- | --- | --- | --- | --- |
 | Cycles | 0.216 | 0.180 | 0.129 | 0.121 | 0.103 | 0.099 |
-| 67js, no reflection | 0.423 | 0.345 | 0.288 | 0.226 | 0.182 | 0.149 |
-| 67js, shipped | 0.354 | 0.326 | 0.215 | 0.226 | 0.180 | 0.154 |
+| Crucible, no reflection | 0.423 | 0.345 | 0.288 | 0.226 | 0.182 | 0.149 |
+| Crucible, shipped | 0.354 | 0.326 | 0.215 | 0.226 | 0.180 | 0.154 |
 
-The bay and the valley are within 0.02 of Cycles in the same bands, so it is specific to the canyon. In the picture the sidewalks and tower faces that the river mirrors are lighter in 67js than in Cycles too. The reading (inferred, not isolated): the towers stand close together and Cycles lets only a slice of the sky reach them, while 67js lights them with the whole sky. With `--ambient 0` the river bands fall to 0.298, 0.259, 0.146, 0.169, 0.126 and 0.111, towards Cycles. Haze is not it, since the nearest band is as far off as the farthest. So the remaining gap is the light on the mirrored city (sky occlusion in narrow streets), and a reflection gain of 0.7 only trades one scene's error for another's. #195's done-when for the three water options was already met by #202 and #230 (all three scores moved towards Cycles, scenes without water unchanged), so this adds no change and closes nothing by itself.
+The bay and the valley are within 0.02 of Cycles in the same bands, so it is specific to the canyon. In the picture the sidewalks and tower faces that the river mirrors are lighter in Crucible than in Cycles too. The reading (inferred, not isolated): the towers stand close together and Cycles lets only a slice of the sky reach them, while Crucible lights them with the whole sky. With `--ambient 0` the river bands fall to 0.298, 0.259, 0.146, 0.169, 0.126 and 0.111, towards Cycles. Haze is not it, since the nearest band is as far off as the farthest. So the remaining gap is the light on the mirrored city (sky occlusion in narrow streets), and a reflection gain of 0.7 only trades one scene's error for another's. #195's done-when for the three water options was already met by #202 and #230 (all three scores moved towards Cycles, scenes without water unchanged), so this adds no change and closes nothing by itself.
 
 ## Fog on two more scenes, and a seam in baked rooms (2026-11-02, issues #164 and #165)
 
 **New scenes.** `fog-valley` is open ground under the HDRI sky with a low sun ahead of the camera, 48 blocks from 25 m to 400 m away and `volumeFog` density 0.005 over the whole field. `fog-room` is a 5 m square room with a window, density 0.2, a constant 0.05 world and the sun coming through the window as a shaft; it declares a `brightRegion` (24.3 percent of the frame). Both are built from engine code, so Blender gets the same geometry. Scores against Cycles on 2026-11-02 (RTX 3060):
 
-| Scene | 67js whole frame | EEVEE whole frame | 67js region | EEVEE region |
+| Scene | Crucible whole frame | EEVEE whole frame | Crucible region | EEVEE region |
 | --- | --- | --- | --- | --- |
 | `fog-room` | 0.1953 | 0.3730 | 0.1682 | 0.3146 |
 | `fog-valley` | 0.1967 | 0.1952 | | |
@@ -455,7 +455,7 @@ Region scores, before and after this change, against Cycles (EEVEE in brackets):
 
 Taken on 2026-10-30, under the sky with two suns, and replaced by "Scores now". The notes below explain decisions; their numbers are from the dates they name.
 
-Rows are the baseline taken before shadows for point lights. The `lit-interior` scene now sets `castShadow` on its three point lights. With shadows, 67js scores 0.5055 against Cycles (0.4997 before, so 0.0058 worse) and 0.0923 against EEVEE (0.1204 before, better): the shadow shape now matches, but Cycles fills its shadows with indirect light and 67js leaves them dark. The committed `lit-interior` row stays at the earlier numbers. `spot-area` is new with shadows, a spot light and an area light.
+Rows are the baseline taken before shadows for point lights. The `lit-interior` scene now sets `castShadow` on its three point lights. With shadows, Crucible scores 0.5055 against Cycles (0.4997 before, so 0.0058 worse) and 0.0923 against EEVEE (0.1204 before, better): the shadow shape now matches, but Cycles fills its shadows with indirect light and Crucible leaves them dark. The committed `lit-interior` row stays at the earlier numbers. `spot-area` is new with shadows, a spot light and an area light.
 
 Light bake (issue #55): `npm run reference -- --bake lit-interior` bakes bounced light into the room with `addons/light-bake` (defaults: 128 samples, 3 bounces since 2026-11-02, 25,648 texels, about 6 s on this machine) and leaves the scene itself unchanged; Blender still gets the plain scene. Measured 2026-10-31 on the RTX 3060: `lit-interior` against Cycles goes from 0.5055 to 0.1444 (SwiftShader 0.5051 to 0.1439), and against EEVEE from 0.0923 to 0.4739, because EEVEE has no indirect light here and the bake adds it. No other scene moved by more than 0.002 (the largest change was 0.0001, `car-paint` against EEVEE). The committed baseline rows and images are not rewritten. The remaining gap shows in the FLIP image as faint blotches on the walls, which is bake noise at 128 samples; at 48 samples the blotches were plain to see and the score was 0.1688.
 
@@ -463,36 +463,36 @@ Light bake (issue #55): `npm run reference -- --bake lit-interior` bakes bounced
 
 `brick-room` (issue #128) is a closed room built from a recipe (`createAgentScene`) with three brick pattern walls, two point lights and a table with a vase. Blender gets the box projection as UVs (`boxProjectedGeometry`) and the baked brick map, but not the bump or the roughness map. Measured 2026-11-01 on the RTX 3060: against Cycles 0.5102 without the bake and 0.1515 with it (`npm run reference -- --bake brick-room`; SwiftShader 0.5096 and 0.1503; EEVEE against Cycles 0.5020); the bake took 14.4 s for 28,576 texels while another session loaded the machine. `lit-interior` stayed at 0.1444 with the bake, and every scene without a bake kept its earlier score to four digits (largest change 0.0000).
 
-`brick-graph` (issue #50) is a wall of bricks written as one material graph (triangle waves for the joints, half a brick of shift on every second course, noise through a colour ramp, height as bump) on a quad with UVs, so it uses `mapping: "uv"`. `render-blender.py` translates the same graph JSON into Blender nodes (Math, Map Range, Noise Texture, Color Ramp, Mix and Bump), so each side evaluates its own nodes. It measured 0.2269 against Cycles and 0.1440 for EEVEE on 2026-10-31. A first run scored 0.4027 and showed a black wall in 67js: the `min` and `max` nodes returned NaN. The scene found that bug. The other rows were re-measured in the same run; `glass` against Cycles moved from 0.1450 to 0.1326 and `lit-interior` to the with-shadows numbers described above, and no other score moved by more than 0.002.
+`brick-graph` (issue #50) is a wall of bricks written as one material graph (triangle waves for the joints, half a brick of shift on every second course, noise through a colour ramp, height as bump) on a quad with UVs, so it uses `mapping: "uv"`. `render-blender.py` translates the same graph JSON into Blender nodes (Math, Map Range, Noise Texture, Color Ramp, Mix and Bump), so each side evaluates its own nodes. It measured 0.2269 against Cycles and 0.1440 for EEVEE on 2026-10-31. A first run scored 0.4027 and showed a black wall in Crucible: the `min` and `max` nodes returned NaN. The scene found that bug. The other rows were re-measured in the same run; `glass` against Cycles moved from 0.1450 to 0.1326 and `lit-interior` to the with-shadows numbers described above, and no other score moved by more than 0.002.
 
-`brushed-film` (issue #51) holds a brushed gold sphere (`anisotropy` 0.8), a dark sphere with a thin film (`iridescence`, IOR 1.3, 400 nm) and a silver sphere with the same film. `render-blender.py` maps the glTF anisotropy model onto Blender's aspect ratio (alpha along the tangent is `mix(alpha, 1, strength^2)`, so Blender gets Anisotropic = (1 - alpha / alpha_tangent) / 0.9 and the geometric-mean roughness) and feeds a UV-map Tangent node, because Blender's default tangent is a different field: with the default tangent the first run scored 0.1673 against Cycles and the highlight ran in rings where 67js had bands; with the UV tangent it scores 0.1613 and the highlight direction matches. Thin film goes to Principled Thin Film Thickness and IOR. EEVEE draws no thin film, so its sphere stays black. The two models are not the same: Blender's film is its own Fresnel integration, 67js uses Belcour and Barla at the view angle, so match the colours by eye in the image, not by the score alone. Measured 2026-11-01 on the RTX 3060 and SwiftShader. Before and after adding anisotropy and iridescence, every older scene scored the same against Cycles and EEVEE to four digits (largest change 0.0000, limit 0.002), because their shaders compile the two layers out.
+`brushed-film` (issue #51) holds a brushed gold sphere (`anisotropy` 0.8), a dark sphere with a thin film (`iridescence`, IOR 1.3, 400 nm) and a silver sphere with the same film. `render-blender.py` maps the glTF anisotropy model onto Blender's aspect ratio (alpha along the tangent is `mix(alpha, 1, strength^2)`, so Blender gets Anisotropic = (1 - alpha / alpha_tangent) / 0.9 and the geometric-mean roughness) and feeds a UV-map Tangent node, because Blender's default tangent is a different field: with the default tangent the first run scored 0.1673 against Cycles and the highlight ran in rings where Crucible had bands; with the UV tangent it scores 0.1613 and the highlight direction matches. Thin film goes to Principled Thin Film Thickness and IOR. EEVEE draws no thin film, so its sphere stays black. The two models are not the same: Blender's film is its own Fresnel integration, Crucible uses Belcour and Barla at the view angle, so match the colours by eye in the image, not by the score alone. Measured 2026-11-01 on the RTX 3060 and SwiftShader. Before and after adding anisotropy and iridescence, every older scene scored the same against Cycles and EEVEE to four digits (largest change 0.0000, limit 0.002), because their shaders compile the two layers out.
 
 `metal-room` (issue #55) is the `lit-interior` room with a mirror sphere, a gold sphere and a glossy floor, to show what reflection probes do: 0.5128 against Cycles without a probe and 0.4520 with one (`npm run reference -- --skip-blender --probes metal-room`; with `--bake` the score is 0.1754 without a probe and 0.1537 with one). `--probes [ids]` adds probes to the named scenes; open scenes use a hand placed probe from `PROBE_SPECIFICATIONS` in `harness.js`, and score worse (`metal` 0.1868 to 0.2246, `material-spheres` 0.1598 to 0.1740). Every scene without a probe re-scored within 0.0001 of its earlier baseline (a full rerun on 2026-11-01 matched the committed `baseline.json` exactly). With `--bake`, adding `--probes` lowers the score in the three rooms: `lit-interior` 0.1444 to 0.1213, `brick-room` 0.1515 to 0.1266, `metal-room` 0.1754 to 0.1537. `--scene` renders one scene and does not rescore. `node bench/reference/frame-time.mjs lit-interior gpu` prints medians of three rounds: 1.73 ms plain, 1.90 ms baked, 2.04 ms baked with a probe (RTX 3060, 2026-11-01), against 106.7 s for the path tracer in `path-tracer.json`.
 
-The mean against Cycles is 0.198 for 67js and 0.160 for EEVEE. The mean difference between the RTX 3060 and SwiftShader is 0.007.
+The mean against Cycles is 0.198 for Crucible and 0.160 for EEVEE. The mean difference between the RTX 3060 and SwiftShader is 0.007.
 
-EEVEE against Cycles is a yardstick: it shows what a good rasterizer scores. In `lit-interior` and `fog`, EEVEE scores no better than 67js. Those two scenes depend on indirect light, and this suite does not use EEVEE light probes. A low score does not mean a good picture on its own, so read each score with its image in `images/`.
+EEVEE against Cycles is a yardstick: it shows what a good rasterizer scores. In `lit-interior` and `fog`, EEVEE scores no better than Crucible. Those two scenes depend on indirect light, and this suite does not use EEVEE light probes. A low score does not mean a good picture on its own, so read each score with its image in `images/`.
 
 `baseline.json` also holds the scores for SwiftShader and each render time in Blender.
 
 ## How the two sides stay comparable
 
 - **Geometry:** `scenes.js` builds each scene with the engine's code, and `harness.js` hands the same vertices, normals and textures to Blender. This replaces GLB, because GLB export can not write textures yet (issue #49).
-- **Character:** Blender's glTF importer does not reproduce the rest pose of `RobotExpressive.glb`. three.js and 67js agree on that pose. So `harness.js` skins the vertices first, and Blender gets the result as plain geometry.
-- **Lights:** a measurement on a white plane gave the units. Sun strength equals irradiance in both. A Blender point light has 4π watts for each unit of 67js intensity.
+- **Character:** Blender's glTF importer does not reproduce the rest pose of `RobotExpressive.glb`. three.js and Crucible agree on that pose. So `harness.js` skins the vertices first, and Blender gets the result as plain geometry.
+- **Lights:** a measurement on a white plane gave the units. Sun strength equals irradiance in both. A Blender point light has 4π watts for each unit of Crucible intensity.
 - **Environment:** the same HDRI at the same rotation. The clouds line up in the images.
 - **Display:** Blender writes linear pixels, and `score.py` applies the tone curve and gamma from `src/post.js`. Both sides then use one display transform.
-- **Lighting tricks:** the 67js fill lights are off. All light comes from the sun, the environment and point lights.
+- **Lighting tricks:** the Crucible fill lights are off. All light comes from the sun, the environment and point lights.
 
 Khronos sample assets (issue #51): `npm run reference -- --khronos` draws files from [KhronosGroup/glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) that you download by hand into `artifacts/khronos/<name>/<name>.glb` (gitignored; nothing is committed). Blender imports the same GLB with its own importer, so Cycles is the reference for the file and not for our reading of it. The run uses its own work directory and writes `khronos.json` and `images/khronos-<name>.jpg`; `baseline.json` stays as it is. The sky fills most of each frame and both sides draw it alike, so the whole-frame FLIP score is about 0.05 for every asset and says little. The `asset-` columns score only the pixels the asset changes (a second render of the empty sky decides which, threshold 0.03). Licences, checked in each model's `LICENSE.md`: ClearCoatTest and AnisotropyBarnLamp are CC BY 4.0 (Analytical Graphics, Inc. and Wayfair, LLC), TransmissionTest, AnisotropyDiscTest and SheenChair are CC0 1.0 (SheenChair's model files are CC0; only its metadata files are CC BY 4.0). The scores are in "Scores now". The `AnisotropyBarnLamp` and `AnisotropyDiscTest` rows read `anisotropyTexture` since 2026-11-01 (0.4758 to 0.3584 and 0.3481 to 0.2808 then, under the sky with two suns).
 
 Reading `anisotropyTexture` (strength in blue, direction in red and green) fixed the shade: the factor alone spread a highlight over everything, and it scored worse than no anisotropy. The disc test is still level with anisotropy switched off, so the remaining gap there is not the texture. `TransmissionTest` is unchanged at 0.2708: its `transmissionTexture` is not read, because transmission draws in the liquid pass, which has no feature code, and the scores do not show that the other slots (iridescence, specular) matter. `SheenChair` is scored since the importer accepts a normal map with its own `KHR_texture_transform` scale and offset: the fabric tiles its base color 7 times and its normal map 2 times, so the importer bakes the base color transform into the UVs and the shader applies the normal map's remainder (`normalMapTransform`, outside core; core grew by 25 bytes gzip). The score does not say that the transform is right: the visible gap is the sheen rim, and why it is weaker was not investigated. Both Blender's engines disagree on the lamp by 0.3761, so part of that gap is Blender's own anisotropy and clear coat. Two importer bugs the assets found are fixed: `KHR_xmp` and `KHR_xmp_json_ld` (metadata) stopped the whole import, and `KHR_materials_variants` is now accepted with a warning and draws the default material.
 
-`brick-flat` is the control for `brick-graph` (issue #50): the same wall and light in the average colour of the graph, with no maps. Measured 2026-11-01 it scores 0.1999 against Cycles (0.1119 against EEVEE, EEVEE against Cycles 0.1351), and `brick-graph` 0.2269 (0.1480), so by this baseline the graph does not score above it: the picture is more like Cycles in kind but FLIP punishes the misplaced bevel highlights and the tone differences of noise more than it rewards the brick pattern. The bump of `brick-graph` is not weaker than Blender's. In a profile across one brick edge (columns 365 to 420, rows 150 to 215 of the render) the dark side of the bevel is the same in both (about 0.25 below the wall), and the bright side is about 0.3 above the wall in 67js against 0.17 in Cycles; the luminance spread over the brick area is 0.132 against 0.109 (EEVEE 0.109), and the edges fall on the same rows. Turning the bump down only lowers the score: 0.2065 with a bump of 0.01, 0.2209 at 0.5, 0.2247 at 0.75 and 0.2269 at 1 against Cycles. So the earlier note, that bump is weaker, was wrong. The rim of 67js is brighter because it keeps the full slope of the steep joint edge; the flat wall brightness is also 0.07 lower than Cycles, which has indirect light from the floor (EEVEE matches 67js there).
+`brick-flat` is the control for `brick-graph` (issue #50): the same wall and light in the average colour of the graph, with no maps. Measured 2026-11-01 it scores 0.1999 against Cycles (0.1119 against EEVEE, EEVEE against Cycles 0.1351), and `brick-graph` 0.2269 (0.1480), so by this baseline the graph does not score above it: the picture is more like Cycles in kind but FLIP punishes the misplaced bevel highlights and the tone differences of noise more than it rewards the brick pattern. The bump of `brick-graph` is not weaker than Blender's. In a profile across one brick edge (columns 365 to 420, rows 150 to 215 of the render) the dark side of the bevel is the same in both (about 0.25 below the wall), and the bright side is about 0.3 above the wall in Crucible against 0.17 in Cycles; the luminance spread over the brick area is 0.132 against 0.109 (EEVEE 0.109), and the edges fall on the same rows. Turning the bump down only lowers the score: 0.2065 with a bump of 0.01, 0.2209 at 0.5, 0.2247 at 0.75 and 0.2269 at 1 against Cycles. So the earlier note, that bump is weaker, was wrong. The rim of Crucible is brighter because it keeps the full slope of the steep joint edge; the flat wall brightness is also 0.07 lower than Cycles, which has indirect light from the floor (EEVEE matches Crucible there).
 
 Where the `brick-graph` gap comes from (issue #50, measured 2026-11-01 on the RTX 3060 with temporary scene variants that are not committed; both sides were changed the same way for each row, the flat wall of each row is the average colour of that row's graph, 512 texels). Against Cycles, FLIP, lower is better:
 
-| Variant | 67js against Cycles | EEVEE against Cycles |
+| Variant | Crucible against Cycles | EEVEE against Cycles |
 | --- | --- | --- |
 | flat wall (`brick-flat`) | 0.1999 | 0.1351 |
 | graph colour only | 0.2108 | 0.1432 |
@@ -502,9 +502,9 @@ Where the `brick-graph` gap comes from (issue #50, measured 2026-11-01 on the RT
 | graph colour only, no noise | 0.2098 | 0.1427 |
 | flat wall, no noise | 0.1998 | 0.1350 |
 
-Noise contributes nothing (0.2269 against 0.2270 without it), so the different noise function is not part of the gap. Colour structure alone adds 0.010 and the bump alone adds 0.023, and the two overlap. EEVEE, which reads the same node graph and the same Bump node, is also 0.009 above its own flat wall (0.1440 against 0.1351), so the condition that a graph must score no worse than a flat wall against Cycles can not be met by an independent renderer either: FLIP counts any misplaced fine structure against a flat wall that has none. What is left over 67js is 0.083 above EEVEE's own distance to Cycles for the graph and 0.065 for the flat wall. Blender's Bump node takes a one-sided slope over a footprint of 0.1 pixel (the node's Filter Width), so the bright side of a joint is thin and faint in Cycles, while 67js reads a central difference over two texels, which gives both sides a band. Setting Filter Width to 1 pixel lowered `brick-graph` to 0.2232 and 2 pixels to 0.2208, but the second one raised the EEVEE score from 0.1480 to 0.1565, so it moved the sides apart as much as it moved them together and the harness keeps the default. A 1024 texel bake of the bump only variant scored 0.2140 against 0.2184 at 512 (Filter Width 1), but the full graph is over the 30,000,000 work limit at 1024, so the scene stays at 512. With bounced light baked into the wall and floor (`--bake`, which removes the indirect light difference) `brick-flat` scores 0.1531 and `brick-graph` 0.1892, so the gap does not come from the missing indirect light either. No engine defect was found: the slope of the bake matches Blender's Bump node on distance (0.15 is the geometric mean of 6/32 and 4/32 for the 6 by 4 wall, since a texel slope is per UV unit), the sign and the colour space are the same on both sides. The condition stays open; a fair measure to report next to the raw score is the excess over EEVEE's distance to Cycles on the same scene (0.0829 for `brick-graph`, 0.0648 for `brick-flat`), never in place of it.
+Noise contributes nothing (0.2269 against 0.2270 without it), so the different noise function is not part of the gap. Colour structure alone adds 0.010 and the bump alone adds 0.023, and the two overlap. EEVEE, which reads the same node graph and the same Bump node, is also 0.009 above its own flat wall (0.1440 against 0.1351), so the condition that a graph must score no worse than a flat wall against Cycles can not be met by an independent renderer either: FLIP counts any misplaced fine structure against a flat wall that has none. What is left over Crucible is 0.083 above EEVEE's own distance to Cycles for the graph and 0.065 for the flat wall. Blender's Bump node takes a one-sided slope over a footprint of 0.1 pixel (the node's Filter Width), so the bright side of a joint is thin and faint in Cycles, while Crucible reads a central difference over two texels, which gives both sides a band. Setting Filter Width to 1 pixel lowered `brick-graph` to 0.2232 and 2 pixels to 0.2208, but the second one raised the EEVEE score from 0.1480 to 0.1565, so it moved the sides apart as much as it moved them together and the harness keeps the default. A 1024 texel bake of the bump only variant scored 0.2140 against 0.2184 at 512 (Filter Width 1), but the full graph is over the 30,000,000 work limit at 1024, so the scene stays at 512. With bounced light baked into the wall and floor (`--bake`, which removes the indirect light difference) `brick-flat` scores 0.1531 and `brick-graph` 0.1892, so the gap does not come from the missing indirect light either. No engine defect was found: the slope of the bake matches Blender's Bump node on distance (0.15 is the geometric mean of 6/32 and 4/32 for the 6 by 4 wall, since a texel slope is per UV unit), the sign and the colour space are the same on both sides. The condition stays open; a fair measure to report next to the raw score is the excess over EEVEE's distance to Cycles on the same scene (0.0829 for `brick-graph`, 0.0648 for `brick-flat`), never in place of it.
 
-Bump against Blender's formula (issue #50, measured 2026-11-03, RTX 3060, stored Blender renders, `--skip-blender`, GPU column). Read from `gpu_shader_material_bump.bsl.hh` and Cycles `svm_node_set_bump` (`displace.h`): `N' = normalize(filter_width * abs(det) * N - distance * sign(det) * surfgrad)`, then `normalize(mix(N, N', strength))`. The height difference is divided by the filter width, so the tilt is `distance` times the height's slope per world unit, with strength 1 here (the node's default). 67js's `normalMapFromHeights` builds `normalize(-slope, 1)` from the same kind of slope, so the form is the same. The scale is not: 67js's slope is `bump / 32` times the height slope per UV unit, and Blender's is `0.15 * bump` per world unit, which for the 6 by 4 wall is `0.025 * bump` along U and `0.0375 * bump` along V, so 67js is 1.25 times too strong along U and 0.83 times along V. Matching Blender's numbers exactly (a throwaway edit giving each axis the wall's world size, not committed) moved `brick-graph` against Cycles from 0.1602 to 0.1599 and against EEVEE from 0.0896 to 0.0891, and `brick-flat` is untouched at 0.1272, so the excess over EEVEE on the same scene (67js against Cycles minus EEVEE against Cycles) went from 0.0381 to 0.0378 (flat wall 0.0174). The scale is not what separates the two, and the engine is unchanged. What remains is the footprint: Blender's one-sided difference over 0.1 pixel against a central difference over two baked texels. A faithful match would also need the bump in world units, which a baked normal map cannot know without the surface's UV size, so it would be a shader change; it is not worth doing for 0.0003. The older figures above (0.2269, 0.1999, 0.0829 against 0.0648) are from the two-sun, floor state of the scene; the same scene now scores as in this paragraph.
+Bump against Blender's formula (issue #50, measured 2026-11-03, RTX 3060, stored Blender renders, `--skip-blender`, GPU column). Read from `gpu_shader_material_bump.bsl.hh` and Cycles `svm_node_set_bump` (`displace.h`): `N' = normalize(filter_width * abs(det) * N - distance * sign(det) * surfgrad)`, then `normalize(mix(N, N', strength))`. The height difference is divided by the filter width, so the tilt is `distance` times the height's slope per world unit, with strength 1 here (the node's default). Crucible's `normalMapFromHeights` builds `normalize(-slope, 1)` from the same kind of slope, so the form is the same. The scale is not: Crucible's slope is `bump / 32` times the height slope per UV unit, and Blender's is `0.15 * bump` per world unit, which for the 6 by 4 wall is `0.025 * bump` along U and `0.0375 * bump` along V, so Crucible is 1.25 times too strong along U and 0.83 times along V. Matching Blender's numbers exactly (a throwaway edit giving each axis the wall's world size, not committed) moved `brick-graph` against Cycles from 0.1602 to 0.1599 and against EEVEE from 0.0896 to 0.0891, and `brick-flat` is untouched at 0.1272, so the excess over EEVEE on the same scene (Crucible against Cycles minus EEVEE against Cycles) went from 0.0381 to 0.0378 (flat wall 0.0174). The scale is not what separates the two, and the engine is unchanged. What remains is the footprint: Blender's one-sided difference over 0.1 pixel against a central difference over two baked texels. A faithful match would also need the bump in world units, which a baked normal map cannot know without the surface's UV size, so it would be a shader change; it is not worth doing for 0.0003. The older figures above (0.2269, 0.1999, 0.0829 against 0.0648) are from the two-sun, floor state of the scene; the same scene now scores as in this paragraph.
 
 | Scene | Cycles, before | Cycles, scale matched | EEVEE, before | EEVEE, scale matched | EEVEE against Cycles |
 | --- | --- | --- | --- | --- | --- |
@@ -513,9 +513,9 @@ Bump against Blender's formula (issue #50, measured 2026-11-03, RTX 3060, stored
 
 ## Cloth
 
-`npm run reference -- --cloth` draws a pinned banner in wind (1 and 2 s) and a sheet dropped on a ball (0.5, 1 and 2 s). 67js bakes the sheet with its own solver; Blender bakes the same 13 by 13 grid with its cloth modifier from rest to the same time, stepping every frame, and renders that mesh in Cycles and EEVEE. Scores go to `cloth.json` and `images/cloth-*.jpg`, as FLIP over the whole frame and over the pixels the scene covers (`asset-*`, sky left out). Both solvers get the same mass (0.2 kg/m2, so 0.2 times the sheet area over 169 particles in Blender), gravity and drag; stiffness and bend stay at each side's defaults, because position based stiffness and Blender's tension, compression, shear and bending do not map one to one.
+`npm run reference -- --cloth` draws a pinned banner in wind (1 and 2 s) and a sheet dropped on a ball (0.5, 1 and 2 s). Crucible bakes the sheet with its own solver; Blender bakes the same 13 by 13 grid with its cloth modifier from rest to the same time, stepping every frame, and renders that mesh in Cycles and EEVEE. Scores go to `cloth.json` and `images/cloth-*.jpg`, as FLIP over the whole frame and over the pixels the scene covers (`asset-*`, sky left out). Both solvers get the same mass (0.2 kg/m2, so 0.2 times the sheet area over 169 particles in Blender), gravity and drag; stiffness and bend stay at each side's defaults, because position based stiffness and Blender's tension, compression, shear and bending do not map one to one.
 
-| Scene | 67js against Cycles | EEVEE against Cycles | 67js, covered pixels | EEVEE, covered pixels |
+| Scene | Crucible against Cycles | EEVEE against Cycles | Crucible, covered pixels | EEVEE, covered pixels |
 | --- | --- | --- | --- | --- |
 | banner 1 s | 0.0428 | 0.0418 | 0.0713 | 0.0729 |
 | banner 2 s | 0.0440 | 0.0426 | 0.0689 | 0.0709 |
@@ -523,13 +523,13 @@ Bump against Blender's formula (issue #50, measured 2026-11-03, RTX 3060, stored
 | drape 1 s | 0.0932 | 0.0394 | 0.1157 | 0.0514 |
 | drape 2 s | 0.0909 | 0.0428 | 0.1114 | 0.0555 |
 
-The two solvers differ in kind, so this mostly scores how alike the motion is. The banner sits at the EEVEE yardstick, which is a weak test: a flat sheet leaning in the wind has few pixels to get wrong. By eye the banner differs in shape: Blender's sheet wrinkles and sags along the bottom edge, 67js stays smooth and flat. The drape is about twice the yardstick: Blender's sheet has landed on the ball as a bell with wrinkles and its corners still up, while 67js has pulled its corners down and hangs flat panels on both sides of the ball. Wind is matched by the steady swing of the banner (Blender field strength 2 is 1.5 m/s here), because Blender's wind is a linear drag and this solver's is quadratic. The drape numbers also moved when the drag was matched: see "Recipe cloth" in `docs/physics.md`.
+The two solvers differ in kind, so this mostly scores how alike the motion is. The banner sits at the EEVEE yardstick, which is a weak test: a flat sheet leaning in the wind has few pixels to get wrong. By eye the banner differs in shape: Blender's sheet wrinkles and sags along the bottom edge, Crucible stays smooth and flat. The drape is about twice the yardstick: Blender's sheet has landed on the ball as a bell with wrinkles and its corners still up, while Crucible has pulled its corners down and hangs flat panels on both sides of the ball. Wind is matched by the steady swing of the banner (Blender field strength 2 is 1.5 m/s here), because Blender's wind is a linear drag and this solver's is quadratic. The drape numbers also moved when the drag was matched: see "Recipe cloth" in `docs/physics.md`.
 
 ## Leaf model and tree regions (issue #166)
 
-Before this change the Blender leaf was a plain Principled BSDF, while the 67js foliage shader (`CANOPY_TAG` in `src/shaders.js`) is not. `render-blender.py` now rebuilds each term of that shader on the Blender side, with the shader's own constants, for every material tagged `foliage`:
+Before this change the Blender leaf was a plain Principled BSDF, while the Crucible foliage shader (`CANOPY_TAG` in `src/shaders.js`) is not. `render-blender.py` now rebuilds each term of that shader on the Blender side, with the shader's own constants, for every material tagged `foliage`:
 
-| 67js foliage term | Blender node setup |
+| Crucible foliage term | Blender node setup |
 | --- | --- |
 | Back faces keep the stored normal | Geometry normal times `1 - 2 * Backfacing` undoes Blender's flip |
 | Colour times `0.78 + 0.16 * sin(13 x + sin(9 y)) * sin(11 z - 5 y)` of the world position | The same sines on Geometry position, multiplied into the base colour |
@@ -538,7 +538,7 @@ Before this change the Blender leaf was a plain Principled BSDF, while the 67js 
 | Light from behind: `colour * max(dot(-N, L), 0) * 0.3 * keyColor / (3.7, 3.4, 2.9)` | Translucent BSDF with colour weight `0.3 * pi / (3.7, 3.4, 2.9)`, which returns the same radiance for a sun of irradiance `keyColor`, added to the Principled BSDF |
 | Alpha mask at 0.5 | Mix Shader with a Transparent BSDF, so the Translucent part is cut out too |
 
-The weights are derived from the shader, not tuned. One difference stays: the 67js term was not shadowed, and the Blender Translucent BSDF is. The 67js term now multiplies by the sun shadow `visibility` as well (a leaf can only pass sun that reaches it), which is the one engine change of this issue. It moved `foliage` from 0.1181 to 0.1173; on its own the shader change is small.
+The weights are derived from the shader, not tuned. One difference stays: the Crucible term was not shadowed, and the Blender Translucent BSDF is. The Crucible term now multiplies by the sun shadow `visibility` as well (a leaf can only pass sun that reaches it), which is the one engine change of this issue. It moved `foliage` from 0.1181 to 0.1173; on its own the shader change is small.
 
 Scores before and after (FLIP against Cycles, RTX 3060, 2026-11-02), with EEVEE against Cycles beside them:
 
@@ -549,9 +549,9 @@ Scores before and after (FLIP against Cycles, RTX 3060, 2026-11-02), with EEVEE 
 
 The fair leaf alone moved `foliage` by 0.0109 (the Cycles crown got brighter, from 0.135 to 0.176 mean display luminance) and `mountain-valley` by 0.001: the leaf model was never the main gap there. No other scene changed to four digits in the full rescore.
 
-Regions, measured on the Cycles image (display luminance, mean of the region; FLIP is the mean error of 67js against Cycles):
+Regions, measured on the Cycles image (display luminance, mean of the region; FLIP is the mean error of Crucible against Cycles):
 
-| Scene and region | Cycles | EEVEE | 67js | FLIP 67js | Share of the error |
+| Scene and region | Cycles | EEVEE | Crucible | FLIP Crucible | Share of the error |
 | --- | --- | --- | --- | --- | --- |
 | `foliage` crown (green, upper rows) | 0.176 | 0.229 | 0.300 | 0.472 | 0.37 |
 | `foliage` trunk and ground under the tree | 0.139 | 0.191 | 0.208 | 0.313 | 0.02 |
@@ -561,21 +561,21 @@ Regions, measured on the Cycles image (display luminance, mean of the region; FL
 
 What the experiments show, each with the flags of this runner:
 
-- `foliage` crown with `--ambient 0` (sun and shading only): 67js 0.176, the same as the whole Cycles crown. So the sun term alone is already as bright as Cycles, and the sky term adds 0.12 on top. Cycles loses most of the sky inside a dense crown to the leaves around each card; 67js has no occlusion in the ambient term, only vertex colours that darken from the crown centre. Screen space occlusion (`--ambient-occlusion 1 --ambient-occlusion-radius 1`) takes `foliage` from 0.1181 to 0.1133 and the crown to 0.283, which is not enough to close the gap. The remaining gap is recorded, not fixed: it needs occlusion between cards, which is the light bake's job (`addons/light-bake`) and is not part of a shader.
-- `mountain-valley` floor with `--ambient 0`: 67js 0.180, against 0.272 for the full Cycles frame. The valley floor sits inside a ring of 1,100 m peaks that hide much of the sky in Cycles, and 67js lights the floor with the whole sky. This is inferred from the ring geometry and from the floor matching on the open `foliage` scene (0.698 against 0.689); it was not measured by removing the mountains. It is the main reason the trees there are lighter than in Cycles too. Fixing it needs sky visibility for terrain, which no shader has.
+- `foliage` crown with `--ambient 0` (sun and shading only): Crucible 0.176, the same as the whole Cycles crown. So the sun term alone is already as bright as Cycles, and the sky term adds 0.12 on top. Cycles loses most of the sky inside a dense crown to the leaves around each card; Crucible has no occlusion in the ambient term, only vertex colours that darken from the crown centre. Screen space occlusion (`--ambient-occlusion 1 --ambient-occlusion-radius 1`) takes `foliage` from 0.1181 to 0.1133 and the crown to 0.283, which is not enough to close the gap. The remaining gap is recorded, not fixed: it needs occlusion between cards, which is the light bake's job (`addons/light-bake`) and is not part of a shader.
+- `mountain-valley` floor with `--ambient 0`: Crucible 0.180, against 0.272 for the full Cycles frame. The valley floor sits inside a ring of 1,100 m peaks that hide much of the sky in Cycles, and Crucible lights the floor with the whole sky. This is inferred from the ring geometry and from the floor matching on the open `foliage` scene (0.698 against 0.689); it was not measured by removing the mountains. It is the main reason the trees there are lighter than in Cycles too. Fixing it needs sky visibility for terrain, which no shader has.
 - Ground under the `foliage` tree: the floor is within 0.01 luminance of Cycles, and FLIP is worst in a band of 0.2 to 0.5 at the canopy rows, not at the trunk base. The trunk and its contact shadow are 2% of the error.
 
 Blender render time of the two rerun scenes, now in `baseline.json`: `foliage` 26.4 s in Cycles and 13.5 s in EEVEE, `mountain-valley` 35.9 s and 39.2 s (other jobs loaded the machine).
 
 ### Sky visibility in crowns and valleys (issue #191)
 
-The two experiments above point at the same missing term: sky light that reaches a surface which the scene itself shades. Cycles blocks that light and 67js did not. Two bakes now give the sky term a visibility, and no recipe field changes.
+The two experiments above point at the same missing term: sky light that reaches a surface which the scene itself shades. Cycles blocks that light and Crucible did not. Two bakes now give the sky term a visibility, and no recipe field changes.
 
 Causes, each measured on its own:
 
-- Crown. With `--ambient 0` the 67js crown is 0.176, the same as the whole Cycles crown (0.175). The 0.12 the world adds in 67js (0.298 in total) is therefore sky light that Cycles stops inside the crown.
+- Crown. With `--ambient 0` the Crucible crown is 0.176, the same as the whole Cycles crown (0.175). The 0.12 the world adds in Crucible (0.298 in total) is therefore sky light that Cycles stops inside the crown.
 - Valley floor, from the heightfield. A script walked 32 horizon directions from 6 floor points of the `mountain-valley` height function and computed the cosine weighted share of the sky above the horizon. The ring leaves 0.69 to 0.72 of the sky open. Without the ring the share is 0.995 to 0.999. Cycles was not rerun without the ring.
-- The valley sky term is 0.416 minus 0.180 = 0.236 in 67js, and 0.272 minus 0.180 = 0.092 in Cycles, which needs a share of 0.39. The ring explains the larger part of the gap. The estimate 0.18 + 0.7 * 0.236 = 0.345 is close to the measured result below (0.360). The rest is not explained: the sky of the HDRI is brightest near the horizon, which the ring hides, and a cosine share cannot see that.
+- The valley sky term is 0.416 minus 0.180 = 0.236 in Crucible, and 0.272 minus 0.180 = 0.092 in Cycles, which needs a share of 0.39. The ring explains the larger part of the gap. The estimate 0.18 + 0.7 * 0.236 = 0.345 is close to the measured result below (0.360). The rest is not explained: the sky of the HDRI is brightest near the horizon, which the ring hides, and a cosine share cannot see that.
 
 What changed:
 
@@ -586,7 +586,7 @@ What changed:
 
 Results (FLIP against Cycles, RTX 3060, 2026-11-02), with EEVEE against Cycles beside them. Region luminance is the mean display luminance of the region, taken on the Cycles image:
 
-| Scene and region | Cycles | EEVEE | 67js before | 67js after |
+| Scene and region | Cycles | EEVEE | Crucible before | Crucible after |
 | --- | --- | --- | --- | --- |
 | `foliage` score | - | 0.0888 | 0.1173 | 0.1023 |
 | `foliage` crown | 0.175 | 0.227 | 0.298 | 0.200 |
@@ -602,12 +602,12 @@ Build time, on this machine with other jobs running: a 5 km valley terrain adds 
 
 - Scores come from one camera for each scene and one machine. They do not measure motion or speed.
 - This suite sets an HDRI from code and leaves occlusion off; `--ambient-occlusion <strength> [--ambient-occlusion-radius <units>]` turns it on. A recipe reaches only the named procedural setups, so these scores still describe a better environment than an agent gets (issue #53).
-- Both sides use the same leaf model since issue #166 (see "Leaf model and tree regions"). Grass has its own extra term in the 67js shader (`TAG_GRASS`), and Blender does not get it; no reference scene draws grass cards.
+- Both sides use the same leaf model since issue #166 (see "Leaf model and tree regions"). Grass has its own extra term in the Crucible shader (`TAG_GRASS`), and Blender does not get it; no reference scene draws grass cards.
 - `render-blender.py` does not read normal maps. No scene uses one yet, so a new scene with a normal map must add that first.
-- `glass` and `car-paint` use the real 67js `transmission` and `clearcoat` layers, and the Blender side sets the same values on the Principled BSDF. 67js refracts through the front surface only, so the sphere does not show the inverted sky that Cycles traces through the back face.
+- `glass` and `car-paint` use the real Crucible `transmission` and `clearcoat` layers, and the Blender side sets the same values on the Principled BSDF. Crucible refracts through the front surface only, so the sphere does not show the inverted sky that Cycles traces through the back face.
 - `car-paint` scored 0.1521 against Cycles and `glass` 0.1326 (it was 0.1450 with the `liquid` material). The other scenes scored the same as in the table above, to four digits. The table above is the 2026-10-30 baseline and has not been rewritten.
-- `fog` has no noise on either side. EEVEE and 67js approximate scattering, and Cycles follows 8 volume bounces.
-- Sample counts are fixed: 256 for Cycles with denoising, 64 for EEVEE and 4 MSAA samples for 67js.
+- `fog` has no noise on either side. EEVEE and Crucible approximate scattering, and Cycles follows 8 volume bounces.
+- Sample counts are fixed: 256 for Cycles with denoising, 64 for EEVEE and 4 MSAA samples for Crucible.
 
 Path tracer (issue #57): `npm run reference -- --path-tracer [--samples 32]` draws each scene with `addons/path-tracer` (CPU, 960 by 540, four threads, below-normal priority) and scores it against the Cycles renders of an earlier run into `path-tracer.json`; `baseline.json` and `images/` stay as they are. The first pass (2026-10-31) drew 32 samples with the tracer's own denoiser; the second pass is below.
 
@@ -694,9 +694,9 @@ Same command, `npm run reference -- --skip-blender --bake <five ids> --bake-pres
 
 ## Sky visibility in crowns and under the valley rim, what is left (2026-11-03, issue #191)
 
-Method: Cycles was rendered a second time with the world light at 0 (sun only) for `foliage` and `mountain-valley`, and 67js with `render-gpu.mjs --ambient 0`. Region luminance is the mean over a region, in linear light after the tone curve of `src/post.js` (the "display" figures are the mean of the display values). The crown is the green and dark pixels above the ground of the Cycles image; the valley floor is the bottom 100 rows of `mountain-valley`.
+Method: Cycles was rendered a second time with the world light at 0 (sun only) for `foliage` and `mountain-valley`, and Crucible with `render-gpu.mjs --ambient 0`. Region luminance is the mean over a region, in linear light after the tone curve of `src/post.js` (the "display" figures are the mean of the display values). The crown is the green and dark pixels above the ground of the Cycles image; the valley floor is the bottom 100 rows of `mountain-valley`.
 
-| Region | Cycles, sky and sun | Cycles, sun only | 67js | 67js, world 0 |
+| Region | Cycles, sky and sun | Cycles, sun only | Crucible | Crucible, world 0 |
 | --- | --- | --- | --- | --- |
 | `foliage` crown, display | 0.163 | 0.126 | 0.209 | 0.177 |
 | `foliage` crown, sun-shadowed pixels, linear | 0.0062 | 0.0013 | 0.0052 | 0.0022 |
@@ -704,16 +704,16 @@ Method: Cycles was rendered a second time with the world light at 0 (sun only) f
 | `mountain-valley` floor, linear | 0.0651 | 0.0003 | 0.1117 | 0.0251 |
 | `mountain-valley` slopes (rows 100 to 250), linear | 0.0394 | 0.0014 | 0.0258 | 0.0019 |
 
-- Crown: the sky light inside the crown already matches. Where neither renderer has sun (44 percent of the crown pixels), 67js reads 0.0052 and Cycles 0.0062. The excess is sun light: with the world at 0 the 67js crown (0.177) is already brighter than Cycles with everything on (0.163). 9,252 of the 55,137 crown pixels are sun-lit in 67js and in shadow in Cycles (0.169 linear against 0.0016), and the pixels both sides light read 0.1065 against 0.0774. So the sun shadow inside the crown leaks; a darker sky value cannot fix that without being wrong in the shadowed leaves. A depth bias of a tenth of the current one moved the sun-lit pixel count from 25,922 to 22,981 (Cycles 21,574) and left 7,837 leaking pixels, so the bias is a part of it, not the cause. It was not kept.
-- Valley floor: the cause is mostly not sky visibility. In Cycles the sun does not reach the floor at all (0.0003): the sun is 13 degrees above the horizon behind a rim up to 1,100 m high. In 67js the floor takes 0.0251 from the sun, in stripes along the sun direction and with no tree shadows, which is 54 percent of the 0.0466 gap. The other 0.0215 is sky light (0.0866 against 0.0648).
+- Crown: the sky light inside the crown already matches. Where neither renderer has sun (44 percent of the crown pixels), Crucible reads 0.0052 and Cycles 0.0062. The excess is sun light: with the world at 0 the Crucible crown (0.177) is already brighter than Cycles with everything on (0.163). 9,252 of the 55,137 crown pixels are sun-lit in Crucible and in shadow in Cycles (0.169 linear against 0.0016), and the pixels both sides light read 0.1065 against 0.0774. So the sun shadow inside the crown leaks; a darker sky value cannot fix that without being wrong in the shadowed leaves. A depth bias of a tenth of the current one moved the sun-lit pixel count from 25,922 to 22,981 (Cycles 21,574) and left 7,837 leaking pixels, so the bias is a part of it, not the cause. It was not kept.
+- Valley floor: the cause is mostly not sky visibility. In Cycles the sun does not reach the floor at all (0.0003): the sun is 13 degrees above the horizon behind a rim up to 1,100 m high. In Crucible the floor takes 0.0251 from the sun, in stripes along the sun direction and with no tree shadows, which is 54 percent of the 0.0466 gap. The other 0.0215 is sky light (0.0866 against 0.0648).
 - Terrain sky visibility did read a little high. A brute-force march (48 azimuths, 8 m first step, 8 percent growth) gives 0.68 to 0.69 on the floor and `terrain-sky.js` gave 0.73, because the 1.3 step growth skips narrow peaks. A step growth of 1.1 gives 0.694 at about 0.03 s more build time. It moved the floor from 0.1117 to 0.1073 (nearer Cycles), but the slopes from 0.0258 to 0.0232 (further from Cycles 0.0394), and `mountain-valley` went from 0.2623 to 0.2743 against Cycles. Reverted. The slopes are already darker than Cycles, which has bounced light off the lit walls.
 - The sky radiance by elevation of the capped HDRI is nearly flat (the share of irradiance above a 40 degree horizon is 0.70 against 0.59 for a uniform sky), so a sky that is brighter near the horizon does not explain the floor.
 
 ### Where the valley floor's sun comes from (2026-11-03, part of issue #191, tracked in #206)
 
-Display luminance of the bottom 100 rows of `mountain-valley`, GPU column, stored Cycles and EEVEE renders, `--ambient 0` (sun only in 67js). Cycles reads 0.2753 and EEVEE 0.3082 with the whole sky on; the 67js frame with the sky on reads 0.3620. Each row changes one thing against the first row:
+Display luminance of the bottom 100 rows of `mountain-valley`, GPU column, stored Cycles and EEVEE renders, `--ambient 0` (sun only in Crucible). Cycles reads 0.2753 and EEVEE 0.3082 with the whole sky on; the Crucible frame with the sky on reads 0.3620. Each row changes one thing against the first row:
 
-| 67js, world light 0 | Floor | What it tells |
+| Crucible, world light 0 | Floor | What it tells |
 | --- | --- | --- |
 | as drawn | 0.1822 | The sun alone lights the floor. |
 | sun term off (`keyColor * 0`) | 0.0015 | All of the 0.1822 is sun, not the fill lights. |
@@ -741,11 +741,11 @@ The shadow depth pass now draws both faces (`applyAlphaState` in `src/renderer.j
 | every other scene, FLIP against Cycles and EEVEE | | unchanged to four digits | |
 | shadow map redraw, median of 3 runs of 40 (RTX 3060) | `mountain-valley` 1.75 to 1.81 ms, `foliage` 0.25 to 0.27, `long-street` 0.15 to 0.18 | 1.81 to 1.88, 0.28 to 0.31, 0.19 | |
 
-The map is redrawn only when a caster, the wind or the assembly changes, so a still scene pays nothing per frame. The floor is now lit by the sky alone, so a tree shadow cannot fall on it: the sun does not reach it, as in Cycles. The `foliage` crown leak is not this cause: its FLIP and picture did not move. The crown's sun-shadow rows (9,252 pixels sun-lit in 67js and shadowed in Cycles) stay open under #206; the depth bias is the remaining lead (a tenth of it removed 2,941 pixels).
+The map is redrawn only when a caster, the wind or the assembly changes, so a still scene pays nothing per frame. The floor is now lit by the sky alone, so a tree shadow cannot fall on it: the sun does not reach it, as in Cycles. The `foliage` crown leak is not this cause: its FLIP and picture did not move. The crown's sun-shadow rows (9,252 pixels sun-lit in Crucible and shadowed in Cycles) stay open under #206; the depth bias is the remaining lead (a tenth of it removed 2,941 pixels).
 
 ## The foliage crown's sun, ruled out one by one (2026-11-03, part of issue #206)
 
-No engine change came out of this. Method: the stored Cycles array of `foliage` is full light, so the Cycles shadow mask is approximated from it. Crown pixels are the green-or-dark pixels of the Cycles image in the top 62 percent of the frame, 52,281 of them. Cycles reads shadowed where its linear value after the tone curve is below 0.02 (28,129 pixels); 67js reads sun-lit where the `--ambient 0` render is above 0.01. The count of both is the leak. On the branch of #222 it is 9,402 (the 9,252 of #191 was taken on another mask), and the crown mean is 0.0704 against Cycles 0.0509. Each row changes one thing on the GPU render, 960 x 540, with the rest as drawn:
+No engine change came out of this. Method: the stored Cycles array of `foliage` is full light, so the Cycles shadow mask is approximated from it. Crown pixels are the green-or-dark pixels of the Cycles image in the top 62 percent of the frame, 52,281 of them. Cycles reads shadowed where its linear value after the tone curve is below 0.02 (28,129 pixels); Crucible reads sun-lit where the `--ambient 0` render is above 0.01. The count of both is the leak. On the branch of #222 it is 9,402 (the 9,252 of #191 was taken on another mask), and the crown mean is 0.0704 against Cycles 0.0509. Each row changes one thing on the GPU render, 960 x 540, with the rest as drawn:
 
 | Change | Leaking pixels | Crown mean (linear) | FLIP against Cycles |
 | --- | --- | --- | --- |
@@ -763,44 +763,44 @@ No engine change came out of this. Method: the stored Cycles array of `foliage` 
 - Only the solid quad moves the count, and it does so by darkening: it leaves 10,479 fewer crown pixels sun-lit than Cycles does (13,673 against 24,152) and FLIP gets worse (0.1110). The ground under the tree agrees with it (0.4132 against Cycles 0.4086, 0.4352 as drawn, mean linear over rows 380 to 540, columns 250 to 700), but the picture does not. So the leak is not the cutout reading the wrong alpha, and cards that cast their transparent part are not what Cycles draws either.
 - The leaking pixels come as leaf-sized patches and thin slivers along leaf edges (the slivers are silhouette differences, not shadow). The patch that stays sits on a leaf that a leaf above it shadows in Cycles.
 
-Open: a sun-only Cycles render (world light 0, as #191 made) is needed to say whether Cycles shadows these leaves by the sun or the stored image darkens them by something else, for instance the Translucent term, which Cycles shadows differently from the 67js term. This needs Blender, which was not run. The second Done-when of #206 stays open.
+Open: a sun-only Cycles render (world light 0, as #191 made) is needed to say whether Cycles shadows these leaves by the sun or the stored image darkens them by something else, for instance the Translucent term, which Cycles shadows differently from the Crucible term. This needs Blender, which was not run. The second Done-when of #206 stays open.
 
 ## The foliage crown against a sun-only Cycles render (2026-11-03, part of issue #206)
 
-The section above approximated the Cycles shadow mask from the full-light array. This one renders it: `blender -b --factory-startup -t 6 --python bench/reference/render-blender.py -- artifacts/reference --world-strength 0 foliage` draws Cycles only (same camera, 960 x 540, 256 samples, denoised), with the world's light at 0, so only the sun is left, into `foliage-cycles-world0.npy`. The EEVEE render and the timings stay as they were. `python bench/reference/crown-leak.py artifacts/reference <67js --ambient 0 png>` (command in its header) counts the pixels. Branch: the sun-aligned shadow and the world-unit bias (#224, #226) included.
+The section above approximated the Cycles shadow mask from the full-light array. This one renders it: `blender -b --factory-startup -t 6 --python bench/reference/render-blender.py -- artifacts/reference --world-strength 0 foliage` draws Cycles only (same camera, 960 x 540, 256 samples, denoised), with the world's light at 0, so only the sun is left, into `foliage-cycles-world0.npy`. The EEVEE render and the timings stay as they were. `python bench/reference/crown-leak.py artifacts/reference <Crucible --ambient 0 png>` (command in its header) counts the pixels. Branch: the sun-aligned shadow and the world-unit bias (#224, #226) included.
 
-Crown pixels are the green-or-dark pixels of the full-light Cycles image in the top 62 percent of the frame, 56,921 of them (the 52,281 of the section above came from a slightly different colour test). Cycles shadowed is a tone-mapped linear value below 0.02 in the sun-only render; 67js sun-lit is above 0.01 in the `--ambient 0` render.
+Crown pixels are the green-or-dark pixels of the full-light Cycles image in the top 62 percent of the frame, 56,921 of them (the 52,281 of the section above came from a slightly different colour test). Cycles shadowed is a tone-mapped linear value below 0.02 in the sun-only render; Crucible sun-lit is above 0.01 in the `--ambient 0` render.
 
 | | Pixels |
 | --- | --- |
-| Sun-lit in Cycles / in 67js / in both | 19,883 / 30,907 / 17,836 |
-| Lit in 67js, shadowed in Cycles (the leak) | 13,071 |
+| Sun-lit in Cycles / in Crucible / in both | 19,883 / 30,907 / 17,836 |
+| Lit in Crucible, shadowed in Cycles (the leak) | 13,071 |
 | of those, within 2 px of a pixel Cycles lights | 7,424 |
 | of those, farther away | 5,647 |
 | Lit in Cycles only | 2,047 |
 
-The true mask gives a larger leak than the full-light approximation did (11,137 on this crown). The target of fewer than 3,000 is not met, and nothing in the 67js shader moved it.
+The true mask gives a larger leak than the full-light approximation did (11,137 on this crown). The target of fewer than 3,000 is not met, and nothing in the Crucible shader moved it.
 
-- Shadow or silhouette: 7,424 of the 13,071 sit beside a leaf Cycles lights, as a sliver along its edge with a matching blue sliver (lit only in Cycles) on the other side. That is leaf placement and the denoiser, not shadow. The other 5,647 are patches inside the lower crown that 67js lights and Cycles shadows.
-- Translucency is not the difference. The Blender leaf adds a Translucent BSDF with the weight of the 67js back-light term (`CANOPY_BACK_LIGHT`), and the 67js term is multiplied by the sun visibility, so both sides shadow it (the comment in `render-blender.py` said the opposite and is corrected). This is read from the two definitions; a Cycles render without the Translucent BSDF would settle it and was not made.
+- Shadow or silhouette: 7,424 of the 13,071 sit beside a leaf Cycles lights, as a sliver along its edge with a matching blue sliver (lit only in Cycles) on the other side. That is leaf placement and the denoiser, not shadow. The other 5,647 are patches inside the lower crown that Crucible lights and Cycles shadows.
+- Translucency is not the difference. The Blender leaf adds a Translucent BSDF with the weight of the Crucible back-light term (`CANOPY_BACK_LIGHT`), and the Crucible term is multiplied by the sun visibility, so both sides shadow it (the comment in `render-blender.py` said the opposite and is corrected). This is read from the two definitions; a Cycles render without the Translucent BSDF would settle it and was not made.
 - A shadow bias grown on back-facing leaves is not the cause either. `shadowVisibility` floors the cosine at 0.05, which gives a back-lit leaf the largest bias; using `abs(dot)` changed the leak from 13,071 to 13,069, so it was not kept.
-- Solid quads in the shadow pass (no cutout) leave 5,418 leaking pixels (2,804 away from a lit edge) but 67js then lights 14,991 crown pixels against 19,883 in Cycles, and 10,310 are lit only in Cycles. The truth is between the two: the cutout shadow lets too much sun through, solid cards block too much, and neither a bias nor a threshold sits between them (see the table of the section above). The cause is still open; the lead is how much of a card Cycles blocks for a shadow ray, which needs a Cycles render with the leaf alpha changed to test.
+- Solid quads in the shadow pass (no cutout) leave 5,418 leaking pixels (2,804 away from a lit edge) but Crucible then lights 14,991 crown pixels against 19,883 in Cycles, and 10,310 are lit only in Cycles. The truth is between the two: the cutout shadow lets too much sun through, solid cards block too much, and neither a bias nor a threshold sits between them (see the table of the section above). The cause is still open; the lead is how much of a card Cycles blocks for a shadow ray, which needs a Cycles render with the leaf alpha changed to test.
 
 ## The foliage leak is mostly not shadow (2026-11-03, part of issue #206)
 
-No engine change came out of this. The "leak" of the section above compared two lights that are not the same thing, so it was re-measured with the sun of 67js separated from everything else. `render-gpu.mjs` has a new `--key <scale>` switch (the sun's intensity); `crown-leak.py` takes the `--ambient 0 --key 0` render as a third argument, subtracts it from the `--ambient 0` render, and applies one threshold (0.02) to both sides. All numbers are on the same 56,921 crown pixels, the GPU render at 960 x 540, with the stored sun-only Cycles array.
+No engine change came out of this. The "leak" of the section above compared two lights that are not the same thing, so it was re-measured with the sun of Crucible separated from everything else. `render-gpu.mjs` has a new `--key <scale>` switch (the sun's intensity); `crown-leak.py` takes the `--ambient 0 --key 0` render as a third argument, subtracts it from the `--ambient 0` render, and applies one threshold (0.02) to both sides. All numbers are on the same 56,921 crown pixels, the GPU render at 960 x 540, with the stored sun-only Cycles array.
 
-- With the sun off and the ambient at 0, 67js still lights 5,068 crown pixels (3,100 of the 13,071 "leaking" ones): sky reflected in the leaf, which Cycles does not have in its sun-only render. Cycles shadowed was also tested below 0.02 and 67js lit above 0.01, which counts a 67js pixel at 0.015 as a leak next to a Cycles pixel at 0.0005.
-- Measured fairly, the leak is 7,661 pixels: 5,213 within 2 px of a pixel Cycles lights (silhouette and leaf placement, as before) and 2,448 farther away. The part that is shadow 67js does not cast is already under the 3,000 of the Done-when. The whole count is not, and its silhouette share is not a shadow matter.
-- The mean sun on the crown agrees: 0.0304 linear in 67js, 0.0316 in Cycles. What differs is where it goes. In pixels Cycles shadows, 67js carries 463 units of sun energy (Cycles 89); in pixels Cycles lights, 1,265 (Cycles 1,710). The 25 percent of the sun that sits in the wrong place is partly dimmer lit leaves and partly the 2-px edges, not a missing shadow layer.
-- Leaf alpha is not the cause, and Cycles does not treat it as a fraction. The Blender leaf is `GREATER_THAN` the cutoff into a Mix with a Transparent BSDF (`render-blender.py`), so Cycles also cuts at 0.5, on the full-size texture. The 67js leaf texture is close to binary: the cutoff of the shadow pass swept from 0.02 to 0.8 moves the leak between 9,053 and 11,429 (old measure, 10,524 at 0.5), and reading the texture at level 0 changed it by 53 pixels. Solid cards in the shadow pass leave 2,474 leaking but only 0.013 of mean sun on the crown, 42 percent of Cycles, so they are over-dark, and the card is larger than the leaf. Hashed or stochastic alpha was not built: it needs partial alpha to average, and there is none.
+- With the sun off and the ambient at 0, Crucible still lights 5,068 crown pixels (3,100 of the 13,071 "leaking" ones): sky reflected in the leaf, which Cycles does not have in its sun-only render. Cycles shadowed was also tested below 0.02 and Crucible lit above 0.01, which counts a Crucible pixel at 0.015 as a leak next to a Cycles pixel at 0.0005.
+- Measured fairly, the leak is 7,661 pixels: 5,213 within 2 px of a pixel Cycles lights (silhouette and leaf placement, as before) and 2,448 farther away. The part that is shadow Crucible does not cast is already under the 3,000 of the Done-when. The whole count is not, and its silhouette share is not a shadow matter.
+- The mean sun on the crown agrees: 0.0304 linear in Crucible, 0.0316 in Cycles. What differs is where it goes. In pixels Cycles shadows, Crucible carries 463 units of sun energy (Cycles 89); in pixels Cycles lights, 1,265 (Cycles 1,710). The 25 percent of the sun that sits in the wrong place is partly dimmer lit leaves and partly the 2-px edges, not a missing shadow layer.
+- Leaf alpha is not the cause, and Cycles does not treat it as a fraction. The Blender leaf is `GREATER_THAN` the cutoff into a Mix with a Transparent BSDF (`render-blender.py`), so Cycles also cuts at 0.5, on the full-size texture. The Crucible leaf texture is close to binary: the cutoff of the shadow pass swept from 0.02 to 0.8 moves the leak between 9,053 and 11,429 (old measure, 10,524 at 0.5), and reading the texture at level 0 changed it by 53 pixels. Solid cards in the shadow pass leave 2,474 leaking but only 0.013 of mean sun on the crown, 42 percent of Cycles, so they are over-dark, and the card is larger than the leaf. Hashed or stochastic alpha was not built: it needs partial alpha to average, and there is none.
 - A tighter shadow extent (4.5 instead of 9, so a texel of 0.0044 m) took the leak from 10,524 to 9,592 on the old measure. That is small for a scene change and was not kept.
 
 The second Done-when of #206 (fewer than 3,000 sun-lit crown pixels that Cycles shadows) holds for pixels away from a lit leaf (2,448) and not for the whole crown (7,661). The rest of the gap is placement of leaves and their edges, and the lower brightness of lit leaves. #191 should stay open for that.
 
 ## Fog valley against EEVEE (2026-11-03, part of issue #165)
 
-`fog-valley` scored 0.1967 against EEVEE's 0.1952. Measured by band of rows on the GPU render (FLIP against Cycles): 67js is better than EEVEE in the sky (0.1311 against 0.1608, and 0.0512 against 0.0815 within 40 pixels of the sun, so the glow is not the problem), and worse below the horizon (0.2437 against 0.2317 at rows 230 to 300, 0.2664 against 0.2576 at rows 300 to 400) and in the left third of the frame (0.2866 against 0.2556), where the shadowed face of the near tower and the ground shadow are darker than in Cycles. The fog's in-scatter inside the sun's shadow is the term that lifts them, and it keeps 15 percent of the ambient there, a constant fitted to closed rooms, where the air in shadow sees walls and not sky.
+`fog-valley` scored 0.1967 against EEVEE's 0.1952. Measured by band of rows on the GPU render (FLIP against Cycles): Crucible is better than EEVEE in the sky (0.1311 against 0.1608, and 0.0512 against 0.0815 within 40 pixels of the sun, so the glow is not the problem), and worse below the horizon (0.2437 against 0.2317 at rows 230 to 300, 0.2664 against 0.2576 at rows 300 to 400) and in the left third of the frame (0.2866 against 0.2556), where the shadowed face of the near tower and the ground shadow are darker than in Cycles. The fog's in-scatter inside the sun's shadow is the term that lifts them, and it keeps 15 percent of the ambient there, a constant fitted to closed rooms, where the air in shadow sees walls and not sky.
 
 Single constants tried on the GPU render of the five fog scenes (the whole frame against Cycles, before: `fog-valley` 0.1967, `fog-room` 0.1049, `dark-shaft` 0.0619, `temple-hall` 0.0659, `fog` 0.2257):
 
@@ -826,7 +826,7 @@ No other score in `baseline.json` moved by more than 0.0004. `gpu-vs-cpu` of `fo
 
 ## Sky visibility of the fog (2026-11-03, part of issue #164)
 
-The fog's ambient in the sun's shadow was one share for the whole box (`shadowAmbient`, derived from the middle of the box). `fogSkyVisibility` (`src/fog-sky-visibility.js`, passed to `Renderer67` by the harness and the agent preview like `skyOpenness`) replaces it with a per-point value: 24 upward rays from the centre of each cell of a grid over the fog box (at most 2,048 cells), read by the post shader from a 3D texture. A point that sees any sky keeps all the ambient, a point that sees none keeps 0.1, and sunlit fog keeps all of it as before. Without the option the sampling is compiled out, and a recipe that sets `shadowAmbient` gets no grid.
+The fog's ambient in the sun's shadow was one share for the whole box (`shadowAmbient`, derived from the middle of the box). `fogSkyVisibility` (`src/fog-sky-visibility.js`, passed to `CrucibleRenderer` by the harness and the agent preview like `skyOpenness`) replaces it with a per-point value: 24 upward rays from the centre of each cell of a grid over the fog box (at most 2,048 cells), read by the post shader from a 3D texture. A point that sees any sky keeps all the ambient, a point that sees none keeps 0.1, and sunlit fog keeps all of it as before. Without the option the sampling is compiled out, and a recipe that sets `shadowAmbient` gets no grid.
 
 Measured on the GPU render against the stored Cycles and EEVEE arrays (RTX 3060, `--skip-blender`; the whole frame, and the bright region in brackets; EEVEE against Cycles on the region is 0.2455 for `temple-hall`, 0.2643 for `dark-shaft`, 0.3146 for `fog-room`):
 
@@ -916,24 +916,24 @@ Both brick scenes are back under their scores before the aligned eye (0.1272 and
 
 ## Sky light in the canyon of `megacity-dusk-a` is not the cause of the bright river (2026-11-03, part of issue #232)
 
-Issue #231 inferred that surfaces between the towers get the whole sky in 67js while Cycles lets only a slice in. This measures it with the sun off on both sides. `render-blender.py` has a new `--sun-strength <scale>` switch beside `--world-strength` (Cycles only, the sun times the scale, into `<id>-cycles-sun<scale>.npy`): `blender -b --factory-startup -t 6 --python bench/reference/render-blender.py -- artifacts/reference-grand --sun-strength 0 megacity-dusk-a`. The 67js side is `render-gpu.mjs <directory> megacity-dusk-a --key 0`, and again with `--ambient 0` to take the sky's diffuse light away. Both arrays are tone mapped with the curve of `src/post.js` and compared as mean luminance over image regions (960 x 540, GPU).
+Issue #231 inferred that surfaces between the towers get the whole sky in Crucible while Cycles lets only a slice in. This measures it with the sun off on both sides. `render-blender.py` has a new `--sun-strength <scale>` switch beside `--world-strength` (Cycles only, the sun times the scale, into `<id>-cycles-sun<scale>.npy`): `blender -b --factory-startup -t 6 --python bench/reference/render-blender.py -- artifacts/reference-grand --sun-strength 0 megacity-dusk-a`. The Crucible side is `render-gpu.mjs <directory> megacity-dusk-a --key 0`, and again with `--ambient 0` to take the sky's diffuse light away. Both arrays are tone mapped with the curve of `src/post.js` and compared as mean luminance over image regions (960 x 540, GPU).
 
-| Region | Cycles, sun off | 67js, sun off | 67js, sun and ambient off | excess | of it, ambient |
+| Region | Cycles, sun off | Crucible, sun off | Crucible, sun and ambient off | excess | of it, ambient |
 | --- | --- | --- | --- | --- | --- |
 | towers (rows 100 to 340) | 0.2157 | 0.2024 | 0.1868 | -0.0132 | 0.0156 |
 | quay and street (rows 340 to 400) | 0.1096 | 0.1023 | 0.0917 | -0.0073 | 0.0106 |
 | river, middle (rows 420 to 540, columns 280 to 680) | 0.0063 | 0.0274 | 0.0204 | +0.0211 | 0.0070 |
 | river, sides (rows 400 to 540, columns 0 to 280) | 0.0158 | 0.0528 | 0.0429 | +0.0370 | 0.0099 |
 
-Row bands of 60 rows, 67js over Cycles with the sun off: 0.99, 0.98, 0.96, 0.94, 0.92, 0.90 down to row 360, then 1.55, 3.31 and 3.65 over the river. Full light gives the same bottom bands (1.75, 3.13, 3.37).
+Row bands of 60 rows, Crucible over Cycles with the sun off: 0.99, 0.98, 0.96, 0.94, 0.92, 0.90 down to row 360, then 1.55, 3.31 and 3.65 over the river. Full light gives the same bottom bands (1.75, 3.13, 3.37).
 
-The towers and the quay are slightly darker in 67js than in Cycles with only the sky, not brighter, so the canyon walls and the street do not get too much sky light. The river is 3 to 4 times brighter, but taking all the sky's diffuse light away (`--ambient 0`) removes only 0.007 to 0.010 of an excess of 0.021 to 0.037, so 67js stays 2.6 to 2.8 times over Cycles with no ambient at all. Even a perfect occlusion of the sky light in the river could close about a third of the gap, and the walls give no sign that the occlusion is missing. The rest comes from what the water draws besides diffuse sky: the reflection of the lit windows and the lamps (`src/water-reflection.js`), which is the part #195 works on. No sky visibility grid was built.
+The towers and the quay are slightly darker in Crucible than in Cycles with only the sky, not brighter, so the canyon walls and the street do not get too much sky light. The river is 3 to 4 times brighter, but taking all the sky's diffuse light away (`--ambient 0`) removes only 0.007 to 0.010 of an excess of 0.021 to 0.037, so Crucible stays 2.6 to 2.8 times over Cycles with no ambient at all. Even a perfect occlusion of the sky light in the river could close about a third of the gap, and the walls give no sign that the occlusion is missing. The rest comes from what the water draws besides diffuse sky: the reflection of the lit windows and the lamps (`src/water-reflection.js`), which is the part #195 works on. No sky visibility grid was built.
 
 ## Multiple scattering in the environment specular (2026-11-03, part of issue #167)
 
 Re-measured on current main, `metal` was still 0.1036 against Cycles (EEVEE 0.0916), `car-paint` 0.1037 and `brushed-film` 0.1029, so the object probes of #209 had held. FLIP over screen regions of `metal` (GPU against Cycles, EEVEE in brackets, mean luminance difference to Cycles in the last column, regions cut from the projected bounds of each part):
 
-| Region | pixels | FLIP | share of the error | luminance, 67js minus Cycles (EEVEE) |
+| Region | pixels | FLIP | share of the error | luminance, Crucible minus Cycles (EEVEE) |
 | --- | --- | --- | --- | --- |
 | floor | 291684 | 0.1015 (0.0884) | 50% | -0.0060 (-0.0061) |
 | chrome sphere | 56296 | 0.2138 (0.1744) | 20% | +0.0199 (+0.0083) |
@@ -942,7 +942,7 @@ Re-measured on current main, `metal` was still 0.1036 against Cycles (EEVEE 0.09
 | steel cylinder | 6636 | 0.3069 (0.2039) | 3% | -0.0531 (-0.0345) |
 | background | 110400 | 0.0158 (0.0101) | 3% | -0.0003 |
 
-The rough metals (copper, gold, steel) were darker than Cycles by 0.03 to 0.06 in both 67js and EEVEE. The environment specular was the single scattering split sum: `base reflectance * scale + offset`, which loses the light a rough GGX surface bounces a second time, while Cycles' Principled BSDF defaults to multiscatter GGX. `environmentLighting` now divides by `1 - (1 - scale - offset) * averageFresnel` (the closed form of Fdez-Aguera 2019, with the average Fresnel `F0 + (1 - F0) / 21`). Nothing is added to the BRDF lookup, so the extra cost is a few multiplies.
+The rough metals (copper, gold, steel) were darker than Cycles by 0.03 to 0.06 in both Crucible and EEVEE. The environment specular was the single scattering split sum: `base reflectance * scale + offset`, which loses the light a rough GGX surface bounces a second time, while Cycles' Principled BSDF defaults to multiscatter GGX. `environmentLighting` now divides by `1 - (1 - scale - offset) * averageFresnel` (the closed form of Fdez-Aguera 2019, with the average Fresnel `F0 + (1 - F0) / 21`). Nothing is added to the BRDF lookup, so the extra cost is a few multiplies.
 
 | Scene | before | after |
 | --- | --- | --- |
@@ -955,11 +955,11 @@ The rough metals (copper, gold, steel) were darker than Cycles by 0.03 to 0.06 i
 
 Every other scene moves by 0.0006 or less, none worse than 0.0002. Per region after the change: copper 0.2289 (was 0.2957), gold 0.1963 (was 0.2109), steel 0.3003, chrome 0.2127, floor 0.0994. Copper and gold are now past EEVEE; the remaining gap to EEVEE (0.0058) sits in the floor (50% of the error, 0.0994 against 0.0884: light bounced from the metal parts onto it, which the earlier one bounce probe test did not fix), the chrome sphere (0.021 too bright) and the steel cylinder. The direct light specular (`illuminate`) has no multiple scattering yet; it needs the BRDF lookup in the per light path, so it is the next thing to measure. Box 1 of #167 (metal reaches EEVEE) stays open.
 
-Correction to the table above: the sun was never on in `megacity-dusk-a` (`keyColor` is 0, 0, 0 in `grand-scenes.js`), so `--key 0` and `--sun-strength 0` change nothing there. The two Cycles arrays are the same render and the 67js `--key 0` image equals the full one pixel for pixel. The "sky only" numbers above are the plain comparison, and the sky was the only light all along.
+Correction to the table above: the sun was never on in `megacity-dusk-a` (`keyColor` is 0, 0, 0 in `grand-scenes.js`), so `--key 0` and `--sun-strength 0` change nothing there. The two Cycles arrays are the same render and the Crucible `--key 0` image equals the full one pixel for pixel. The "sky only" numbers above are the plain comparison, and the sky was the only light all along.
 
-## The Cycles river was dark, not the 67js river bright (2026-11-03, issue #232)
+## The Cycles river was dark, not the Crucible river bright (2026-11-03, issue #232)
 
-The cause of the bright river and street bands is measured, and it is on the reference side. In `grand-scenes.js` the `river` box (centre y -1.2, height 1.4) and the `city-ground` box (centre y -1.5, height 2) both have their top at y = -0.5. Two surfaces in one plane: Cycles picks one of them at random per ray, so part of the rays that should mirror the sky and the towers hit the dark ground instead. `megacity-dusk-b` has the same pair for its bay. 67js draws the same scene without that noise.
+The cause of the bright river and street bands is measured, and it is on the reference side. In `grand-scenes.js` the `river` box (centre y -1.2, height 1.4) and the `city-ground` box (centre y -1.5, height 2) both have their top at y = -0.5. Two surfaces in one plane: Cycles picks one of them at random per ray, so part of the rays that should mirror the sky and the towers hit the dark ground instead. `megacity-dusk-b` has the same pair for its bay. Crucible draws the same scene without that noise.
 
 Mean linear luminance over the river of `megacity-dusk-a` (960 x 540, GPU, no sun, river middle rows 420 to 540 and columns 280 to 680, sides rows 400 to 540 and columns 0 to 280):
 
@@ -967,9 +967,9 @@ Mean linear luminance over the river of `megacity-dusk-a` (960 x 540, GPU, no su
 | --- | --- | --- |
 | Cycles, as it was (coplanar) | 0.0130 | 0.0212 |
 | Cycles, river 1 cm higher | 0.0385 | 0.0584 |
-| 67js, shipped (reflection and sky specular) | 0.0317 | 0.0476 |
+| Crucible, shipped (reflection and sky specular) | 0.0317 | 0.0476 |
 
-One term at a time in 67js (river middle, linear): reflection gain 0 gives 0.0032 (the diffuse sky light on the body colour and nothing else); gain 0 and body colour 0 gives 0.0000; reflection on with body colour 0 gives 0.0285; reflection off with body colour 0 (only the sky's specular) gives 0.0224; reflection off with body colour 0.02, 0.05, 0.08 gives 0.0256; with `--ambient 0` as well the reflection alone gives 0.0248 and with the reflection off the river is 0.0000, so there is no emission, no sun and no direct term on the water. The 67js river is the reflection weighted by Fresnel and nothing else. In the middle band 67js equals the exact Fresnel for IOR 1.5 times the picture at the mirrored row to within 3 percent (row 430: 0.0363 against 0.0351; row 538: 0.0124 against 0.0128). Cycles with the river as a pure mirror (Metallic 1, white) returns 0.0488 in the middle band, and the stored Cycles river was 0.267 of it, where the exact Fresnel at these angles (12 to 27 percent) says about 0.2 plus the diffuse part. A river raised 1 cm gives the Cycles values above. So the Fresnel curve, the double counting of reflection and sky, the exposure of the reflected windows and the diffuse colour are not the cause; the earlier tables of #195 and #232 compared 67js with a Cycles river that was dim by an artefact.
+One term at a time in Crucible (river middle, linear): reflection gain 0 gives 0.0032 (the diffuse sky light on the body colour and nothing else); gain 0 and body colour 0 gives 0.0000; reflection on with body colour 0 gives 0.0285; reflection off with body colour 0 (only the sky's specular) gives 0.0224; reflection off with body colour 0.02, 0.05, 0.08 gives 0.0256; with `--ambient 0` as well the reflection alone gives 0.0248 and with the reflection off the river is 0.0000, so there is no emission, no sun and no direct term on the water. The Crucible river is the reflection weighted by Fresnel and nothing else. In the middle band Crucible equals the exact Fresnel for IOR 1.5 times the picture at the mirrored row to within 3 percent (row 430: 0.0363 against 0.0351; row 538: 0.0124 against 0.0128). Cycles with the river as a pure mirror (Metallic 1, white) returns 0.0488 in the middle band, and the stored Cycles river was 0.267 of it, where the exact Fresnel at these angles (12 to 27 percent) says about 0.2 plus the diffuse part. A river raised 1 cm gives the Cycles values above. So the Fresnel curve, the double counting of reflection and sky, the exposure of the reflected windows and the diffuse colour are not the cause; the earlier tables of #195 and #232 compared Crucible with a Cycles river that was dim by an artefact.
 
 Both water boxes now stand 1 cm above the ground. Cycles is re-rendered for `megacity-dusk-a` and `-b` (the other scenes are unchanged), `grand.json` and the two images hold the new rows:
 
@@ -978,7 +978,7 @@ Both water boxes now stand 1 cm above the ground. Cycles is re-rendered for `meg
 | `megacity-dusk-a` GPU / CPU | 0.1999 / 0.1992 | 0.1507 / 0.1502 |
 | `megacity-dusk-b` GPU / CPU | 0.1242 / 0.1258 | 0.1108 / 0.1120 |
 
-Mean linear luminance of 67js over Cycles after the change, `megacity-dusk-a`: towers 0.92, street 0.90, river middle 0.82, river sides 0.82. The river is now slightly dark in 67js instead of 2.4 times bright. The scores of `mountain-valley-a` and the default suite are not touched: no engine file changed, and neither scene uses these boxes (inferred; not re-run). The measuring switch `render-gpu.mjs --water off|ssr` is new. Done-when 1 of #232 holds (the cause is measured); the sky visibility grid of its scope is not needed, and the issue's second item is moot.
+Mean linear luminance of Crucible over Cycles after the change, `megacity-dusk-a`: towers 0.92, street 0.90, river middle 0.82, river sides 0.82. The river is now slightly dark in Crucible instead of 2.4 times bright. The scores of `mountain-valley-a` and the default suite are not touched: no engine file changed, and neither scene uses these boxes (inferred; not re-run). The measuring switch `render-gpu.mjs --water off|ssr` is new. Done-when 1 of #232 holds (the cause is measured); the sky visibility grid of its scope is not needed, and the issue's second item is moot.
 
 ## Multiple scattering on direct light (2026-11-03, issue #167)
 
@@ -996,11 +996,11 @@ Scores against Cycles, GPU, `--skip-blender` on the stored Cycles and EEVEE arra
 
 No scene got worse by more than 0.0002 (`spot-area`, `fog-valley` 0.1855 to 0.1859). Frame cost on the RTX 3060 (`frame-time.mjs`, median of three runs): `brick-flat` 0.375 to 0.39 ms before and 0.375 to 0.38 after, `metal` 0.44 to 0.45 before and 0.44 after, so the extra lookup is below the timer's resolution. SwiftShader `transparency` in `bench/runtime`: 345.9 ms before, 347.5 after (15 frames; that scene has no environment map, so the shader path is the same).
 
-`metal` is still 0.0046 above EEVEE, so the first box of #167 stays open. Where the rest is, by 6 by 8 block of the FLIP map (measured): the largest error is the lower half of the chrome sphere, where 67js is 0.062 brighter in display luminance than Cycles (EEVEE 0.022). Cycles shows the floor there darkened by the sphere's own contact shadow, and the sphere's probe traces the scene without the sphere, so the floor it shows is lit all the way to its base (inferred; the "seeing through the part itself" try above, 0.1117, was the attempt at that and was not kept). The rest of the frame is 67js 0.01 to 0.03 darker than Cycles, and EEVEE is darker still, so there is little left to gain from the direct specular. The floor holds over half of the error (0.0639 of 0.1147 in the table above) and is not a reflector.
+`metal` is still 0.0046 above EEVEE, so the first box of #167 stays open. Where the rest is, by 6 by 8 block of the FLIP map (measured): the largest error is the lower half of the chrome sphere, where Crucible is 0.062 brighter in display luminance than Cycles (EEVEE 0.022). Cycles shows the floor there darkened by the sphere's own contact shadow, and the sphere's probe traces the scene without the sphere, so the floor it shows is lit all the way to its base (inferred; the "seeing through the part itself" try above, 0.1117, was the attempt at that and was not kept). The rest of the frame is Crucible 0.01 to 0.03 darker than Cycles, and EEVEE is darker still, so there is little left to gain from the direct specular. The floor holds over half of the error (0.0639 of 0.1147 in the table above) and is not a reflector.
 
 ## The sphere's contact shadow in its probe, measured and not kept (2026-11-03, part of issue #167)
 
-The inference above, that the chrome sphere is too bright because its probe shows a floor with no shadow of the sphere, is right about the direction and wrong about the cure. Main reproduced `baseline.json` to four digits on the stored arrays first (`metal` 0.0962, `car-paint` 0.1028, `brushed-film` 0.1026, `material-spheres` 0.1185, `metal-room` 0.5071). Display luminance of the sphere's lower half, 67js minus Cycles, in four bands below the centre and three columns (GPU; the first column is the plain probe):
+The inference above, that the chrome sphere is too bright because its probe shows a floor with no shadow of the sphere, is right about the direction and wrong about the cure. Main reproduced `baseline.json` to four digits on the stored arrays first (`metal` 0.0962, `car-paint` 0.1028, `brushed-film` 0.1026, `material-spheres` 0.1185, `metal-room` 0.5071). Display luminance of the sphere's lower half, Crucible minus Cycles, in four bands below the centre and three columns (GPU; the first column is the plain probe):
 
 | Band (top to bottom) | left | middle | right |
 | --- | --- | --- | --- |
@@ -1009,7 +1009,7 @@ The inference above, that the chrome sphere is too bright because its probe show
 | 3 | +0.001 | +0.005 | +0.088 |
 | 4 (bottom edge) | +0.038 | +0.142 | +0.312 |
 
-The mean over the lower half is only +0.015 (Cycles 0.594, 67js 0.609, EEVEE 0.588); the excess sits in the bottom edge and on the right, where the sun's shadow falls in Cycles (sun from -x, +z). So the cause is the one inferred: a floor lit up to the base. Casting the sphere's shadow onto the probe's floor points fixed that edge (band 4 middle +0.142 to -0.092) and overshot everywhere else (band 3 middle +0.005 to -0.107, right +0.088 to -0.141). The probe sits at the sphere's centre, and a ray from the centre to the floor lands far from where the true reflected ray from the surface lands: for a pixel at the bottom of the sphere the true ray leaves the surface a few centimetres above the floor and meets it next to the contact point, while the centre ray meets it about a sphere radius further out. The shadow therefore moves to the wrong floor points.
+The mean over the lower half is only +0.015 (Cycles 0.594, Crucible 0.609, EEVEE 0.588); the excess sits in the bottom edge and on the right, where the sun's shadow falls in Cycles (sun from -x, +z). So the cause is the one inferred: a floor lit up to the base. Casting the sphere's shadow onto the probe's floor points fixed that edge (band 4 middle +0.142 to -0.092) and overshot everywhere else (band 3 middle +0.005 to -0.107, right +0.088 to -0.141). The probe sits at the sphere's centre, and a ray from the centre to the floor lands far from where the true reflected ray from the surface lands: for a pixel at the bottom of the sphere the true ray leaves the surface a few centimetres above the floor and meets it next to the contact point, while the centre ray meets it about a sphere radius further out. The shadow therefore moves to the wrong floor points.
 
 Scores against Cycles (GPU, the five scenes with a reflective part; every other scene has no object probe and is unchanged):
 
@@ -1044,9 +1044,9 @@ Bundle size: the floor trace and the lookup correction add about 250 bytes gzip 
 
 ## The floor of `metal`, measured and nothing kept (2026-11-03, part of issue #167)
 
-Main reproduced `baseline.json` first (`metal` 0.0957 against Cycles, EEVEE 0.0916, GPU, on the stored arrays). The floor holds 44% of the frame error. Replacing the floor with the Cycles pixels (the ceiling for all floor work) gives 0.0555, so the floor costs 0.040 of 0.0957. FLIP over floor regions, cut by distance on the floor plane to the footprint of the nearest part (the parts' own pixels excluded), 67js against Cycles with EEVEE beside it, and the mean luminance difference to Cycles in display space (the last column is the EEVEE gap, FLIP difference times pixels):
+Main reproduced `baseline.json` first (`metal` 0.0957 against Cycles, EEVEE 0.0916, GPU, on the stored arrays). The floor holds 44% of the frame error. Replacing the floor with the Cycles pixels (the ceiling for all floor work) gives 0.0555, so the floor costs 0.040 of 0.0957. FLIP over floor regions, cut by distance on the floor plane to the footprint of the nearest part (the parts' own pixels excluded), Crucible against Cycles with EEVEE beside it, and the mean luminance difference to Cycles in display space (the last column is the EEVEE gap, FLIP difference times pixels):
 
-| Region | pixels | share of the error | FLIP 67js (EEVEE) | luminance 67js minus Cycles (EEVEE) | EEVEE gap |
+| Region | pixels | share of the error | FLIP Crucible (EEVEE) | luminance Crucible minus Cycles (EEVEE) | EEVEE gap |
 | --- | --- | --- | --- | --- | --- |
 | contact, under 0.15 | 15887 | 6.8% | 0.2362 (0.2265) | -0.0021 (-0.0262) | 154 |
 | near, 0.15 to 0.5 | 23729 | 8.2% | 0.1916 (0.1611) | +0.0071 (-0.0054) | 688 |
@@ -1054,16 +1054,16 @@ Main reproduced `baseline.json` first (`metal` 0.0957 against Cycles, EEVEE 0.09
 | open, 1.5 to 4 | 56116 | 6.0% | 0.0592 (0.0517) | -0.0066 (-0.0038) | 420 |
 | far, over 4 | 81837 | 9.0% | 0.0610 (0.0531) | -0.0064 (-0.0023) | 646 |
 
-Oracle ceilings (Cycles pixels pasted into one region of the 67js frame, whole frame FLIP): contact and near 0.0831, everything within 1.5 units 0.0698, within 4 units 0.0638, the sun shadow alone 0.0940, its edge band alone 0.0944. Each candidate cause below was tested against the data and none gives a change worth keeping.
+Oracle ceilings (Cycles pixels pasted into one region of the Crucible frame, whole frame FLIP): contact and near 0.0831, everything within 1.5 units 0.0698, within 4 units 0.0638, the sun shadow alone 0.0940, its edge band alone 0.0944. Each candidate cause below was tested against the data and none gives a change worth keeping.
 
-- Shadow shape and softness: ruled out. Blender's sun is 1 degree wide (`SUN_ANGLE` in `render-blender.py`). The 67js filter reaches 3.5 texels of the 2048 map (extent 6, 5.9 mm a texel), about 2 cm, and a 1 degree sun gives a penumbra of 1.4 cm at 0.8 m and 2.1 cm at 1.2 m, so the two agree. Floor pixels where Cycles is below 0.6 of the open floor are 67js +0.0024 (EEVEE -0.0397) and score 0.204 (EEVEE 0.265): 67js is closer than EEVEE there, and a perfect shadow would be worth 0.0017.
+- Shadow shape and softness: ruled out. Blender's sun is 1 degree wide (`SUN_ANGLE` in `render-blender.py`). The Crucible filter reaches 3.5 texels of the 2048 map (extent 6, 5.9 mm a texel), about 2 cm, and a 1 degree sun gives a penumbra of 1.4 cm at 0.8 m and 2.1 cm at 1.2 m, so the two agree. Floor pixels where Cycles is below 0.6 of the open floor are Crucible +0.0024 (EEVEE -0.0397) and score 0.204 (EEVEE 0.265): Crucible is closer than EEVEE there, and a perfect shadow would be worth 0.0017.
 - Shadow darkness (ambient in the shadow): ruled out by the same row. The shadow bands are within 0.013 of Cycles in luminance and hold 3% of the error.
 - Floor level, colour and sky reflection: open floor is within 0.002 to 0.008 of Cycles in `metal`, `car-paint`, `brushed-film`, `material-spheres`, `outdoor-hdri` and `character`, and where it is off (the bottom right of the `metal` family, up to 0.008) EEVEE is off by the same amount, which is Cycles-only light from the copper box. A flat gain on the far floor is worth at most 0.0013 (+0.4% display: 0.0950 to 0.0937; a gain of 1.01 on the whole floor is worse, 0.0979), and so is a +0.4% push of red and green (0.0945). That is the size of a tuning knob and the other scenes do not show the offset, so no constant is added.
-- Contact and sky occlusion: the visible halo (Cycles 0.620 to 0.635 around the parts, against 0.645 on open floor) is the band where 67js is worst against EEVEE (FLIP 0.164 against 0.112, 8% of the error), but analytic occlusion is not the cause. Over the sunlit floor within 2 units of each part, the difference to Cycles correlates with a sphere's cosine form factor only for the chrome sphere (+0.31; the excess is +0.036 within 0.2 units of it, +0.009 to 0.5 and nothing beyond); steel, torus and box give -0.06, -0.25 and +0.16. A cosine form factor sphere applied to the floor of the 67js image, as an oracle, was worse or equal in every variant: the chrome sphere alone 0.0957 (strength 0.2) and 0.0969 (0.5), sphere plus steel 0.0975, four spheres 0.1004 to 0.123 by size and strength. A mirror sphere shows the floor on its lower half, so what Cycles darkens there is bounced light, which #209 tried (0.1246) and did not keep.
+- Contact and sky occlusion: the visible halo (Cycles 0.620 to 0.635 around the parts, against 0.645 on open floor) is the band where Crucible is worst against EEVEE (FLIP 0.164 against 0.112, 8% of the error), but analytic occlusion is not the cause. Over the sunlit floor within 2 units of each part, the difference to Cycles correlates with a sphere's cosine form factor only for the chrome sphere (+0.31; the excess is +0.036 within 0.2 units of it, +0.009 to 0.5 and nothing beyond); steel, torus and box give -0.06, -0.25 and +0.16. A cosine form factor sphere applied to the floor of the Crucible image, as an oracle, was worse or equal in every variant: the chrome sphere alone 0.0957 (strength 0.2) and 0.0969 (0.5), sphere plus steel 0.0975, four spheres 0.1004 to 0.123 by size and strength. A mirror sphere shows the floor on its lower half, so what Cycles darkens there is bounced light, which #209 tried (0.1246) and did not keep.
 - Screen-space occlusion: `--ambient-occlusion 0.3 --ambient-occlusion-radius 1.5` takes the halo band from 0.164 to 0.125 and the floor from 0.0873 to 0.0865, and the frame to 0.0970 (0.2 at radius 2.5 gives 0.0971; 1 at radius 1.0 gives 0.1018). The pass multiplies the whole frame, so it darkens the metal parts too, and with the parts untouched the floor would gain about 0.0004. It stays opt-in.
 - Bake: `--bake metal --bake-preset standard` scores 0.1526, worse.
 
-Where EEVEE beats 67js on the floor is the mid band (46% of the gap) and the open and far floor (30%), where the means are within 0.002 to 0.007 and the difference is spread thin (FLIP is also reading Cycles' own noise there); the one concentrated piece, the halo at the chrome sphere, is bounced light. No engine file, scene, baseline row or budget changed, and the first box of #167 stays open: `metal` 0.0957 against EEVEE 0.0916. The floor has no single cause left that a measured change reaches; what is left sits in the parts (the chrome sphere's lower half and the steel cylinder) and in bounce light.
+Where EEVEE beats Crucible on the floor is the mid band (46% of the gap) and the open and far floor (30%), where the means are within 0.002 to 0.007 and the difference is spread thin (FLIP is also reading Cycles' own noise there); the one concentrated piece, the halo at the chrome sphere, is bounced light. No engine file, scene, baseline row or budget changed, and the first box of #167 stays open: `metal` 0.0957 against EEVEE 0.0916. The floor has no single cause left that a measured change reaches; what is left sits in the parts (the chrome sphere's lower half and the steel cylinder) and in bounce light.
 
 
 ## Depth parallax, floor occlusion and a probe gain for object probes, measured and nothing kept (2026-11-03, part of issue #167)
@@ -1098,26 +1098,26 @@ Main reproduced `baseline.json` first on the stored arrays (`brick-flat` 0.1264,
 | Bump 1, ambient clipped to the surface plane | 0.1518 | 0.3238 | 0.3565 | 0.3150 | 0.465 |
 
 - The bump hurts against Cycles at every strength, and stronger is worse, so the scale (#219) and the footprint are not the lead. The 512 texel normal map puts the joint edges where Cycles puts them (the albedo transition of the bump-free render sits on the same pixels, 423 to 430 on row 168), and the signs match.
-- Across a joint's right edge Cycles stays dark over the whole 6 pixel transition (0.25 to 0.36) and 67js is dark over 2 or 3 pixels (0.33 to 0.47). Cycles discards light that arrives from below the geometric surface, and a bumped normal tilted 60 to 70 degrees has a third of its lobe there. 67js lit the full lobe.
-- Change: for a mapped normal the ambient and reflected sky term is scaled by `0.5 + 0.5 * dot(mapped, geometric)`, the share of an even sky lobe that stays above the surface. `brick-graph` 0.1584 to 0.1518 (EEVEE 0.0875 to 0.0844, CPU the same); all 22 other scenes reproduce their rows to 4 digits (none uses a normal map). Excess over its flat wall: 67js 0.0320 to 0.0254, EEVEE 0.0122.
-- Still open: the sun is not clipped against the surface plane (the wall faces the sun, so it changes nothing here), the colour gap on the brick faces (Cycles 0.524, EEVEE 0.476, 67js 0.466 in luminance), and a bump scale per world unit instead of per UV unit (Blender's Distance 0.15 is 0.025 per UV unit across and 0.0375 up on this 6 by 4 wall, the bake gives 0.031 both ways). Whether the condition of #50 can be met is still An's decision.
+- Across a joint's right edge Cycles stays dark over the whole 6 pixel transition (0.25 to 0.36) and Crucible is dark over 2 or 3 pixels (0.33 to 0.47). Cycles discards light that arrives from below the geometric surface, and a bumped normal tilted 60 to 70 degrees has a third of its lobe there. Crucible lit the full lobe.
+- Change: for a mapped normal the ambient and reflected sky term is scaled by `0.5 + 0.5 * dot(mapped, geometric)`, the share of an even sky lobe that stays above the surface. `brick-graph` 0.1584 to 0.1518 (EEVEE 0.0875 to 0.0844, CPU the same); all 22 other scenes reproduce their rows to 4 digits (none uses a normal map). Excess over its flat wall: Crucible 0.0320 to 0.0254, EEVEE 0.0122.
+- Still open: the sun is not clipped against the surface plane (the wall faces the sun, so it changes nothing here), the colour gap on the brick faces (Cycles 0.524, EEVEE 0.476, Crucible 0.466 in luminance), and a bump scale per world unit instead of per UV unit (Blender's Distance 0.15 is 0.025 per UV unit across and 0.0375 up on this 6 by 4 wall, the bake gives 0.031 both ways). Whether the condition of #50 can be met is still An's decision.
 Bundle size: the two shader lines add 9 to 18 bytes gzip to eight bundles that carry the main fragment shader (ntry:core, ntry:agent-scene, ntry:agent-asset, ntry:cascaded-shadows, scene:lit-box, scene:gltf-box, scene:gltf-box+lazy, scene:agent-scene); their budgets rose by 20 to 30 bytes.
 
 ## Ground bounce (2026-11-03, issue #244)
 
-Cause of the 10.7 percent gap on `brick-flat`, measured: light the ground bounces onto the wall. Cycles of `brick-flat`, 256 samples, RTX 3060, mean display luminance over the wall (rows 110 to 430, columns 230 to 730; same tone map as 67js):
+Cause of the 10.7 percent gap on `brick-flat`, measured: light the ground bounces onto the wall. Cycles of `brick-flat`, 256 samples, RTX 3060, mean display luminance over the wall (rows 110 to 430, columns 230 to 730; same tone map as Crucible):
 
 | Cycles setting | wall luminance | linear |
 | --- | --- | --- |
 | normal (stored) | 0.6150 | 0.2389 |
 | floor painted black (`--floor-color 0`) | 0.5466 | 0.1854 |
 | light bounces limited to 0 (`--max-bounces 0`, sun and sky only) | 0.5370 | 0.1791 |
-| 67js before | 0.5558 | |
-| 67js with the fix | 0.6091 | |
+| Crucible before | 0.5558 | |
+| Crucible with the fix | 0.6091 | |
 
-The ground adds 0.0535 linear (22 percent of the wall's light) in Cycles. With bounces off, Cycles is 0.019 below 67js (display), so the sun units and colour, the sky irradiance on a vertical wall, Lambert against Principled diffuse and the tone map are not the cause: they leave 67js slightly bright. 67js lit the wall with the lower half of the sky HDRI, where Cycles has the floor.
+The ground adds 0.0535 linear (22 percent of the wall's light) in Cycles. With bounces off, Cycles is 0.019 below Crucible (display), so the sun units and colour, the sky irradiance on a vertical wall, Lambert against Principled diffuse and the tone map are not the cause: they leave Crucible slightly bright. Crucible lit the wall with the lower half of the sky HDRI, where Cycles has the floor.
 
-Fix, derived from the scene and not set per scene: `groundBounceEnvironment(parts, environment)` (`src/ground-bounce.js`, `67js/addons/ground-bounce`) finds the floor (the lowest thin part that spans the scene, the same test as the automatic floor of agent scenes; a plain coloured, non-metal, opaque, untextured material gives its albedo; water and a graph material give none; a textured floor gives its colour times the mean of its base-colour texture in linear space, found once per image) and adds an `irradianceSource` to the environment map: a copy whose lower half is `albedo * (sun * max(l.y, 0) / pi + sky irradiance on a level surface)`. The renderer reads only the diffuse spherical harmonics from that copy (`environment.js`, two lines, plus the key of the prefilter cache in `renderer.js`), so the background, the reflections and the path tracer keep the real sky. The harness applies it to every scene; the agent preview applies it to every frame, with the colour of the automatic floor when no part forms one, and keeps the answer per parts array (`scripts/agent-preview-browser.js`; the browser preview itself was not driven here, only the stubbed page script in `tests/agent-preview.test.js`). It is skipped for a scene with a baked part (the light map already holds the bounce), a closed room (`closedRoomShare`, a bake or its own walls give that light), a point, spot or area light, no map, or `environment.groundBounce: false`; `--no-ground-bounce` draws the suite without it.
+Fix, derived from the scene and not set per scene: `groundBounceEnvironment(parts, environment)` (`src/ground-bounce.js`, `crucible/addons/ground-bounce`) finds the floor (the lowest thin part that spans the scene, the same test as the automatic floor of agent scenes; a plain coloured, non-metal, opaque, untextured material gives its albedo; water and a graph material give none; a textured floor gives its colour times the mean of its base-colour texture in linear space, found once per image) and adds an `irradianceSource` to the environment map: a copy whose lower half is `albedo * (sun * max(l.y, 0) / pi + sky irradiance on a level surface)`. The renderer reads only the diffuse spherical harmonics from that copy (`environment.js`, two lines, plus the key of the prefilter cache in `renderer.js`), so the background, the reflections and the path tracer keep the real sky. The harness applies it to every scene; the agent preview applies it to every frame, with the colour of the automatic floor when no part forms one, and keeps the answer per parts array (`scripts/agent-preview-browser.js`; the browser preview itself was not driven here, only the stubbed page script in `tests/agent-preview.test.js`). It is skipped for a scene with a baked part (the light map already holds the bounce), a closed room (`closedRoomShare`, a bake or its own walls give that light), a point, spot or area light, no map, or `environment.groundBounce: false`; `--no-ground-bounce` draws the suite without it.
 
 What the first version got wrong, kept for the next try: putting the bounced map in the sky itself (background and reflections too) made `brushed-film` 0.0739, `car-paint` 0.0688 and `metal` 0.0701 worse against Cycles, because the 40 m floor ends before the horizon and the band between the floor edge and the horizon showed the ground colour instead of the sky. A diffuse-only copy removes that. A scene lit by point, spot or area lights still got worse (`light-linking` +0.0059, `spot-area` +0.0056 with a 0.01 world): the term counts the sun and the sky only, so on a floor those lights brighten it takes light away from the lower half; those scenes are skipped now.
 
@@ -1148,20 +1148,20 @@ Bundle size: `entry:ground-bounce` is new (9318 bytes gzip, it brings the closed
 Main reproduced `baseline.json` first on the stored arrays (`brick-flat` 0.1264, `brick-graph` 0.1518, EEVEE against Cycles 0.1099 and 0.1221, GPU). Nothing is kept and no engine file, baseline row or budget changed.
 
 - Bump scale per world unit, tried and not kept. The baked map has a slope of `bump / 32` per UV unit; Blender's Bump node with Distance 0.15 has `0.15 * bump / L` per world length `L` of the UV axis, so the wall (6 across, 4 up) needs the existing `normalScale` uniform at `[4.8 / 6, 4.8 / 4]` = `[0.8, 1.2]` (a scale of the map's x and y leaves the slope ratio exact). `brick-graph` against Cycles goes 0.1518 to 0.1525 (worse), against EEVEE 0.0844 to 0.0840, CPU the same; `brick-flat` and `brick-room` are unchanged. The mean scale is still 1, and earlier measurements here show bump strength is not what separates the render from Cycles, so matching the anisotropy does not help. No shader or material field was added for it.
-- Brick-face colour, measured: the gap is light, not the colour path. Mean luminance (display space, tone-mapped like 67js) over the wall, a uniform-colour wall (`brick-flat`) against the graph wall, by region found by projecting the wall back to UV:
+- Brick-face colour, measured: the gap is light, not the colour path. Mean luminance (display space, tone-mapped like Crucible) over the wall, a uniform-colour wall (`brick-flat`) against the graph wall, by region found by projecting the wall back to UV:
 
 | Renderer | flat wall | graph, brick faces (body over 0.95) | faces / flat | graph, mortar (under 0.05) | mortar / flat |
 | --- | --- | --- | --- | --- | --- |
 | Cycles | 0.6149 | 0.5236 | 0.852 | 0.7062 | 1.148 |
 | EEVEE | 0.5600 | 0.4755 | 0.849 | 0.6610 | 1.180 |
-| 67js | 0.5557 | 0.4657 | 0.838 | 0.6295 | 1.133 |
+| Crucible | 0.5557 | 0.4657 | 0.838 | 0.6295 | 1.133 |
 
-  Cycles is 10.7% brighter than 67js and 9.8% brighter than EEVEE on the plain flat wall, with no texture at all, so most of the 0.524 against 0.466 on the brick faces (12.4%) is Cycles-only light, the same offset as in `brick-flat`'s score. Once the flat wall removes it, the face ratios are within 1.6% (0.852, 0.849, 0.838), which is the share the graph's colour path and noise statistics can own. Ramp stops and mix constants are linear on both sides (`element.color` in `render-blender.py` takes linear values and the bake writes `linearToSrgbByte`), the ramp is linear in both, and the Blender noise differs from the 67js one (stated in `render-blender.py`), so a 1.6% face offset cannot be traced further without a Blender run, which this pass did not have. Not changed.
-- Excess of the graph wall over its flat wall, the number #50 asks for: 67js 0.1518 - 0.1264 = 0.0254, EEVEE 0.0122, unchanged.
+  Cycles is 10.7% brighter than Crucible and 9.8% brighter than EEVEE on the plain flat wall, with no texture at all, so most of the 0.524 against 0.466 on the brick faces (12.4%) is Cycles-only light, the same offset as in `brick-flat`'s score. Once the flat wall removes it, the face ratios are within 1.6% (0.852, 0.849, 0.838), which is the share the graph's colour path and noise statistics can own. Ramp stops and mix constants are linear on both sides (`element.color` in `render-blender.py` takes linear values and the bake writes `linearToSrgbByte`), the ramp is linear in both, and the Blender noise differs from the Crucible one (stated in `render-blender.py`), so a 1.6% face offset cannot be traced further without a Blender run, which this pass did not have. Not changed.
+- Excess of the graph wall over its flat wall, the number #50 asks for: Crucible 0.1518 - 0.1264 = 0.0254, EEVEE 0.0122, unchanged.
 
 ## Shadow depth against Cycles, remeasured on main (2026-11-03, part of issue #197)
 
-Main at `e4bdee9` (after #222, #224, #226, #234, #236, #238 and the ground bounce of #245), GPU, 960 x 540. The GPU FLIP columns of `baseline.json` reproduce to four digits for all 23 scenes (only `gpu-vs-cpu` of two scenes moved, 0.0001 to 0.0017). Measured with `bench/reference/shadow-depth.py` against the Cycles arrays of the earlier runs (the re-rendered `megacity-dusk-a` and `-b` arrays); luminance is in display space. Percentiles are 67js / Cycles. `floor` is the shadow-tile floor, 67js over Cycles (above 1 means the shadows are too light), `contrast` is log2 of lit over shadowed in the same 24 pixel tile, 67js / Cycles, and `edge` is the median width of the lit-to-shadow transition in pixels, far half / near half of the frame, 67js / Cycles.
+Main at `e4bdee9` (after #222, #224, #226, #234, #236, #238 and the ground bounce of #245), GPU, 960 x 540. The GPU FLIP columns of `baseline.json` reproduce to four digits for all 23 scenes (only `gpu-vs-cpu` of two scenes moved, 0.0001 to 0.0017). Measured with `bench/reference/shadow-depth.py` against the Cycles arrays of the earlier runs (the re-rendered `megacity-dusk-a` and `-b` arrays); luminance is in display space. Percentiles are Crucible / Cycles. `floor` is the shadow-tile floor, Crucible over Cycles (above 1 means the shadows are too light), `contrast` is log2 of lit over shadowed in the same 24 pixel tile, Crucible / Cycles, and `edge` is the median width of the lit-to-shadow transition in pixels, far half / near half of the frame, Crucible / Cycles.
 
 | Scene | p1 | p5 | p25 | floor | contrast | edge far | edge near |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1281,9 +1281,9 @@ Engine code reverted; `baseline.json` is unchanged. Next idea, if this is taken 
 
 ## Where the rest of `metal` sits, and a metal mirror in the probe trace, measured and not kept (2026-11-03, part of issue #167)
 
-`bench/reference/region-errors.py <scene> [gpu|cpu]` splits the FLIP error map of a scene by what each pixel shows. It draws each part's triangles back to front with the scene's camera (the floor quad reaches behind the camera, so the floor is the uncovered pixels below the horizon), then prints share, mean error and luminance per region for 67js and EEVEE against Cycles. GPU render, same arrays as the baseline (67js 0.0944, EEVEE 0.0916); the shares of the error are of the error map's own total (its mean is 0.1053, a little above the 0.0944 of the scorer, so use the shares and not the absolute values):
+`bench/reference/region-errors.py <scene> [gpu|cpu]` splits the FLIP error map of a scene by what each pixel shows. It draws each part's triangles back to front with the scene's camera (the floor quad reaches behind the camera, so the floor is the uncovered pixels below the horizon), then prints share, mean error and luminance per region for Crucible and EEVEE against Cycles. GPU render, same arrays as the baseline (Crucible 0.0944, EEVEE 0.0916); the shares of the error are of the error map's own total (its mean is 0.1053, a little above the 0.0944 of the scorer, so use the shares and not the absolute values):
 
-| Region | Frame share | FLIP 67js | FLIP EEVEE | Share of 67js error | Display luminance 67js / Cycles / EEVEE |
+| Region | Frame share | FLIP Crucible | FLIP EEVEE | Share of Crucible error | Display luminance Crucible / Cycles / EEVEE |
 | --- | --- | --- | --- | --- | --- |
 | Floor, open | 0.632 | 0.0883 | 0.0745 | 53% | 0.677 / 0.679 / 0.677 |
 | Chrome sphere | 0.059 | 0.2430 | 0.2056 | 13% | 0.654 / 0.627 / 0.629 |
@@ -1293,7 +1293,7 @@ Engine code reverted; `baseline.json` is unchanged. Next idea, if this is taken 
 | Sky | 0.161 | 0.0148 | 0.0098 | 2% | 0.860 / 0.860 / 0.860 |
 | Floor front edge | 0.006 | 0.1200 | 0.0838 | 1% | 0.672 / 0.687 / 0.683 |
 
-67js already beats EEVEE on the gold torus (0.0124 against 0.0162 of the frame mean) and the copper cube (0.0125 against 0.0185). EEVEE leads on the open floor (0.0087 of the frame), the chrome sphere (0.0022), the steel cylinder (0.0019) and the sky (0.0008). The floor has the largest gap and no luminance gap (0.677 against 0.679), so what is left there is structure (the shadow shapes and the halo of bounced light around the parts), as #241 found. The steel cylinder is 0.017 too dark and the chrome sphere 0.027 too bright.
+Crucible already beats EEVEE on the gold torus (0.0124 against 0.0162 of the frame mean) and the copper cube (0.0125 against 0.0185). EEVEE leads on the open floor (0.0087 of the frame), the chrome sphere (0.0022), the steel cylinder (0.0019) and the sky (0.0008). The floor has the largest gap and no luminance gap (0.677 against 0.679), so what is left there is structure (the shadow shapes and the halo of bounced light around the parts), as #241 found. The steel cylinder is 0.017 too dark and the chrome sphere 0.027 too bright.
 
 Change tried: in the probe trace, a hit on a metal part returns what that part mirrors toward the probe, times the metal's colour: the environment when the mirrored ray leaves the scene, else the direct and sky light of the part it meets (no further bounce). Either added to the diffuse term or in place of its metallic share. SwiftShader, `metal`, same Cycles arrays:
 
@@ -1308,11 +1308,11 @@ The best of them is 0.0004 better, which is inside what the choice of gain alone
 
 Next idea: the open floor is more than half of the error and the largest gap, and a surface-level cause there needs a new input (light the metal parts reflect onto the floor, which a diffuse bounce leaves out), for example a few traced caustic-like patches stamped into the ground bounce.
 
-## Same quantisation for 67js and EEVEE (2026-11-03, #258)
+## Same quantisation for Crucible and EEVEE (2026-11-03, #258)
 
-The scorer read 67js back as an 8-bit PNG but scored EEVEE from a float array, so every 67js against EEVEE number carried the rounding of one side only. `score.py` now rounds the EEVEE array to 8 bits in display space (`load_eevee`), which is what writing the PNG does. Cycles stays float, because it is the reference both are measured against. The alternative, reading 67js back as float, would need a float readback path in the harness for a measurement of the same size, and the PNG is what the 67js columns already use. `tests/reference-quantisation.test.js` pins the loader against an 8-bit PNG round trip.
+The scorer read Crucible back as an 8-bit PNG but scored EEVEE from a float array, so every Crucible against EEVEE number carried the rounding of one side only. `score.py` now rounds the EEVEE array to 8 bits in display space (`load_eevee`), which is what writing the PNG does. Cycles stays float, because it is the reference both are measured against. The alternative, reading Crucible back as float, would need a float readback path in the harness for a measurement of the same size, and the PNG is what the Crucible columns already use. `tests/reference-quantisation.test.js` pins the loader against an 8-bit PNG round trip.
 
-The EEVEE columns were regenerated from the stored Cycles and EEVEE arrays and the stored 67js PNGs of the baseline run, without rendering. A cell is replaced only where the old scorer on those stored files reproduces the committed number, so the 67js columns (gpu-vs-cycles, cpu-vs-cycles, gpu-vs-cpu) are untouched. Scene order against EEVEE does not flip in any scene; `metal` goes from EEVEE ahead (0.0916 against 0.0944) to a tie at 0.0944.
+The EEVEE columns were regenerated from the stored Cycles and EEVEE arrays and the stored Crucible PNGs of the baseline run, without rendering. A cell is replaced only where the old scorer on those stored files reproduces the committed number, so the Crucible columns (gpu-vs-cycles, cpu-vs-cycles, gpu-vs-cpu) are untouched. Scene order against EEVEE does not flip in any scene; `metal` goes from EEVEE ahead (0.0916 against 0.0944) to a tie at 0.0944.
 
 | scene | eevee-vs-cycles | gpu-vs-eevee |
 | --- | --- | --- |
@@ -1342,24 +1342,24 @@ Not regenerated, still on the old float basis: `cpu-vs-eevee` for most scenes, `
 
 ## Where `foliage` loses to EEVEE, by region (2026-11-03, part of issue #191)
 
-Nothing in the engine changed; `baseline.json` is unchanged. The GPU was held for the whole session by a long Blender render (`gpu-lock.sh` queue), so only the stored arrays were analysed and no fix was tried on a render. Method: `bench/reference/region-errors.py foliage gpu` (67js 0.0979, EEVEE 0.0888, against Cycles), then the same FLIP error map cut finer (distance from the silhouette, Cycles luminance of the pixel). The shares are of the frame; the gap is the contribution of 67js minus the contribution of EEVEE to the frame mean:
+Nothing in the engine changed; `baseline.json` is unchanged. The GPU was held for the whole session by a long Blender render (`gpu-lock.sh` queue), so only the stored arrays were analysed and no fix was tried on a render. Method: `bench/reference/region-errors.py foliage gpu` (Crucible 0.0979, EEVEE 0.0888, against Cycles), then the same FLIP error map cut finer (distance from the silhouette, Cycles luminance of the pixel). The shares are of the frame; the gap is the contribution of Crucible minus the contribution of EEVEE to the frame mean:
 
-| Region | Frame share | FLIP 67js / EEVEE | Gap to EEVEE | Display luminance 67js / Cycles / EEVEE |
+| Region | Frame share | FLIP Crucible / EEVEE | Gap to EEVEE | Display luminance Crucible / Cycles / EEVEE |
 | --- | --- | --- | --- | --- |
 | Crown (`broadleaf foliage`) | 0.167 | 0.3037 / 0.2805 | +0.0039 | 0.395 / 0.377 / 0.427 |
 | Open floor | 0.459 | 0.0988 / 0.0931 | +0.0026 | 0.735 / 0.730 / 0.736 |
 | Sky | 0.364 | 0.0157 / 0.0101 | +0.0020 | 0.829 / 0.829 / 0.829 |
 | Bark and the floor part | 0.010 | 0.2016 / 0.1792 | +0.0002 | |
 
-The sky and the open floor have the same luminance as Cycles, and their gap is almost all 8-bit rounding. The 67js frame is an 8-bit PNG while the Cycles and EEVEE arrays are floats: in the flat sky 67js differs from Cycles by 0.0010 per channel (mean absolute, the value of uniform rounding) and EEVEE by 0.0002, and the sky error is 0.0157 against 0.0101. The floor lit by the sun (Cycles luminance 0.7 to 0.8) shows the same offset (0.0854 against 0.0796). Rounding the EEVEE array to 8 bits and rescoring: EEVEE 0.0888 becomes 0.0924, so 0.0036 of the 0.0091 gap is the format of the comparison, not a rendering error, and no shader can remove it. The remaining gap is 0.0055.
+The sky and the open floor have the same luminance as Cycles, and their gap is almost all 8-bit rounding. The Crucible frame is an 8-bit PNG while the Cycles and EEVEE arrays are floats: in the flat sky Crucible differs from Cycles by 0.0010 per channel (mean absolute, the value of uniform rounding) and EEVEE by 0.0002, and the sky error is 0.0157 against 0.0101. The floor lit by the sun (Cycles luminance 0.7 to 0.8) shows the same offset (0.0854 against 0.0796). Rounding the EEVEE array to 8 bits and rescoring: EEVEE 0.0888 becomes 0.0924, so 0.0036 of the 0.0091 gap is the format of the comparison, not a rendering error, and no shader can remove it. The remaining gap is 0.0055.
 
-Inside the crown, by the Cycles luminance of the pixel (contribution to the frame mean, 67js / EEVEE): pixels under 0.15 (share 0.063) 0.0227 / 0.0261, 67js better; 0.15 to 0.5 (0.047) 0.0187 / 0.0170; over 0.5 (0.057, sunlit leaves) 0.0094 / 0.0038. The mean crown luminance is closer to Cycles in 67js (+0.019) than in EEVEE (+0.050). So the level is right and the loss is where individual bright leaves sit: in pixels Cycles draws as lit leaf, 67js has error 0.167 against 0.067, while its shaded leaves beat EEVEE. This is the leaf shape and placement cause #191 already named; the edge of the silhouette (3 px) is only 0.0007 of the frame.
+Inside the crown, by the Cycles luminance of the pixel (contribution to the frame mean, Crucible / EEVEE): pixels under 0.15 (share 0.063) 0.0227 / 0.0261, Crucible better; 0.15 to 0.5 (0.047) 0.0187 / 0.0170; over 0.5 (0.057, sunlit leaves) 0.0094 / 0.0038. The mean crown luminance is closer to Cycles in Crucible (+0.019) than in EEVEE (+0.050). So the level is right and the loss is where individual bright leaves sit: in pixels Cycles draws as lit leaf, Crucible has error 0.167 against 0.067, while its shaded leaves beat EEVEE. This is the leaf shape and placement cause #191 already named; the edge of the silhouette (3 px) is only 0.0007 of the frame.
 
-Next idea: the crown needs a per-card measurement, for example the Cycles array against 67js with the same leaf card in each pixel (a card id image from the harness), to see whether the bright-leaf error is cards missing, shifted or too dark; and the scorer could report the 8-bit EEVEE figure beside the float one so "beats EEVEE" compares like with like. Neither was tried. The first box of #191 stays open.
+Next idea: the crown needs a per-card measurement, for example the Cycles array against Crucible with the same leaf card in each pixel (a card id image from the harness), to see whether the bright-leaf error is cards missing, shifted or too dark; and the scorer could report the 8-bit EEVEE figure beside the float one so "beats EEVEE" compares like with like. Neither was tried. The first box of #191 stays open.
 
 ## Every cell regenerated with the 8-bit EEVEE scorer (2026-11-03, #258)
 
-`npm run reference -- --skip-blender` and `npm run reference -- --grand --skip-blender` drew 67js on the GPU and with SwiftShader and scored every cell of `baseline.json` and `grand.json` with the current `score.py`, against the stored Cycles and EEVEE arrays of the earlier Blender runs. Blender was not run, so the `seconds` rows are as they were. The grand EEVEE arrays come from the earlier grand run that holds all nine frames (its Cycles arrays are identical to the ones used before). The tables show old to new; "same" means the cell did not change. In the default suite 24 of 150 cells changed, in the grand suite 51 of 54.
+`npm run reference -- --skip-blender` and `npm run reference -- --grand --skip-blender` drew Crucible on the GPU and with SwiftShader and scored every cell of `baseline.json` and `grand.json` with the current `score.py`, against the stored Cycles and EEVEE arrays of the earlier Blender runs. Blender was not run, so the `seconds` rows are as they were. The grand EEVEE arrays come from the earlier grand run that holds all nine frames (its Cycles arrays are identical to the ones used before). The tables show old to new; "same" means the cell did not change. In the default suite 24 of 150 cells changed, in the grand suite 51 of 54.
 
 ### Default suite
 
@@ -1389,9 +1389,9 @@ Next idea: the crown needs a per-card measurement, for example the Cycles array 
 | spot-area | same | same | same | same | same | 0.1712 to 0.1689 |
 | temple-hall | same | same | same | same | same | same |
 
-One 67js column moved by more than 0.002: `long-street` `cpu-vs-cycles`, 0.115 to 0.1125. Its `gpu-vs-cycles` is the same, so it is the SwiftShader frame, and the committed CPU cells of that scene were already stale (`cpu-vs-eevee` 0.0919 against 0.1147 now). `megacity-dusk` `cpu-vs-cycles` moved 0.0009, below the threshold. Every GPU 67js column against Cycles is the same to four digits, so the scorer change did not touch them.
+One Crucible column moved by more than 0.002: `long-street` `cpu-vs-cycles`, 0.115 to 0.1125. Its `gpu-vs-cycles` is the same, so it is the SwiftShader frame, and the committed CPU cells of that scene were already stale (`cpu-vs-eevee` 0.0919 against 0.1147 now). `megacity-dusk` `cpu-vs-cycles` moved 0.0009, below the threshold. Every GPU Crucible column against Cycles is the same to four digits, so the scorer change did not touch them.
 
-`foliage`: 67js 0.0979 against Cycles, EEVEE 0.0924 against Cycles; against EEVEE itself 0.0771 on the GPU, 0.0753 on the CPU. `metal`: 67js 0.0944 against Cycles, EEVEE 0.0944 (a tie, as in the section above); against EEVEE itself 0.0806 on the GPU, 0.0797 on the CPU.
+`foliage`: Crucible 0.0979 against Cycles, EEVEE 0.0924 against Cycles; against EEVEE itself 0.0771 on the GPU, 0.0753 on the CPU. `metal`: Crucible 0.0944 against Cycles, EEVEE 0.0944 (a tie, as in the section above); against EEVEE itself 0.0806 on the GPU, 0.0797 on the CPU.
 
 ### Grand suite
 
@@ -1407,11 +1407,11 @@ One 67js column moved by more than 0.002: `long-street` `cpu-vs-cycles`, 0.115 t
 | temple-hall-b | 0.3642 to 0.1564 | 0.3644 to 0.1567 | 0.0054 to 0.0044 | 0.4743 to 0.4747 | 0.234 to 0.4573 | 0.2335 to 0.457 |
 | temple-hall-c | 0.2746 to 0.1177 | 0.2749 to 0.118 | 0.0028 to 0.0025 | 0.3989 to 0.3992 | 0.2216 to 0.3682 | 0.2213 to 0.3679 |
 
-The EEVEE-against-Cycles column barely moves (at most 0.0037), so the references are the ones the old numbers used. The 67js columns moved a lot: 17 cells by more than 0.002, up to 0.21 (`temple-hall-b` against Cycles 0.3642 to 0.1564, `megacity-dusk-a` 0.1507 to 0.1989). That is not the scorer, which changes only the EEVEE columns by a few thousandths. It is 67js drawing these scenes differently from the run that wrote the old `grand.json`, which was written before the water and river commits (#195, #232) and other work on main (inferred from the commit history; the individual cause of each scene was not isolated). These are the numbers of main as of this run.
+The EEVEE-against-Cycles column barely moves (at most 0.0037), so the references are the ones the old numbers used. The Crucible columns moved a lot: 17 cells by more than 0.002, up to 0.21 (`temple-hall-b` against Cycles 0.3642 to 0.1564, `megacity-dusk-a` 0.1507 to 0.1989). That is not the scorer, which changes only the EEVEE columns by a few thousandths. It is Crucible drawing these scenes differently from the run that wrote the old `grand.json`, which was written before the water and river commits (#195, #232) and other work on main (inferred from the commit history; the individual cause of each scene was not isolated). These are the numbers of main as of this run.
 
 ## Sampling the base map one mip finer for alpha cutouts, measured and not kept (2026-11-03, part of issue #191)
 
-Hypothesis from the region analysis above: 67js draws leaves where Cycles has sky along card edges and tips, because the averaged alpha of a coarse mip level can sit above the cutoff on a thin leaflet. The change: `texture(baseMap, textureUV, -1.0)` in the base-map sample, for `alphaMode` mask only (opaque and blend untouched).
+Hypothesis from the region analysis above: Crucible draws leaves where Cycles has sky along card edges and tips, because the averaged alpha of a coarse mip level can sit above the cutoff on a thin leaflet. The change: `texture(baseMap, textureUV, -1.0)` in the base-map sample, for `alphaMode` mask only (opaque and blend untouched).
 
 Measured with the stored Cycles and EEVEE arrays, `npm run reference -- --skip-blender --scene foliage` on the GPU, then `--score-only` for the whole default suite:
 
@@ -1426,11 +1426,11 @@ Not tried: preserving alpha coverage across mips at load, and alpha to coverage 
 
 ## The foliage crown's lit leaves: coverage, not shading (2026-11-03, part of issue #191)
 
-No engine change was kept and `baseline.json` is unchanged. Method: the crown is the card pixels of `broadleaf foliage` (label image of `region-errors.py`, 86,646 pixels); a pixel is leaf when it is green-dominant (green at least red, green at least blue + 0.02) or darker than 0.25, in Cycles and in each renderer separately. Sun-lit Cycles leaf is a Cycles display luminance above 0.35 (12,456 pixels). The stored 67js GPU render and a `render-gpu.mjs --key 0` render (sun off) were used. Each lit Cycles pixel is classed by what the renderer shows there: (a) no leaf, (b) leaf more than 0.10 darker, (c) more than 0.10 brighter, (d) within 0.10. Contribution is the FLIP sum over the frame.
+No engine change was kept and `baseline.json` is unchanged. Method: the crown is the card pixels of `broadleaf foliage` (label image of `region-errors.py`, 86,646 pixels); a pixel is leaf when it is green-dominant (green at least red, green at least blue + 0.02) or darker than 0.25, in Cycles and in each renderer separately. Sun-lit Cycles leaf is a Cycles display luminance above 0.35 (12,456 pixels). The stored Crucible GPU render and a `render-gpu.mjs --key 0` render (sun off) were used. Each lit Cycles pixel is classed by what the renderer shows there: (a) no leaf, (b) leaf more than 0.10 darker, (c) more than 0.10 brighter, (d) within 0.10. Contribution is the FLIP sum over the frame.
 
 An earlier cut of this analysis, which called "lit" a Cycles luminance above 0.5, was mostly sky seen through gaps in the cards (Cycles luminance 0.83) and is wrong; the 0.167 against 0.067 of the section above carries the same contamination.
 
-| Class (lit Cycles leaf) | 67js pixels (share) | 67js contribution | EEVEE pixels (share) | EEVEE contribution |
+| Class (lit Cycles leaf) | Crucible pixels (share) | Crucible contribution | EEVEE pixels (share) | EEVEE contribution |
 | --- | --- | --- | --- | --- |
 | (a) no leaf | 929 (0.075) | 0.0010 | 114 (0.009) | 0.0001 |
 | (b) too dark | 2,359 (0.189) | 0.0024 | 2,071 (0.166) | 0.0024 |
@@ -1438,9 +1438,9 @@ An earlier cut of this analysis, which called "lit" a Cycles luminance above 0.5
 | (d) within 0.10 | 8,947 (0.718) | 0.0039 | 10,176 (0.817) | 0.0035 |
 | leaf here, sky in Cycles (whole crown) | 1,862 | 0.0022 | 118 | 0.0001 |
 
-- Lit leaves lose to EEVEE by 0.0014 (0.0075 against 0.0061). Of that, missing leaf (a) is 0.0009, brightness (c) 0.0001, the rest of the leaves 0.0004, and too-dark leaves (b) nothing: EEVEE has the same count and the same error. Counting the leaf 67js draws on sky pixels of Cycles (0.0022 against 0.0001), the card coverage accounts for more than the whole gap; 67js wins on the darkest crown pixels (0.0197 against 0.0236).
-- So the dominant class is coverage: leaf mask mismatch against Cycles is 6,073 pixels in 67js and 2,864 in EEVEE, in a window of the crown (75,890 Cycles leaf pixels; 67js 73,567, EEVEE 73,288). 67js misses 4,198 Cycles leaf pixels (EEVEE 2,733) and draws 1,875 that Cycles does not (EEVEE 131). It is not one shift: the best integer shift of the mask is 0 to 3 pixels left and differs by quadrant, and it removes at most 30 percent of the mismatch in any one of them. The mismatch is along leaf edges and tips (about 60 percent within a pixel of the other mask).
-- Shading is not it. The too-dark leaves (b) get 0.163 of linear-ish luminance from the sun in 67js (the sun-off render is 0.080 against 0.244 with the sun) against 0.448 in Cycles, and EEVEE has the same count. The lit leaves that 67js gets right take 0.232 from the sun. Leaf transmission and normals are not what separates 67js from EEVEE.
+- Lit leaves lose to EEVEE by 0.0014 (0.0075 against 0.0061). Of that, missing leaf (a) is 0.0009, brightness (c) 0.0001, the rest of the leaves 0.0004, and too-dark leaves (b) nothing: EEVEE has the same count and the same error. Counting the leaf Crucible draws on sky pixels of Cycles (0.0022 against 0.0001), the card coverage accounts for more than the whole gap; Crucible wins on the darkest crown pixels (0.0197 against 0.0236).
+- So the dominant class is coverage: leaf mask mismatch against Cycles is 6,073 pixels in Crucible and 2,864 in EEVEE, in a window of the crown (75,890 Cycles leaf pixels; Crucible 73,567, EEVEE 73,288). Crucible misses 4,198 Cycles leaf pixels (EEVEE 2,733) and draws 1,875 that Cycles does not (EEVEE 131). It is not one shift: the best integer shift of the mask is 0 to 3 pixels left and differs by quadrant, and it removes at most 30 percent of the mismatch in any one of them. The mismatch is along leaf edges and tips (about 60 percent within a pixel of the other mask).
+- Shading is not it. The too-dark leaves (b) get 0.163 of linear-ish luminance from the sun in Crucible (the sun-off render is 0.080 against 0.244 with the sun) against 0.448 in Cycles, and EEVEE has the same count. The lit leaves that Crucible gets right take 0.232 from the sun. Leaf transmission and normals are not what separates Crucible from EEVEE.
 - Candidate not run: the leaf texture is read with trilinear mip filtering and cut at alpha 0.5, so thin leaflets and tips fall under the cutoff at a coarse level, while Cycles reads the full-size image. Reading cutout materials one mip level finer (`texture(baseMap, uv, -1.0)` for `alphaMode` mask) is a one-line change, written but not measured because the GPU lock was held by another job for 35 minutes of waiting (the queued render was cancelled). It also touches grass and every other cutout, so it needs the full default and `--grand` suites before it is kept.
 
 ## Soft leaf edges: alpha to coverage is already on, coverage-preserving mips did not help (2026-11-03, part of issue #191)
@@ -1451,9 +1451,9 @@ The second option was tried: for alpha-mask materials only, the base map got its
 
 | `foliage` | before | coverage-preserving mips |
 | --- | --- | --- |
-| 67js against Cycles (GPU) | 0.0979 | 0.0981 |
-| 67js against Cycles (CPU) | 0.0976 | 0.0977 |
-| 67js against EEVEE (GPU) | 0.0771 | 0.0769 |
+| Crucible against Cycles (GPU) | 0.0979 | 0.0981 |
+| Crucible against Cycles (CPU) | 0.0976 | 0.0977 |
+| Crucible against EEVEE (GPU) | 0.0771 | 0.0769 |
 | EEVEE against Cycles | 0.0924 | 0.0924 |
 
 Worse by 0.0002 against Cycles, so the default suite and `--grand` were not run and the code was reverted. Reading (inferred): the lost coverage is at full-size edges, not at coarse mips, since the crown is seen at about one texel per pixel; keeping more coverage in the coarse levels cannot reach it. Same direction as the one mip finer attempt (0.0979 to 0.0982). Next idea: match Cycles' edge softness at level 0 (a slightly blurred alpha, or the leaf alpha edge drawn with a ramp wider than a texel) instead of changing the mips.
@@ -1462,9 +1462,9 @@ Worse by 0.0002 against Cycles, so the default suite and `--grand` were not run 
 
 Main (merged with `origin/main` of the day) on the stored Cycles and EEVEE arrays, GPU, 960 x 540. Before: `brick-graph` 0.0967 against Cycles in a fresh render (0.0982 in the committed row), `brick-flat` 0.0547, so the excess of the graph wall over the flat wall was 0.0420 (0.0435 by the committed rows) against EEVEE's 0.0120 (0.1249 against 0.1129).
 
-The split, with Blender renders of each variant too (temporary scene variants, not committed; each row is 67js against Cycles of the same variant, FLIP, lower is better; the flat wall is the average colour of the graph):
+The split, with Blender renders of each variant too (temporary scene variants, not committed; each row is Crucible against Cycles of the same variant, FLIP, lower is better; the flat wall is the average colour of the graph):
 
-| Variant | 67js | EEVEE | 67js over flat | EEVEE over flat |
+| Variant | Crucible | EEVEE | Crucible over flat | EEVEE over flat |
 | --- | --- | --- | --- | --- |
 | flat wall | 0.0547 | 0.1129 | | |
 | colour only (bump off) | 0.0735 | 0.1194 | +0.0188 | +0.0065 |
@@ -1475,15 +1475,15 @@ Colour is about +0.019 and bump about +0.028; the earlier split (+0.010 and +0.0
 
 Parity of the Blender material with the graph, checked line by line: Bump node Distance 0.15 times `graphBump`, strength 1, not inverted, height into Bump (not Displacement), normal into the Principled Normal; Colour Ramp linear with linear stop colours; the bake writes `linearToSrgbByte` and the map is sampled as sRGB, so mix and ramp are evaluated linearly on both sides; the UVs agree (v flipped in the mesh, undone in the translator). The slope is bump / 32 per UV unit in the bake and `0.15 * bump` per world unit in Blender, which is 0.8 and 1.2 of it along U and V on the 6 by 4 wall and was measured to be worth about 0.0003 earlier. No mismatch in the export, so the Blender side and its renders are unchanged.
 
-The mismatch that is in the compiler: the bake read the slope by a central difference over two baked texels, so a joint edge a texel thin became three texels wide, and the bands of a bevel were wider than Blender's, whose Bump node reads a footprint of 0.1 pixel. `bakeMaterialGraph` now evaluates the height function half a texel either side of each texel centre (`normalMapFromHeightFunction`), with the same slope scale per UV unit. Step in texels against 67js GPU, FLIP of `brick-graph` against Cycles (against EEVEE): 2 texels 0.1060 (0.0978), 1 texel (the old bake) 0.0967 (0.0973), 0.5 texel 0.0933 (0.0994), 0.25 texel 0.0931 (0.1010). The half texel is kept: the quarter texel gains 0.0002 and moves the render further from EEVEE.
+The mismatch that is in the compiler: the bake read the slope by a central difference over two baked texels, so a joint edge a texel thin became three texels wide, and the bands of a bevel were wider than Blender's, whose Bump node reads a footprint of 0.1 pixel. `bakeMaterialGraph` now evaluates the height function half a texel either side of each texel centre (`normalMapFromHeightFunction`), with the same slope scale per UV unit. Step in texels against Crucible GPU, FLIP of `brick-graph` against Cycles (against EEVEE): 2 texels 0.1060 (0.0978), 1 texel (the old bake) 0.0967 (0.0973), 0.5 texel 0.0933 (0.0994), 0.25 texel 0.0931 (0.1010). The half texel is kept: the quarter texel gains 0.0002 and moves the render further from EEVEE.
 
 After the change: `brick-graph` 0.0933 (GPU) and 0.0930 (CPU) against Cycles, 0.0994 against EEVEE; `brick-flat` 0.0547. Excess over the flat wall 0.0386, was 0.0420 on the same renders, against EEVEE's 0.0120, so the first Done-when box of #50 stays open (gap 0.0266). Only `brick-graph` reads a graph. The full default run and the `--grand` run scored every other scene within 0.002 of main or better (`mountain-valley` 0.1769 to 0.1693 and the grand mountain-valley rows improved from other work on main; none is worse). The bundle budgets of the three `agent-scene` and `agent-asset` lazy entries were raised to the measured size plus 20 bytes (3 lines of `bench/size/budgets.json`). `emissive-sign` (new on main) had no Cycles render in the stored arrays and was rendered here to complete the run (0.2372 against Cycles); its row is not committed in this change.
 
-What is left is not in the bake. On the bump-only wall across the dark side of a joint, luminance (display space) is 0.25 at the darkest pixel in Cycles, 0.34 in EEVEE and 0.37 in 67js, against 0.62 on the flat wall: EEVEE and 67js agree with each other and Cycles is darker. That is a shading difference on a normal tilted about 70 degrees from the surface, in the lighting of `src/shaders.js`, which this change does not touch; it needs the engine session.
+What is left is not in the bake. On the bump-only wall across the dark side of a joint, luminance (display space) is 0.25 at the darkest pixel in Cycles, 0.34 in EEVEE and 0.37 in Crucible, against 0.62 on the flat wall: EEVEE and Crucible agree with each other and Cycles is darker. That is a shading difference on a normal tilted about 70 degrees from the surface, in the lighting of `src/shaders.js`, which this change does not touch; it needs the engine session.
 
 ## The graph noise node is Blender's Noise Texture (2026-11-04, part of issue #50, RTX 3060 960 x 540)
 
-The brick-tone error of `brick-graph` was a pattern error: the `noise` node was a periodic gradient noise with its own hash, so its blotches sat in other places than Cycles' and EEVEE's. Blender 5.2.2 headless baked its Noise Texture (2D, Fac) over the unit square to float arrays (Cycles on the CPU, 1 sample, filter 0.01, `Geometry > Position` as the vector), and the 67js node (`tile: false`) was evaluated at the same pixel centres, 256 x 256.
+The brick-tone error of `brick-graph` was a pattern error: the `noise` node was a periodic gradient noise with its own hash, so its blotches sat in other places than Cycles' and EEVEE's. Blender 5.2.2 headless baked its Noise Texture (2D, Fac) over the unit square to float arrays (Cycles on the CPU, 1 sample, filter 0.01, `Geometry > Position` as the vector), and the Crucible node (`tile: false`) was evaluated at the same pixel centres, 256 x 256.
 
 | Property | Before | Blender 5.2 | Now |
 | --- | --- | --- | --- |
@@ -1537,7 +1537,7 @@ Scored on the GPU through `raster-only.mjs` and FLIP against the Cycles and EEVE
 
 Not scored, because the result is known without a render: the fill lights (`fillIntensity` is 0 in this scene, so the term is zero) and the sky and environment specular (`occlusion`, which already carries the horizon share, multiplies the environment diffuse and the environment specular together, so that clip is already there). The wall faces the sun, so a soft terminator clip is a no-op and the literal product only darkens the whole lit wall.
 
-Nothing is kept: `h^2.5` is 0.0002 better, inside the spread between runs, and pushes the darkest pixel past Cycles, so the exponent is at its optimum between 2 and 2.5. The remaining 0.0324 is not shading at the joint. The FLIP error map of 67js on the wall is the blotchy low-frequency brick tone inside each brick (inferred from the error map, not isolated: the noise through the colour ramp, which the two renderers may evaluate differently), while EEVEE's error is an almost uniform offset of its darker flat wall (0.560 against 0.615), which FLIP charges less than misplaced detail. The excess over the flat wall therefore compares a pattern error with a brightness offset, and a shader change at the joint cannot close it. No source file changed, so no size or suite number moved.
+Nothing is kept: `h^2.5` is 0.0002 better, inside the spread between runs, and pushes the darkest pixel past Cycles, so the exponent is at its optimum between 2 and 2.5. The remaining 0.0324 is not shading at the joint. The FLIP error map of Crucible on the wall is the blotchy low-frequency brick tone inside each brick (inferred from the error map, not isolated: the noise through the colour ramp, which the two renderers may evaluate differently), while EEVEE's error is an almost uniform offset of its darker flat wall (0.560 against 0.615), which FLIP charges less than misplaced detail. The excess over the flat wall therefore compares a pattern error with a brightness offset, and a shader change at the joint cannot close it. No source file changed, so no size or suite number moved.
 
 ## Named looks for the grand scenes (2026-11-03, part of issue #168)
 
@@ -1558,19 +1558,19 @@ Terrain shape: the rim is rounded massifs (erosion noise) with a little ridged n
 
 ## The three picked looks are the grand scenes (2026-11-04, issue #168)
 
-An picked `mountain-valley:dawn`, `temple-hall:rose` and `megacity-dusk:blue-hour`. `GRAND_PICKS` in `look-options.js` adds them to the grand set (`?set=grand`), so `node bench/reference/run.mjs --grand --scene mountain-valley-dawn,temple-hall-rose,megacity-dusk-blue-hour` draws them and Blender renders them; the option names still work. Their entries sit in `grand.json` beside the letter variants, which are unchanged, and the old plain scenes are replaced by these picks (no old against new comparison is kept). `final-sheet.py` writes the contact sheet of the 67js and Cycles frames.
+An picked `mountain-valley:dawn`, `temple-hall:rose` and `megacity-dusk:blue-hour`. `GRAND_PICKS` in `look-options.js` adds them to the grand set (`?set=grand`), so `node bench/reference/run.mjs --grand --scene mountain-valley-dawn,temple-hall-rose,megacity-dusk-blue-hour` draws them and Blender renders them; the option names still work. Their entries sit in `grand.json` beside the letter variants, which are unchanged, and the old plain scenes are replaced by these picks (no old against new comparison is kept). `final-sheet.py` writes the contact sheet of the Crucible and Cycles frames.
 
 Facade fix: the lit windows of `facadeMaterial` came from a voronoi, whose cells cut the 6 by 10 window grid into shards. A noise read at the centre of each window cell now lights a window as a whole, in drifts, and both noises use `"tile": false` so `render-blender.py` builds the same nodes.
 
 FLIP mean error, lower is better (measured, one run, Blender 5.2.2, 960 by 540):
 
-| Scene | 67js GPU vs Cycles | 67js GPU vs EEVEE | EEVEE vs Cycles |
+| Scene | Crucible GPU vs Cycles | Crucible GPU vs EEVEE | EEVEE vs Cycles |
 | --- | --- | --- | --- |
 | `mountain-valley-dawn` | 0.2008 | 0.3720 | 0.3039 |
 | `temple-hall-rose` | 0.5652 | 0.5727 | 0.8878 |
 | `megacity-dusk-blue-hour` | 0.1128 | 0.1081 | 0.0688 |
 
-Known gaps shown on purpose, not hidden by a per-scene setting: the dark band of mid-distance trees in the dawn frame is a 67js defect (the lower tree levels shade near black under sky light and a low sun, issue #394); the temple hall is lit flat in 67js while Cycles leaves it dark, the closed-room-without-bake gap (an open roof is not a bake). The hall has an opt-in for it: `--bake temple-hall-rose` bakes it on the GPU (see below), which takes `temple-hall-rose` from 0.5652 to 0.1181 against Cycles (and makes EEVEE worse, 0.5727 to 0.9019, because EEVEE has no indirect light here); the committed rows above are the plain scene.
+Known gaps shown on purpose, not hidden by a per-scene setting: the dark band of mid-distance trees in the dawn frame is a Crucible defect (the lower tree levels shade near black under sky light and a low sun, issue #394); the temple hall is lit flat in Crucible while Cycles leaves it dark, the closed-room-without-bake gap (an open roof is not a bake). The hall has an opt-in for it: `--bake temple-hall-rose` bakes it on the GPU (see below), which takes `temple-hall-rose` from 0.5652 to 0.1181 against Cycles (and makes EEVEE worse, 0.5727 to 0.9019, because EEVEE has no indirect light here); the committed rows above are the plain scene.
 
 ### The hall baked on the GPU (2026-11-04, issue #302)
 
@@ -1582,7 +1582,7 @@ Known gaps shown on purpose, not hidden by a per-scene setting: the dark band of
 
 Found by comparing the leaf cards of the two sides. No engine code changed and no Blender render changed: the Cycles and EEVEE arrays are the ones of the earlier runs.
 
-| Property | 67js (scene JSON) | Blender (`render-blender.py`) | Same |
+| Property | Crucible (scene JSON) | Blender (`render-blender.py`) | Same |
 | --- | --- | --- | --- |
 | Cards | 558 in one geometry, 2,232 vertices, UVs 0 to 1 | the same arrays, `build_mesh` | yes |
 | Transform | identity part matrix, Y-up to Z-up | `Y_UP_TO_Z_UP @ matrix` | yes |
@@ -1602,12 +1602,12 @@ Measured with a CPU rasteriser of the cards (Python, bilinear alpha above 0.5 at
 | --- | --- | --- | --- |
 | EEVEE | 1,036 | none | n/a |
 | Cycles | 2,523 | none | n/a |
-| 67js (GPU) | 3,228 | 1.5 px right, 0.5 px down (2,558) | 1,607 |
-| 67js (CPU) | 3,178 | 1.5 px right, 0.5 px down (2,492) | 1,493 |
+| Crucible (GPU) | 3,228 | 1.5 px right, 0.5 px down (2,558) | 1,607 |
+| Crucible (CPU) | 3,178 | 1.5 px right, 0.5 px down (2,492) | 1,493 |
 
-Fix: `harness.js` renders the reference frame with `wind: 0`. Re-run with 67js only (`--skip-blender`, GPU lock), then `--score-only`; only scenes with leaf cards moved. FLIP against Cycles (GPU), before to after:
+Fix: `harness.js` renders the reference frame with `wind: 0`. Re-run with Crucible only (`--skip-blender`, GPU lock), then `--score-only`; only scenes with leaf cards moved. FLIP against Cycles (GPU), before to after:
 
-| Scene | 67js against Cycles | 67js against EEVEE | EEVEE against Cycles |
+| Scene | Crucible against Cycles | Crucible against EEVEE | EEVEE against Cycles |
 | --- | --- | --- | --- |
 | foliage | 0.0979 to 0.0838 | 0.0771 to 0.0613 | 0.0924 |
 | mountain-valley | 0.1769 to 0.1691 | 0.2668 to 0.2613 | 0.1895 |
@@ -1615,11 +1615,11 @@ Fix: `harness.js` renders the reference frame with `wind: 0`. Re-run with 67js o
 | mountain-valley-b (grand) | 0.2096 to 0.2019 | 0.2645 to 0.2567 | 0.1306 |
 | mountain-valley-c (grand) | 0.1836 to 0.1775 | 0.223 to 0.2182 | 0.1522 |
 
-`foliage` now sits 0.0086 under EEVEE against Cycles (was 0.0055 over). Every other default and grand scene has no leaf cards and was not re-rendered; the only score that rose is a GPU against CPU difference (`gpu-vs-cpu` of `foliage` 0.0095 to 0.0097, `mountain-valley-b` 0.0158 to 0.0164). The Cycles and EEVEE columns did not move, so this is a change on the 67js side of the comparison and not a new reference. The score no longer includes the wind, which a real scene still has by default (`wind` 0.3); that is by design and is not scored here.
+`foliage` now sits 0.0086 under EEVEE against Cycles (was 0.0055 over). Every other default and grand scene has no leaf cards and was not re-rendered; the only score that rose is a GPU against CPU difference (`gpu-vs-cpu` of `foliage` 0.0095 to 0.0097, `mountain-valley-b` 0.0158 to 0.0164). The Cycles and EEVEE columns did not move, so this is a change on the Crucible side of the comparison and not a new reference. The score no longer includes the wind, which a real scene still has by default (`wind` 0.3); that is by design and is not scored here.
 
 ## Subsurface scattering (2026-11-04, part of issue #283)
 
-`subsurface` (wax candle, skin sphere, leaf slab, weight 1) and `subsurface-off` (the same scene at weight 0 in both renderers) are scored each against its own Cycles render: the rasterizer scores 0.1180 with subsurface on and 0.0940 off, and EEVEE scores 0.1028 and 0.0764, so the scene with subsurface is the harder one for both, and the on scene does not score better than the off scene. Scored against the same Cycles render with subsurface, the weight 0 picture of 67js scores 0.1229 and the weight 1 picture 0.1180 (0.1211 with back translucency 0.5), so the block moves the picture toward Cycles by 0.005. The leaf is the part that stays dark (signed mean luminance error of -0.05, wax and skin +0.01). Frame cost with `frame-time.mjs <scene> gpu --plain`: 0.45 to 0.49 ms on, 0.455 to 0.485 ms off, the same within noise.
+`subsurface` (wax candle, skin sphere, leaf slab, weight 1) and `subsurface-off` (the same scene at weight 0 in both renderers) are scored each against its own Cycles render: the rasterizer scores 0.1180 with subsurface on and 0.0940 off, and EEVEE scores 0.1028 and 0.0764, so the scene with subsurface is the harder one for both, and the on scene does not score better than the off scene. Scored against the same Cycles render with subsurface, the weight 0 picture of Crucible scores 0.1229 and the weight 1 picture 0.1180 (0.1211 with back translucency 0.5), so the block moves the picture toward Cycles by 0.005. The leaf is the part that stays dark (signed mean luminance error of -0.05, wax and skin +0.01). Frame cost with `frame-time.mjs <scene> gpu --plain`: 0.45 to 0.49 ms on, 0.455 to 0.485 ms off, the same within noise.
 
 ## Reversed-Z depth (2026-11-03, issue #310)
 
@@ -1645,7 +1645,7 @@ Pictures: `glass`, `brick-flat`, `outdoor-hdri` and `mountain-valley` drawn by S
 
 ## Sky visibility traced from the floor texels, measured and kept opt-in (2026-11-04, issue #197)
 
-The attempt the volume section named: trace the sky from the floor itself. `applyFloorSkyVisibility(parts, options)` (`src/floor-sky-visibility.js`, `67js/addons/floor-sky-visibility`, nothing in core) finds the floor parts (thin, at least 2 percent of the scene's footprint, opaque, plain, at least 30 percent of the area facing up, no light map and no baked `skyVisibility`), cuts their upward triangles by the longest edge to about 24,000 texels in total, and from each texel shoots 64 cosine-weighted rays (a fixed set, so the same scene gives the same bytes) against every other opaque part with the bake's BVH tracer. The share that escapes goes into the geometry's `skyVisibility`, which the shader already multiplies into the world and sky light of that surface, so the shader and the core entry are unchanged. `strength` blends the share toward 1 (`1 - strength * (1 - share)`). The trace is capped at 20 s and leaves the parts as they were past it, above 200,000 triangles, or when the scene has no floor. A closed room (the ray test of the ground bounce) is left alone unless `includeClosedRooms` is set. Harness: `npm run reference -- --floor-sky [<strength>] [--floor-sky-rooms]`, `frame-time.mjs --floor-sky=<strength>`.
+The attempt the volume section named: trace the sky from the floor itself. `applyFloorSkyVisibility(parts, options)` (`src/floor-sky-visibility.js`, `crucible/addons/floor-sky-visibility`, nothing in core) finds the floor parts (thin, at least 2 percent of the scene's footprint, opaque, plain, at least 30 percent of the area facing up, no light map and no baked `skyVisibility`), cuts their upward triangles by the longest edge to about 24,000 texels in total, and from each texel shoots 64 cosine-weighted rays (a fixed set, so the same scene gives the same bytes) against every other opaque part with the bake's BVH tracer. The share that escapes goes into the geometry's `skyVisibility`, which the shader already multiplies into the world and sky light of that surface, so the shader and the core entry are unchanged. `strength` blends the share toward 1 (`1 - strength * (1 - share)`). The trace is capped at 20 s and leaves the parts as they were past it, above 200,000 triangles, or when the scene has no floor. A closed room (the ray test of the ground bounce) is left alone unless `includeClosedRooms` is set. Harness: `npm run reference -- --floor-sky [<strength>] [--floor-sky-rooms]`, `frame-time.mjs --floor-sky=<strength>`.
 
 Main at `8153626`, GPU, 960 x 540, FLIP against the stored Cycles arrays, 24 scenes of the default suite and the nine grand options; change from a fresh render of main on the same machine (it reproduces the committed rows: `long-street` 0.1121, `material-spheres` 0.0954, `metal` 0.0944). Scoring is the `score.py` FLIP of each GPU frame; no `baseline.json` row is rewritten.
 
@@ -1657,7 +1657,7 @@ Main at `8153626`, GPU, 960 x 540, FLIP against the stored Cycles arrays, 24 sce
 
 Grand options (strength 0.5): `megacity-dusk-b` +0.0033, `-c` +0.0017, `-a` -0.0002; the three valley options are untouched (`mountain-valley-a` and `-b` pass the triangle limit, `-c` has no floor part); the three temple options are closed rooms and unchanged, and traced as rooms they improve: `temple-hall-a` 0.1642 to 0.1536, `-b` 0.1564 to 0.1355, `-c` 0.1177 to 0.1016.
 
-Box 2 (`shadow-depth.py`, display luminance, 67js before > after / Cycles; strength 0.5, rooms traced):
+Box 2 (`shadow-depth.py`, display luminance, Crucible before > after / Cycles; strength 0.5, rooms traced):
 
 | Scene | p1 | p5 | p25 | contrast (log2) |
 | --- | --- | --- | --- | --- |
@@ -1705,11 +1705,11 @@ The new preview uses Poly Haven CC0 assets (boulder_01, rock_07, modular_wooden_
 
 Main reproduced the stored rows first: `brick-graph` 0.0734, `brick-flat` 0.0556 against Cycles, excess 0.0178 against EEVEE's 0.0120 (EEVEE against Cycles 0.1249 and 0.1129).
 
-Node level, Blender 5.2.2 headless against 67js, on the unit square of the brick wall (a 6 by 4 plane, Bump Distance 0.15, strength 1):
+Node level, Blender 5.2.2 headless against Crucible, on the unit square of the brick wall (a 6 by 4 plane, Bump Distance 0.15, strength 1):
 
 - Height: the translated Math, Map Range and Wave nodes baked to a float array by Cycles (EMIT, 2048 x 2048) against the graph's `height` at the same pixel centres: max difference 0.00029, mean 0.000023. The brick factor and the joint profile are the same, so the Brick Texture candidates (mortar size, smoothing, offset) are ruled out; the graph does not use Blender's Brick node.
 - Bump: Cycles bake of the NORMAL pass (tangent space, Diffuse BSDF; with a Principled BSDF the baked normal is the average of the closure normals and the specular one is clamped, so it is not the bump normal) at 2048 x 2048. Its slope `-n.xy / n.z`, divided by Distance over the world size of each UV axis, equals the analytic derivative of the height to float precision (peak 299.7 against 296.0 per UV unit across a course joint, the difference being the analytic gradient's own 2048 grid). Blender differentiates the height at each pixel, so a joint edge about 2.6 texels wide at 512 loses nothing.
-- 67js bakes `normalMapFromHeightFunction` at the colour resolution (512), the slope read half a texel either side (the step is right). Sampled bilinearly at the 2048 grid and compared with Blender's normal (the 67js slope is `bump / 32` per UV unit, Blender's `0.15 / L`, so the scale differs by 1.25 along U and 0.83 along V and is left in both rows): mean angle 3.51 degrees, mean Lambert difference for the sun 0.0340. At 1024 texels: 2.14 degrees, 0.0186. At 2048: 1.36 degrees, 0.0097. The cause is the texel size: bilinear filtering blends the unit normals of two texels, and a joint edge is a few texels wide, so the tilt of its middle pixels reads weaker than the analytic one.
+- Crucible bakes `normalMapFromHeightFunction` at the colour resolution (512), the slope read half a texel either side (the step is right). Sampled bilinearly at the 2048 grid and compared with Blender's normal (the Crucible slope is `bump / 32` per UV unit, Blender's `0.15 / L`, so the scale differs by 1.25 along U and 0.83 along V and is left in both rows): mean angle 3.51 degrees, mean Lambert difference for the sun 0.0340. At 1024 texels: 2.14 degrees, 0.0186. At 2048: 1.36 degrees, 0.0097. The cause is the texel size: bilinear filtering blends the unit normals of two texels, and a joint edge is a few texels wide, so the tilt of its middle pixels reads weaker than the analytic one.
 
 Whole frame, FLIP against the stored Cycles array, `brick-graph` only (every variant rendered in one session, `brick-flat` is 0.0556 throughout):
 
@@ -1736,7 +1736,7 @@ Tried and not kept (all at 2048 texels with mips unless stated; against Cycles):
 
 The world scale is the exact match to Blender and scores worse, and there is no offset between the two renders (the wall's top and bottom edges sit within 0.1 pixel). So what remains is not the normal.
 
-Where the rest is, measured from the 2048 texel render by the sign of the bump slope at each pixel centre (display luminance, 67js minus Cycles): ledges that tilt up towards the sun are +0.046 and +0.057 too bright, ledges that tilt down -0.078 (gentle) and -0.022 (steep) too dark, and the vertical joints are +0.03 too bright on both sides. EEVEE is 0.27 off Cycles on every wall pixel, flat or not, because its flat wall is darker; 67js is 0.057 on the flat wall and 0.146 to 0.196 on the pixels at or next to a bump edge (0.0705 render; 0.0576 for the same pixels of `brick-flat`), which is where its excess sits. Which side is "up-tilted" is read from the sign of the slope (inferred). Cause (inferred, not isolated): Cycles removes the part of the lobe that falls below the geometric plane, which for an up-tilted ledge is the bright upper sky and for a down-tilted one the dark lower half, while the shader scales the whole sky term by one share. Moving the sky lookup towards the geometric normal helped by 0.0009 at best (table) and moved the render away from EEVEE, so it was not kept; it would also add to `scene:lit-box`.
+Where the rest is, measured from the 2048 texel render by the sign of the bump slope at each pixel centre (display luminance, Crucible minus Cycles): ledges that tilt up towards the sun are +0.046 and +0.057 too bright, ledges that tilt down -0.078 (gentle) and -0.022 (steep) too dark, and the vertical joints are +0.03 too bright on both sides. EEVEE is 0.27 off Cycles on every wall pixel, flat or not, because its flat wall is darker; Crucible is 0.057 on the flat wall and 0.146 to 0.196 on the pixels at or next to a bump edge (0.0705 render; 0.0576 for the same pixels of `brick-flat`), which is where its excess sits. Which side is "up-tilted" is read from the sign of the slope (inferred). Cause (inferred, not isolated): Cycles removes the part of the lobe that falls below the geometric plane, which for an up-tilted ledge is the bright upper sky and for a down-tilted one the dark lower half, while the shader scales the whole sky term by one share. Moving the sky lookup towards the geometric normal helped by 0.0009 at best (table) and moved the render away from EEVEE, so it was not kept; it would also add to `scene:lit-box`.
 
 After the change: `brick-graph` 0.0714 on the GPU (CPU render not redone), `brick-flat` 0.0556, excess 0.0158 against EEVEE's 0.0120. The first Done-when box of #50 stays open by 0.0038. Only `brick-graph` reads a graph with a height output among the suite's scenes (no other scene has a normal map from a graph), so no other scene's pixels changed and the full suite was not run.
 
@@ -1746,7 +1746,7 @@ The twice-resolution normal bake above is reverted as a default: 0.0020 of FLIP 
 
 ## Which term carries the tilted-ledge error, and the one fix that fits no size budget (2026-11-04, part of issue #50, RTX 3060 960 x 540)
 
-Method: `brick-graph` rendered on the GPU with one term at a time swapped from the mapped normal to the geometric one (shader switches that were not kept), scored by FLIP against the stored Cycles array and by the mean display-luminance residual (67js minus Cycles) over four wall regions, cut by the mapped normal of each pixel (flat: tilt below 0.03, 101,886 px; up ledge: normal.y above 0.03, 16,374 px; down ledge: below -0.03, 16,636 px; side joint: 25,104 px). Cycles was also rendered with only the sun (`--world-strength 0`) and with only the world (`--sun-strength 0`), 4 to 6 s each, to read each term's response to the tilt on the Cycles side. Main reproduces `brick-graph` 0.0734 and `brick-flat` 0.0556 (excess 0.0178 against EEVEE's 0.0120).
+Method: `brick-graph` rendered on the GPU with one term at a time swapped from the mapped normal to the geometric one (shader switches that were not kept), scored by FLIP against the stored Cycles array and by the mean display-luminance residual (Crucible minus Cycles) over four wall regions, cut by the mapped normal of each pixel (flat: tilt below 0.03, 101,886 px; up ledge: normal.y above 0.03, 16,374 px; down ledge: below -0.03, 16,636 px; side joint: 25,104 px). Cycles was also rendered with only the sun (`--world-strength 0`) and with only the world (`--sun-strength 0`), 4 to 6 s each, to read each term's response to the tilt on the Cycles side. Main reproduces `brick-graph` 0.0734 and `brick-flat` 0.0556 (excess 0.0178 against EEVEE's 0.0120).
 
 | Variant (one change on main) | `brick-graph` | flat | up ledge | down ledge | side joint |
 | --- | --- | --- | --- | --- | --- |
@@ -1763,8 +1763,8 @@ Method: `brick-graph` rendered on the GPU with one term at a time swapped from t
 
 The fill lights are zero in this scene, so that term cannot carry anything. Reading the table:
 
-- The tilt error is in the sun term and the environment diffuse term together, not in specular. With the geometric normal the sun swings the ledges by 0.066 (up) and 0.181 (down), so its response is the large one, and it is too strong on both sides: in linear light, with the albedo divided out and the floor bounce of Cycles estimated as its excess over 67js on the flat wall (inferred), the sun on an up ledge is 1.46 times its flat value in 67js and about 1.14 in Cycles, and on a down ledge 0.31 against 0.45. No blend between the geometric and the mapped normal fixes it, because the side joints get worse as fast as the down ledges improve (table, 0.8 / 0.6 / 0.4).
-- The environment diffuse term is too bright on up ledges: with only the world lit, a ledge reads 1.19 times the flat wall in 67js and 0.91 in Cycles (down 0.84 against 0.81, side 0.95 against 0.86). That is 0.018 of the 0.034 linear excess on up ledges. The geometric normal brings the up ledge to 0.88, but the same switch darkens the down ledges by 0.03 in the full image (0.0766), because the lit floor under the wall is part of the environment diffuse term and the mapped normal is what sees it, as in Cycles. So the squared horizon share is already the right shape for the sky; the missing piece is a floor term that keeps the mapped normal.
+- The tilt error is in the sun term and the environment diffuse term together, not in specular. With the geometric normal the sun swings the ledges by 0.066 (up) and 0.181 (down), so its response is the large one, and it is too strong on both sides: in linear light, with the albedo divided out and the floor bounce of Cycles estimated as its excess over Crucible on the flat wall (inferred), the sun on an up ledge is 1.46 times its flat value in Crucible and about 1.14 in Cycles, and on a down ledge 0.31 against 0.45. No blend between the geometric and the mapped normal fixes it, because the side joints get worse as fast as the down ledges improve (table, 0.8 / 0.6 / 0.4).
+- The environment diffuse term is too bright on up ledges: with only the world lit, a ledge reads 1.19 times the flat wall in Crucible and 0.91 in Cycles (down 0.84 against 0.81, side 0.95 against 0.86). That is 0.018 of the 0.034 linear excess on up ledges. The geometric normal brings the up ledge to 0.88, but the same switch darkens the down ledges by 0.03 in the full image (0.0766), because the lit floor under the wall is part of the environment diffuse term and the mapped normal is what sees it, as in Cycles. So the squared horizon share is already the right shape for the sky; the missing piece is a floor term that keeps the mapped normal.
 - Environment specular is the only term that improved when cut like Cycles does: a reflection that points below the geometric plane should see no sky. `skyReflection *= step(0.0, dot(reflected, geometricNormal))` (guarded by `USES_NORMAL_MAP`, next to the squared share) takes `brick-graph` from 0.0734 to 0.0721 and the excess over the flat wall from 0.0178 to 0.0165, still above EEVEE's 0.0120. The gain is the steepest bump edges: at column 392 the pixels on the lit side of a joint (normal.y 0.87 to 1.0) are 0.03 to 0.05 too bright and the ones on the dark side (normal.y -0.35 to -0.72) 0.06 to 0.12 too dark, one to three pixels wide, which is a footprint difference (Cycles averages the bump over the pixel) that no lobe change reaches.
 - Not kept. The line costs 16 bytes of `scene:lit-box` (49957 to 49973) and 22 of `scene:agent-scene` (102827 to 102849), against 8 allowed there; merging it with the squared share into one `if` block did not change that (+16 and +22), the `smoothstep` form costs 5 bytes more, and removing trailing zeros from the shader's literals made the gzip larger (+48 / +34). The change is ready to take when a budget allows it: one line of GLSL, no other scene has a normal map in the suite, so no other reference scene could move. The full suite was not run because nothing changed.
 - Where the rest of the 0.0165 is, in order: the sun's tilt response (above), the one-to-three pixel footprint at steep joints, and the environment diffuse of up ledges. The sun's response is what a next worker should isolate with a per-pixel comparison against a Cycles Diffuse-only bake.
@@ -1772,15 +1772,15 @@ The fill lights are zero in this scene, so that term cannot carry anything. Read
 
 ## The excess of the brick graph wall is a limit at the bevel edges (2026-11-04, closes issue #50)
 
-The box of #50 asks for the excess of `brick-graph` over `brick-flat` in 67js to be no larger than EEVEE's, against Cycles. On main it is 0.0178 (0.0734 and 0.0556) against EEVEE's 0.0120 (0.1249 and 0.1129). It is documented here as a limit, not closed.
+The box of #50 asks for the excess of `brick-graph` over `brick-flat` in Crucible to be no larger than EEVEE's, against Cycles. On main it is 0.0178 (0.0734 and 0.0556) against EEVEE's 0.0120 (0.1249 and 0.1129). It is documented here as a limit, not closed.
 
 What was measured:
 
-- The excess is shape, not brightness. Over the wall rectangle the graph wall scores 0.1177 and the flat wall 0.0592; the pixels within 2 of a Cycles edge (half of the wall) carry 0.168 against 0.059 on the flat wall, the interior 0.068 against 0.059. The mean luminance residual on the edges is -0.0015. Across a joint's dark side 67js stays 0.02 to 0.03 lighter in the tail (row 168, columns 426 to 429) and on the lit shoulder 0.03 to 0.04 lighter, so 67js leaves a bevel more softly than Cycles. Cycles reads the height function at the pixel; 67js reads a 512 texel normal map through bilinear filtering.
-- Lighting terms, tried in turn (PR #414 and the rounds above): the squared horizon share (kept), exponents 1.75 to 3, the sun with the geometric normal or a blend, the environment diffuse and specular about the geometric normal, a sky reflection cut below the geometric plane (0.0734 to 0.0721, excess 0.0165, +29 bytes gzip on `scene:agent-scene` which sits over its goal, so it was not merged), the filtered normal length (0.0744), and a Gaussian blur of the 67js frame standing in for Cycles' film filter (no gain). None reaches 0.0120.
+- The excess is shape, not brightness. Over the wall rectangle the graph wall scores 0.1177 and the flat wall 0.0592; the pixels within 2 of a Cycles edge (half of the wall) carry 0.168 against 0.059 on the flat wall, the interior 0.068 against 0.059. The mean luminance residual on the edges is -0.0015. Across a joint's dark side Crucible stays 0.02 to 0.03 lighter in the tail (row 168, columns 426 to 429) and on the lit shoulder 0.03 to 0.04 lighter, so Crucible leaves a bevel more softly than Cycles. Cycles reads the height function at the pixel; Crucible reads a 512 texel normal map through bilinear filtering.
+- Lighting terms, tried in turn (PR #414 and the rounds above): the squared horizon share (kept), exponents 1.75 to 3, the sun with the geometric normal or a blend, the environment diffuse and specular about the geometric normal, a sky reflection cut below the geometric plane (0.0734 to 0.0721, excess 0.0165, +29 bytes gzip on `scene:agent-scene` which sits over its goal, so it was not merged), the filtered normal length (0.0744), and a Gaussian blur of the Crucible frame standing in for Cycles' film filter (no gain). None reaches 0.0120.
 - Data only, this round (no engine byte changes): a 768 texel graph is not a valid resolution (256, 512 or 1024 only); 1024 is over the work limit of 30,000,000 (52 work units per pixel with 2 noise octaves, about 28 allowed), so a finer bake needs a smaller graph or a faster evaluator. Wider bevels in the scene graph (Blender gets the same graph and was rendered again): joint widths 0.10 to 0.36 and 0.06 to 0.26 gave `brick-graph` 0.0708 and `brick-flat` 0.0544 (excess 0.0164, EEVEE 0.0134 on the new renders), and 0.08 to 0.5 and 0.04 to 0.4 gave 0.0738 and 0.0529 (excess 0.0209, EEVEE 0.0166). The gap to EEVEE stays at 0.003 to 0.006 whichever bevel is used, and EEVEE's own excess moves with it, so changing the scene only moves the target. The scene was left as it is.
 
-What would close it is a finer height-to-normal source than a 512 texel map (an analytic or 1024 texel bake of a graph that fits the work limit), which is engine work and costs memory or bytes; it is outside the data-only brief and the size goals. `brick-graph` is 0.0734 against Cycles, 0.1249 for EEVEE against Cycles on the same scene, so 67js is closer to Cycles than EEVEE is on this wall.
+What would close it is a finer height-to-normal source than a 512 texel map (an analytic or 1024 texel bake of a graph that fits the work limit), which is engine work and costs memory or bytes; it is outside the data-only brief and the size goals. `brick-graph` is 0.0734 against Cycles, 0.1249 for EEVEE against Cycles on the same scene, so Crucible is closer to Cycles than EEVEE is on this wall.
 
 ## Sky seen from the floor, on by default for sunlit closed rooms (2026-11-04, part of issue #197)
 
@@ -1797,7 +1797,7 @@ GPU, 960 x 540, FLIP against the stored Cycles arrays, change from a render of m
 
 0.2 is the largest strength that keeps `dark-shaft` within the 0.002 limit; the shaft's walls and floor get sun bounce in Cycles that a sky trace does not hold, so the shaft is the scene that sets the strength (guessed, not isolated).
 
-Box 2, dark end (`shadow-depth.py`, display luminance, 67js before > after / Cycles):
+Box 2, dark end (`shadow-depth.py`, display luminance, Crucible before > after / Cycles):
 
 | Scene | p1 | p5 | p25 | contrast (log2) |
 | --- | --- | --- | --- | --- |
@@ -1815,11 +1815,11 @@ Rows refreshed: `temple-hall` and `dark-shaft` in `baseline.json` (with their sh
 
 ## Water shadows against Cycles (2026-11-04, closes the last box of issue #349)
 
-`node scripts/score-water-shadows.mjs` draws the pool of the section above from overhead in 67js (480 x 270, 40 degree view) and in Blender 5.2 Cycles (CPU, 6 threads, 96 samples, denoised): the water is a box with Volume Absorption (`1 - absorption / density` as colour, so the coefficient is the preset's per metre) plus Volume Scatter (density = the preset's turbidity per metre, an assumed mapping, since turbidity has no physical unit). The sky and sun in Cycles are set from the dry bed 67js measured (sky = shadowed bed / albedo, sun from the lit minus shadowed difference), so a dry pool is the same exposure in both. `bench/reference/water-shadows-cycles.py` builds it and `bench/reference/water-shadows-score.py` scores it.
+`node scripts/score-water-shadows.mjs` draws the pool of the section above from overhead in Crucible (480 x 270, 40 degree view) and in Blender 5.2 Cycles (CPU, 6 threads, 96 samples, denoised): the water is a box with Volume Absorption (`1 - absorption / density` as colour, so the coefficient is the preset's per metre) plus Volume Scatter (density = the preset's turbidity per metre, an assumed mapping, since turbidity has no physical unit). The sky and sun in Cycles are set from the dry bed Crucible measured (sky = shadowed bed / albedo, sun from the lit minus shadowed difference), so a dry pool is the same exposure in both. `bench/reference/water-shadows-cycles.py` builds it and `bench/reference/water-shadows-score.py` scores it.
 
-Whole frame FLIP of 67js against Cycles (Cycles tone mapped like 67js), and the bed shadow contrast (lit minus shadowed against the same pool dry; red, green, blue):
+Whole frame FLIP of Crucible against Cycles (Cycles tone mapped like Crucible), and the bed shadow contrast (lit minus shadowed against the same pool dry; red, green, blue):
 
-| Pool | FLIP | FLIP, same pool dry | 67js | Cycles | `exp(-absorption * depth)` |
+| Pool | FLIP | FLIP, same pool dry | Crucible | Cycles | `exp(-absorption * depth)` |
 | --- | --- | --- | --- | --- | --- |
 | lake 0.2 m | 0.3027 | 0.3358 | 0.939, 0.970, 0.999 | 0.858, 0.964, 0.979 | 0.932, 0.986, 0.992 |
 | lake 1 m | 0.4530 | 0.3735 | 0.699, 0.918, 0.937 | 0.463, 0.842, 0.901 | 0.705, 0.932, 0.961 |
@@ -1828,13 +1828,13 @@ Whole frame FLIP of 67js against Cycles (Cycles tone mapped like 67js), and the 
 | river 1 m | 0.5890 | 0.3735 | 0.206, 0.179, 0.089 | 0.294, 0.276, 0.166 | 0.449, 0.407, 0.202 |
 | river 4 m | 0.5408 | 0.4834 | -0.042, -0.036, -0.035 | 0.254, 0.247, 0.159 | 0.041, 0.027, 0.002 |
 
-Reading it: the FLIP of the dry pool is already 0.34 to 0.48, so most of the score is the dry pool (the bed, the post, the sun's penumbra and the sky are not the same picture in the two renderers), and water adds 0.0 to 0.2 on top. The shadow contrast agrees in trend. Cycles fades the clear lake faster than the formula because the sun's path to the bed is longer than the eye's (slant of 1/cos 59 degrees), which `exp(-absorption * depth)` does not count: the shadow difference is lit (two paths) against shadowed (the eye's path only). The murky river is where the two differ most: Cycles keeps 0.25 of the contrast at 4 m, where scattered light still reaches the shadow, and 67js reaches zero (slightly negative, -0.04: the lift overshoots the lit side). A river that clears to nothing at 4 m is a known simplification of the in-scatter lift; it is recorded here and not changed.
+Reading it: the FLIP of the dry pool is already 0.34 to 0.48, so most of the score is the dry pool (the bed, the post, the sun's penumbra and the sky are not the same picture in the two renderers), and water adds 0.0 to 0.2 on top. The shadow contrast agrees in trend. Cycles fades the clear lake faster than the formula because the sun's path to the bed is longer than the eye's (slant of 1/cos 59 degrees), which `exp(-absorption * depth)` does not count: the shadow difference is lit (two paths) against shadowed (the eye's path only). The murky river is where the two differ most: Cycles keeps 0.25 of the contrast at 4 m, where scattered light still reaches the shadow, and Crucible reaches zero (slightly negative, -0.04: the lift overshoots the lit side). A river that clears to nothing at 4 m is a known simplification of the in-scatter lift; it is recorded here and not changed.
 
 ### The sun's path and the murky floor (2026-11-04, closes issue #438)
 
 Two gaps in the table above, fixed in the world material chunk. The sun leg to the bed is now absorbed over the refracted path, `depth / cos(theta_t)` with Snell n = 1.33, so a shadowed bed keeps the eye's vertical leg and a lit bed adds the longer sun leg (the clear lake at 4 m was 0.227 red against 0.064 in Cycles). The turbidity lift that pulled the shadow toward the lit side is gone; the murky water instead adds a positive term, the scattered sunlight the post also shadows, so the contrast never goes below 0 and keeps a floor at depth (about a quarter at 4 m in a river). The sun leg also carries an extinction of `0.9 * turbidity * (1 - turbidity)` per metre, the part of the scatter that is not returned.
 
-The contrast is now read at x = 0.9 m, not 0.65 m, for both renderers: at 4 m the post's foot puts 0.65 m on the edge of the shadow, where the wider murky penumbra and refraction blur make the number depend on the edge, in Cycles as much as in 67js. The Cycles renders are the ones of the section above, not re-rendered (their scene is unchanged). `node scripts/score-water-shadows.mjs --skip-blender` rescores against them. Contrast (red, green, blue) against Cycles, and whole frame FLIP:
+The contrast is now read at x = 0.9 m, not 0.65 m, for both renderers: at 4 m the post's foot puts 0.65 m on the edge of the shadow, where the wider murky penumbra and refraction blur make the number depend on the edge, in Cycles as much as in Crucible. The Cycles renders are the ones of the section above, not re-rendered (their scene is unchanged). `node scripts/score-water-shadows.mjs --skip-blender` rescores against them. Contrast (red, green, blue) against Cycles, and whole frame FLIP:
 
 | Pool | Before | After | Cycles | FLIP before | FLIP after |
 | --- | --- | --- | --- | --- | --- |
@@ -1849,7 +1849,7 @@ Every row is within 0.05 of Cycles in each channel (largest gap 0.040, river 4 m
 
 ## Shadow contrast of the halls and `dark-shaft` after sun bounce, measured and nothing kept (2026-11-06, part of issue #197)
 
-Main at `ce50d2e` (after #434, #462 and #465), 960 x 540. The default scenes are GPU frames against fresh Blender 5.2.2 Cycles arrays; the four temple options are GPU frames against Cycles arrays rendered on the GPU in the same run. Measured with `shadow-depth.py` (display luminance, 67js / Cycles). `top 5%` and `bottom 30%` are the mean display luminance of the pixels where Cycles is brightest and darkest.
+Main at `ce50d2e` (after #434, #462 and #465), 960 x 540. The default scenes are GPU frames against fresh Blender 5.2.2 Cycles arrays; the four temple options are GPU frames against Cycles arrays rendered on the GPU in the same run. Measured with `shadow-depth.py` (display luminance, Crucible / Cycles). `top 5%` and `bottom 30%` are the mean display luminance of the pixels where Cycles is brightest and darkest.
 
 | Scene | p1 | p5 | p25 | contrast (log2) | floor | lit-level | top 5% | bottom 30% |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1875,10 +1875,10 @@ No engine change was made and no frame cost changes. The megacity and mountain o
 
 ## Default look against three.js (issue #988)
 
-`npm run reference -- --default-look` draws four bare scenes (`default-look-scenes.js`: a sun, a constant sky, geometry and a camera, with no recipe lighting, bake, probes or post steps) in 67js and in three.js, and scores every picture against a Blender Cycles render of the same scene with FLIP. It writes `default-look.json` (scores, means, image paths and any proposed default change), the Cycles reference of each scene as `default-look/<scene>-cycles.png`, and a contact sheet `default-look/<scene>-sheet.jpg`. `--skip-blender` scores against the committed Cycles images, so it needs only Chrome and `uv`; `--scene <id>,<id>` limits the scenes and writes its report to `artifacts/reference-default-look/default-look-subset.json`, so the committed four-scene report stays unchanged.
+`npm run reference -- --default-look` draws four bare scenes (`default-look-scenes.js`: a sun, a constant sky, geometry and a camera, with no recipe lighting, bake, probes or post steps) in Crucible and in three.js, and scores every picture against a Blender Cycles render of the same scene with FLIP. It writes `default-look.json` (scores, means, image paths and any proposed default change), the Cycles reference of each scene as `default-look/<scene>-cycles.png`, and a contact sheet `default-look/<scene>-sheet.jpg`. `--skip-blender` scores against the committed Cycles images, so it needs only Chrome and `uv`; `--scene <id>,<id>` limits the scenes and writes its report to `artifacts/reference-default-look/default-look-subset.json`, so the committed four-scene report stays unchanged.
 
 - The scenes are 640 by 360, drawn at pixel ratio 1, with the Cycles reference at 128 samples. The Cycles pixels go through the same display transform as every other score here (`score.py`: the ACES fit and gamma 2.2) and are rounded to 8 bits, so the committed PNG is the reference.
 - Both engines get the same geometry, camera, sun (strength, direction, shadow bounds) and sky. three.js gets the sky as a constant environment map (PMREM) and the sun as a `DirectionalLight` with a 2048 shadow map, in physical light units, so the same numbers mean the same energy as in Cycles. three.js is a devDependency used only by `bench/`; `src/` never imports it.
-- Rows: `67js-default` leaves every renderer option at its default (`hdr` false, `samples` 4, ACES view transform, no ambient occlusion). `67js-ao` turns on ambient occlusion 0.5 (it needs `depth: true`), `67js-samples8` uses 8 samples, `67js-hdr` turns `hdr` on. `three-default` is a `WebGLRenderer` with `antialias` and no tone mapping, as three.js leaves it, and `three-aces` adds `ACESFilmicToneMapping` at exposure 1. `eevee` is the yardstick the suite uses elsewhere.
-- A change to a default is proposed (never made here) only when its FLIP is lower than `67js-default` on at least three scenes. `default-look-report.mjs` decides that and `tests/default-look-report.test.js` covers it.
-- Not covered: the light 67js adds in a recipe scene (ground bounce, sun bounce, floor sky), because the bench builds `Renderer67` directly. View transforms (AgX, Neutral) need a Cycles render with the same transform, which `--view-transform` of the main run already does.
+- Rows: `crucible-default` leaves every renderer option at its default (`hdr` false, `samples` 4, ACES view transform, no ambient occlusion). `crucible-ao` turns on ambient occlusion 0.5 (it needs `depth: true`), `crucible-samples8` uses 8 samples, `crucible-hdr` turns `hdr` on. `three-default` is a `WebGLRenderer` with `antialias` and no tone mapping, as three.js leaves it, and `three-aces` adds `ACESFilmicToneMapping` at exposure 1. `eevee` is the yardstick the suite uses elsewhere.
+- A change to a default is proposed (never made here) only when its FLIP is lower than `crucible-default` on at least three scenes. `default-look-report.mjs` decides that and `tests/default-look-report.test.js` covers it.
+- Not covered: the light Crucible adds in a recipe scene (ground bounce, sun bounce, floor sky), because the bench builds `CrucibleRenderer` directly. View transforms (AgX, Neutral) need a Cycles render with the same transform, which `--view-transform` of the main run already does.

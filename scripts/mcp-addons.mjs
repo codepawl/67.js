@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { checkAddon, CORE_PACKAGE } from '../bin/67js-addon-check.mjs';
+import { checkAddon, CORE_PACKAGE } from '../bin/crucible-addon-check.mjs';
 
 // Addons the person who starts the MCP server allows. Only startup options choose them (--addons, --allow-addon); no tool
 // call can name one. Each is looked up in <folder>/node_modules/<name> and must pass the addon contract (docs/addons.md).
@@ -51,8 +51,8 @@ function loadOneChecked(name, addonsFolder, version) {
   if (errors.length > 0) return { reason: `${name} fails the addon contract: ${errors.join(' ')}` };
   const pack = JSON.parse(readFileSync(join(realFolder, 'package.json'), 'utf8'));
   if (pack.name !== name) return { reason: `${name} has package name "${pack.name}" in its package.json. Install the package under its own name.` };
-  if (pack['67js'].bundleBytes > MAXIMUM_ADDON_BUNDLE_BYTES) {
-    return { reason: `${name} declares bundleBytes ${pack['67js'].bundleBytes}, above the server bound of ${MAXIMUM_ADDON_BUNDLE_BYTES} bytes (2 MiB). Ship a smaller entry file.` };
+  if (pack['crucible'].bundleBytes > MAXIMUM_ADDON_BUNDLE_BYTES) {
+    return { reason: `${name} declares bundleBytes ${pack['crucible'].bundleBytes}, above the server bound of ${MAXIMUM_ADDON_BUNDLE_BYTES} bytes (2 MiB). Ship a smaller entry file.` };
   }
   const entry = entryOf(pack);
   if (entry === null) return { reason: `${name} names no entry file. Set "exports" (or its "." import condition) or "main" to the ES module that exports registerAddon.` };
@@ -68,7 +68,7 @@ function loadOneChecked(name, addonsFolder, version) {
       version: pack.version ?? 'unknown',
       folder: realFolder,
       entry: relative(realFolder, realEntry).split(sep).join('/'),
-      extensionPoints: [...pack['67js'].extensionPoints],
+      extensionPoints: [...pack['crucible'].extensionPoints],
     },
   };
 }

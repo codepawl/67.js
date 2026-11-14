@@ -85,7 +85,7 @@ test('GLB bridge preserves hierarchy, shared geometry, missing normals, UVs and 
   asset.dispose();
 });
 
-test('67js exported GLB roundtrip preserves transforms and repeated primitive identity', async () => {
+test('Crucible exported GLB roundtrip preserves transforms and repeated primitive identity', async () => {
   const geometry = {
     positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
     normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),

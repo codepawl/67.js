@@ -1,12 +1,12 @@
 # Grass
 
-`67js/addons/grass` builds a field of real grass blades that follows the terrain and sways in the wind.
+`crucible/addons/grass` builds a field of real grass blades that follows the terrain and sways in the wind.
 It is in the current source and not yet published.
 
 ```js
-import { Renderer67 } from '67js';
-import { createGrass } from '67js/addons/grass';
-import { createTerrain } from '67js/addons/terrain';
+import { CrucibleRenderer } from 'crucible';
+import { createGrass } from 'crucible/addons/grass';
+import { createTerrain } from 'crucible/addons/terrain';
 
 const terrain = createTerrain({ size: 300, seed: 4 });
 const path = (x, z) => (Math.abs(x - 6 * Math.sin(z * 0.08)) < 1.1 ? 0 : 1);
@@ -19,7 +19,7 @@ const grass = createGrass({
   seed: 3,
 });
 
-const renderer = new Renderer67(canvas, [...terrain.parts, ...grass.parts], { world: true, hdr: true, ground: false, memoryBudgetMiB: 1536 });
+const renderer = new CrucibleRenderer(canvas, [...terrain.parts, ...grass.parts], { world: true, hdr: true, ground: false, memoryBudgetMiB: 1536 });
 renderer.render({ eye, target, time: seconds, wind: 0.45 });
 
 // When the camera moves:

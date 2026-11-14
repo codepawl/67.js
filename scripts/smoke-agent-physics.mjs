@@ -9,14 +9,14 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-physics-'));
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-physics-'));
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '96', '--jobs', join(directory, 'jobs')],
   cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-physics-proof', version: '1' });
+const client = new Client({ name: 'crucible-physics-proof', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 60000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });
@@ -32,7 +32,7 @@ async function look(sessionId, motionTime) {
 
 // An authored ramp: a box mesh whose right face is lifted, so the top slopes down toward -X.
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [
     { id: 'ramp', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: [{ op: 'translate', select: { tag: 'right' }, offset: [0, 0.5, 0] }] },
     { id: 'ball', type: 'sphere' },

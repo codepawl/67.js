@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { RenderTargetLedger } from '../src/render-target-ledger.js';
 import { useCompactColor } from '../src/compact-color.js';
 import { CascadedShadows } from '../src/cascaded-shadows.js';
@@ -44,7 +44,7 @@ function recordingContext() {
 
 function shadowRenderer(batches) {
   const { context, sizes } = recordingContext();
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   Object.assign(renderer, {
     context, batches, renderTargets: new RenderTargetLedger(), world: null, activeLightDirection: [1, 2, 3], shadowBounds: {},
     lightProjection: new Float32Array(16), windState: { time: 0, strength: 0 }, drawShadowCasters() {},
@@ -73,7 +73,7 @@ test('the local shadow atlas holds one row of tiles per four shadow tiles and re
 
 function frameTargetRenderer(depth) {
   const { context } = recordingContext();
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   Object.assign(renderer, {
     context, depth, hdr: true, multisampleSamples: 4, renderTargets: new RenderTargetLedger(), releaseFrameTargets() {},
   });

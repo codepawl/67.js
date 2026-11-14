@@ -27,7 +27,7 @@ async function startServer(port) {
 async function drawScenarios(page, scenarios) {
   const task = async (list) => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const canvas = document.createElement('canvas');
     canvas.width = 96;
     canvas.height = 96;
@@ -45,7 +45,7 @@ async function drawScenarios(page, scenarios) {
         { name: 'floor', geometry, matrix: scaled(8, 0.2, 8, 0, -0.1, 0), material: material([0.8, 0.8, 0.8]), ...scenario.floor },
         { name: 'caster', geometry, matrix: scaled(1.4, 1.4, 1.4, 0, 2, 0), material: material([0.9, 0.2, 0.2]), ...scenario.caster },
       ];
-      const renderer = new Renderer67(canvas, parts, { ground: false, samples: 1, pixelRatio: 1, transparent: true });
+      const renderer = new CrucibleRenderer(canvas, parts, { ground: false, samples: 1, pixelRatio: 1, transparent: true });
       renderer.render({ eye: [0, 6, 6], target: [0, 0, 0] });
       copyContext.clearRect(0, 0, 96, 96);
       copyContext.drawImage(canvas, 0, 0, 96, 96);

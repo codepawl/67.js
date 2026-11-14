@@ -6,7 +6,7 @@ import { MATERIAL_PATTERN_TYPES, MAX_MATERIAL_PATTERNS } from '../src/agent-scen
 import { createAgentScene } from '../src/agent-scene.js';
 
 const baseScene = materials => ({
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'block', type: 'box', bevel: 0 }],
   materials,
   nodes: [{ id: 'part', geometry: 'block', material: materials[0].id }],

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 // The optional native denoiser is its own npm package, so the server never carries it. The name sits in a variable so the
 // bundler leaves the import alone and it resolves from the user's node_modules when a job asks for it.
-const OIDN_PACKAGE = '@codepawlhq/67js-denoise-oidn';
+const OIDN_PACKAGE = '@codepawlhq/crucible-denoise-oidn';
 
 // A source checkout keeps the package in packages/, beside scripts/ or, from the bundled server, two folders above build/mcp.
 const CHECKOUT_PACKAGE_URLS = ['../packages/denoise-oidn/index.mjs', '../../packages/denoise-oidn/index.mjs']

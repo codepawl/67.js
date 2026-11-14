@@ -10,7 +10,7 @@ import { lightShapeSupport } from './shader-registry.js';
 export const PROFILE_SAMPLE_COUNT = 16;
 const PROFILE_MAXIMUM_POINTS = 32;
 
-// Bundled profiles, made for 67js as cosine powers (CC0): the exponent sets how tight the beam is.
+// Bundled profiles, made for Crucible as cosine powers (CC0): the exponent sets how tight the beam is.
 // 'batwing' peaks at 45 degrees off the axis, as a wall washer does.
 const BUNDLED_EXPONENTS = { 'wide-flood': 1.5, downlight: 6, 'narrow-spot': 30 };
 export const IES_PROFILE_NAMES = Object.freeze([...Object.keys(BUNDLED_EXPONENTS), 'batwing']);

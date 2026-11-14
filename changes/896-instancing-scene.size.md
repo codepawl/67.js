@@ -1,4 +1,0 @@
-- entry:light-bake-gpu: the instanced scene builder lives in the scene module every tracer entry shares; about 0.8 KB gzip buys shared-geometry scenes for the native cycles kernel (1,000 copies of a mesh no longer flatten into the 400,000 triangle limit)
-- entry:path-tracer: same shared scene module, about 0.8 KB gzip for the instanced scene builder
-- entry:path-tracer-progressive: same shared scene module, about 0.8 KB gzip for the instanced scene builder
-- entry:path-tracer-realtime: same shared scene module, about 0.8 KB gzip for the instanced scene builder

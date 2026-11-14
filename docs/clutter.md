@@ -1,10 +1,10 @@
 # Ground clutter
 
-`67js/addons/clutter` scatters pebbles, rocks, twigs and fallen leaves over terrain.
+`crucible/addons/clutter` scatters pebbles, rocks, twigs and fallen leaves over terrain.
 It is in the current source and not yet published.
 
 ```js
-import { createClutter } from '67js/addons/clutter';
+import { createClutter } from 'crucible/addons/clutter';
 
 const clutter = createClutter({
   preset: 'forest',
@@ -14,7 +14,7 @@ const clutter = createClutter({
   seed: 5,
 });
 
-const renderer = new Renderer67(canvas, [...terrain.parts, ...grass.parts, ...clutter.parts], { world: true, ground: false });
+const renderer = new CrucibleRenderer(canvas, [...terrain.parts, ...grass.parts, ...clutter.parts], { world: true, ground: false });
 
 // When the camera moves:
 if (clutter.update(eye)) renderer.replaceParts([...terrain.parts, ...grass.parts, ...clutter.parts]);

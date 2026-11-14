@@ -9,7 +9,7 @@ import {
   BUNDLED_CUBE_LOOK_NAMES, BUNDLED_ENVIRONMENT_NAMES, registerCatalogEnvironment, registerCatalogLook,
 } from '../src/look-catalog.js';
 
-// The build-67js-scene skill teaches agents the scene_apply tool by example. Every json block in these references that
+// The build-crucible-scene skill teaches agents the scene_apply tool by example. Every json block in these references that
 // carries an `operations` list must keep applying to a fresh scene, so an API change fails here instead of misleading an agent.
 const referenceNames = ['look', 'light', 'camera', 'film-and-animation'];
 
@@ -19,7 +19,7 @@ for (const name of BUNDLED_CUBE_LOOK_NAMES) registerCatalogLook(name, parseCube(
 
 function baseRecipe({ depthOfField }) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box' }],
     materials: [{ id: 'paint', color: [0.4, 0.6, 0.8] }],
     nodes: [
@@ -32,7 +32,7 @@ function baseRecipe({ depthOfField }) {
 }
 
 for (const name of referenceNames) {
-  const url = new URL(`../skills/build-67js-scene/references/${name}.md`, import.meta.url);
+  const url = new URL(`../skills/build-crucible-scene/references/${name}.md`, import.meta.url);
   const text = await readFile(url, 'utf8');
   const blocks = [...text.matchAll(/```json\r?\n([\s\S]*?)```/g)].map(match => JSON.parse(match[1]));
   const applyBlocks = blocks.filter(block => Array.isArray(block.operations));

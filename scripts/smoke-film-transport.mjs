@@ -19,7 +19,7 @@ try {
   browser = await chromium.launch({ headless:true, ...(existsSync(chrome) ? { executablePath:chrome } : {}) });
   const page = await browser.newPage();
   // Isolate transport races from GPU cost and intentionally delay media seeks.
-  await page.route('**/src/renderer.js', route => route.fulfill({ contentType:'text/javascript', body:'export class Renderer67 { render(){} dispose(){} resize(){} }' }));
+  await page.route('**/src/renderer.js', route => route.fulfill({ contentType:'text/javascript', body:'export class CrucibleRenderer { render(){} dispose(){} resize(){} }' }));
   await page.route('**/src/film.js', route => route.fulfill({ contentType:'text/javascript', body:`export const FILM_DURATION=187; export function createFilmScenes(){return {test:{parts:[]}};} export function sampleFilm(time){return {scene:'test',camera:{},time,sceneTime:time,title:'',subtitle:'',titleOpacity:0,flash:0};}` }));
   await page.addInitScript(() => {
     window.Audio = class {

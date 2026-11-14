@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { updatePartVertices } from '../src/update-part-vertices.js';
 
 /** A WebGL2 stand-in that records buffer writes, with one rigid part already uploaded. */
@@ -19,7 +19,7 @@ function fakeRenderer() {
     bufferData: () => calls.push(['bufferData']),
     createVertexArray: () => calls.push(['createVertexArray']),
   };
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.context = context;
   renderer.shadowsDirty = false;
   const batch = { parts: [part], bounds: { center: [0.5, 0.5, 0], radius: 1 } };

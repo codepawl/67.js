@@ -25,7 +25,7 @@ function roomParts({ roof = true, redLeft = false } = {}) {
     slabs.push(slab('roof', [0, 3, 0], [ROOM_SIZE, WALL, ROOM_SIZE], 'grey'));
   }
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'grey', color: [0.5, 0.5, 0.5] }, { id: 'red', color: [0.8, 0.1, 0.1] }],
     nodes: slabs,
@@ -97,7 +97,7 @@ test('a scene without a map or without lamps is left alone', () => {
 
 test('scene_inspect names the bake for a closed room lit by lamps only', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'grey', color: [0.5, 0.5, 0.5] }],
     nodes: [

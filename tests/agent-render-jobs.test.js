@@ -21,7 +21,7 @@ function deferred() {
 }
 
 async function temporary(context) {
-  const directory = await mkdtemp(join(tmpdir(), '67js-render-controller-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-render-controller-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -48,7 +48,7 @@ test('motion job ranges use immutable recipe duration, loops and actual sample t
   const root = await temporary(context);
   const controller = await createAgentRenderJobs({ root, limits, run: writeImage });
   const input = request();
-  input.snapshot.recipe = { format: '67js.scene', motion: { duration: 1, loop: false } };
+  input.snapshot.recipe = { format: 'crucible.scene', motion: { duration: 1, loop: false } };
   input.settings.motion = { start: 1 };
   const submitted = await controller.submit(input);
   await terminal(controller, submitted.jobId);
@@ -60,7 +60,7 @@ test('motion job ranges use immutable recipe duration, loops and actual sample t
   await assert.rejects(controller.submit(input), /motion end/);
   input.settings.motion.start = null;
   await assert.rejects(controller.submit(input), /motion start/);
-  input.snapshot.recipe = { format: '67js.asset', motion: { duration: 1 } };
+  input.snapshot.recipe = { format: 'crucible.asset', motion: { duration: 1 } };
   input.settings.motion.start = 0;
   await assert.rejects(controller.submit(input), /Asset snapshot bytes/);
   const assetBytes = Buffer.from('owned motion asset bytes');
@@ -85,11 +85,11 @@ test('a scene that places a clip takes motion settings without authored motion, 
   const id = 'a'.repeat(64);
   const input = request();
   input.settings = { kind: 'image', width: 64, height: 64, motion: { start: 2 } };
-  input.snapshot.recipe = { format: '67js.scene', nodes: [{ id: 'walker', asset: { id, clip: { index: 0 } } }] };
+  input.snapshot.recipe = { format: 'crucible.scene', nodes: [{ id: 'walker', asset: { id, clip: { index: 0 } } }] };
   const submitted = await controller.submit(input);
   assert.equal((await terminal(controller, submitted.jobId)).state, 'completed');
   assert.equal(controller.status(submitted.jobId).settings.motion.start, 2);
-  input.snapshot.recipe = { format: '67js.scene', nodes: [{ id: 'prop', asset: { id } }] };
+  input.snapshot.recipe = { format: 'crucible.scene', nodes: [{ id: 'prop', asset: { id } }] };
   await assert.rejects(controller.submit(input), /authored motion, physics .* a placed clip/);
   await controller.release(submitted.jobId);
   await controller.close();
@@ -99,7 +99,7 @@ test('a scene with physics takes motion settings, defaults the video to the bake
   const root = await temporary(context);
   const controller = await createAgentRenderJobs({ root, limits, run: writeImage });
   const input = request();
-  input.snapshot.recipe = { format: '67js.scene', physics: { duration: 2, bodies: [] } };
+  input.snapshot.recipe = { format: 'crucible.scene', physics: { duration: 2, bodies: [] } };
   input.settings = { kind: 'video', width: 64, height: 64, fps: 10, motion: { start: 0 } };
   const submitted = await controller.submit(input);
   assert.equal(controller.status(submitted.jobId).settings.duration, 2);
@@ -107,7 +107,7 @@ test('a scene with physics takes motion settings, defaults the video to the bake
   await terminal(controller, submitted.jobId);
   input.settings.duration = 3;
   await assert.rejects(controller.submit(input), /physics bake duration of 2 s/);
-  input.snapshot.recipe = { format: '67js.scene', cloth: { duration: 1, sheets: [] } };
+  input.snapshot.recipe = { format: 'crucible.scene', cloth: { duration: 1, sheets: [] } };
   input.settings = { kind: 'image', width: 64, height: 64, motion: { start: 0.5 } };
   const clothJob = await controller.submit(input);
   assert.equal(controller.status(clothJob.jobId).settings.motion.start, 0.5);
@@ -555,7 +555,7 @@ test('asset digests bind immutable bytes and still/video settings produce only t
     await progress({ frames: settings.frameCount, maximumPendingFrames: 1 });
     return { artifacts, metrics: { frameCount: settings.frameCount } };
   } });
-  const snapshot = { recipe: { format: '67js.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
+  const snapshot = { recipe: { format: 'crucible.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
   await assert.rejects(controller.submit({ sourceRevision: 1, snapshot: { ...snapshot, assetBytes: Buffer.from('changed') }, settings: { kind: 'image', width: 64, height: 64 } }), /SHA256/);
   for (const kind of ['stills', 'video']) {
     const { jobId } = await controller.submit({ sourceRevision: 1, snapshot, settings: { kind, width: 64, height: 64, duration: 1, fps: 12, animation: { clip: 0, start: 2 }, rendererTime: { start: 3, rate: -1 } } });
@@ -572,7 +572,7 @@ test('a path tracer job names its denoiser, and oidn defaults to 16 samples inst
   const root = await temporary(context);
   const assetBytes = Buffer.from('bounded embedded GLB fixture');
   const assetId = createHash('sha256').update(assetBytes).digest('hex');
-  const snapshot = { recipe: { format: '67js.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
+  const snapshot = { recipe: { format: 'crucible.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
   const controller = await createAgentRenderJobs({ root, limits, async run({ directory }) {
     await writeFile(join(directory, 'render.png.partial'), Buffer.alloc(32, 1));
     return { artifacts: [{ temporary: 'render.png.partial', filename: 'render.png', mimeType: 'image/png' }], metrics: {} };
@@ -594,7 +594,7 @@ test('a path tracer job draws every sample unless it passes a noise threshold, w
   const root = await temporary(context);
   const assetBytes = Buffer.from('bounded embedded GLB fixture');
   const assetId = createHash('sha256').update(assetBytes).digest('hex');
-  const snapshot = { recipe: { format: '67js.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
+  const snapshot = { recipe: { format: 'crucible.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
   const controller = await createAgentRenderJobs({ root, limits, async run({ directory }) {
     await writeFile(join(directory, 'render.png.partial'), Buffer.alloc(32, 1));
     return { artifacts: [{ temporary: 'render.png.partial', filename: 'render.png', mimeType: 'image/png' }], metrics: {} };
@@ -614,7 +614,7 @@ test('a path tracer job runs on the cpu unless it asks for the gpu, and film job
   const root = await temporary(context);
   const assetBytes = Buffer.from('bounded embedded GLB fixture');
   const assetId = createHash('sha256').update(assetBytes).digest('hex');
-  const snapshot = { recipe: { format: '67js.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
+  const snapshot = { recipe: { format: 'crucible.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
   const controller = await createAgentRenderJobs({ root, limits, async run({ directory }) {
     await writeFile(join(directory, 'render.png.partial'), Buffer.alloc(32, 1));
     return { artifacts: [{ temporary: 'render.png.partial', filename: 'render.png', mimeType: 'image/png' }], metrics: {} };

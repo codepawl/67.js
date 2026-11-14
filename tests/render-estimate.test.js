@@ -9,7 +9,7 @@ import {
   CORRECTION_BOUND, HISTORY_LIMIT, correctionFromHistory, estimateRenderJob, historyWithJob, jobKind, parseHistory, renderReport, sceneSizeFrom,
 } from '../scripts/agent-render-estimate.mjs';
 
-const recipe = { format: '67js.scene', materials: [{ id: 'wood', map: 'planks' }, { id: 'steel', normalMap: 'dents' }, { id: 'plain' }] };
+const recipe = { format: 'crucible.scene', materials: [{ id: 'wood', map: 'planks' }, { id: 'steel', normalMap: 'dents' }, { id: 'plain' }] };
 
 function inspection({ nodeCount, trianglesEach, truncated = false, parts = nodeCount }) {
   return {
@@ -21,7 +21,7 @@ function inspection({ nodeCount, trianglesEach, truncated = false, parts = nodeC
 }
 
 function settingsFor(overrides) {
-  return normalizeJobSettings({ kind: 'image', width: 640, height: 360, ...overrides }, [], { format: '67js.scene' });
+  return normalizeJobSettings({ kind: 'image', width: 640, height: 360, ...overrides }, [], { format: 'crucible.scene' });
 }
 
 test('scene size counts every placed node, textures and lights', () => {
@@ -128,7 +128,7 @@ test('the report puts the estimate, the measurement and what fell back in one re
 });
 
 test('the job store keeps the history file beside its jobs and counts it', async context => {
-  const root = await mkdtemp(join(tmpdir(), '67js-render-history-'));
+  const root = await mkdtemp(join(tmpdir(), 'crucible-render-history-'));
   context.after(() => rm(root, { recursive: true, force: true }));
   const run = async ({ directory, progress }) => {
     await writeFile(join(directory, 'render.png.partial'), Buffer.from('fixture PNG bytes'));

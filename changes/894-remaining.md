@@ -1,1 +1,0 @@
-- The Cook `cycles` kernel reads area light `shape` (disk, ellipse) and `spread` and a blended material's `opacity` (transparent shadows) from the parity scene description, with two new reference scenes (#894)

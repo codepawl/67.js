@@ -116,7 +116,7 @@ test('uv_unwrap validates its fields and works as an unnamed stack node', () => 
   assert.throws(() => normalizeMeshEdits([{ op: 'uv_unwrap', name: 'x' }]), /edits\[0\]\.name: got "x"; expected one of the fields uv_unwrap takes/);
   assert.equal(normalizeMeshStack([{ op: 'uv_unwrap' }])[0].name, undefined);
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'drum', type: 'mesh', base: { type: 'cylinder', segments: 24, bevel: 0 }, stack: [{ op: 'mirror', axis: 'y' }, { op: 'uv_unwrap' }] }],
     materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'drum', geometry: 'drum', material: 'paint' }],

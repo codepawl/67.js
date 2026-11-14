@@ -11,7 +11,7 @@ import { describeReceived, invalidField, withFieldPrefix } from '../src/field-er
 
 function baseRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }, { id: 'block', type: 'mesh', base: { type: 'box', bevel: 0 } }],
     materials: [{ id: 'plain', color: [0.5, 0.5, 0.5] }, { id: 'paint', color: [0.2, 0.4, 0.8] }],
     nodes: [{ id: 'body', geometry: 'cube', material: 'paint' }, { id: 'child', parent: 'body' }],
@@ -43,18 +43,18 @@ async function withCar(check) {
 
 function badAsset(change) {
   return () => withCar(asset => {
-    const recipe = { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID };
+    const recipe = { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID };
     change(recipe);
     return createAgentAssetScene(asset, recipe);
   });
 }
 
 function badAssetApply(operation) {
-  return () => withCar(asset => createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID }).apply([operation], { expectedRevision: 0 }));
+  return () => withCar(asset => createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID }).apply([operation], { expectedRevision: 0 }));
 }
 
 function badAssetInspect(options) {
-  return () => withCar(asset => createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID }).inspect(options));
+  return () => withCar(asset => createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID }).inspect(options));
 }
 
 function badApply(operation) {
@@ -178,7 +178,7 @@ test('a schema error through the MCP layer names the field path and the value re
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
-    const recipe = { format: '67js.scene', schemaVersion: 1, materials: [{ id: 'paint', color: [0.5, 0.5, 2] }], nodes: [] };
+    const recipe = { format: 'crucible.scene', schemaVersion: 1, materials: [{ id: 'paint', color: [0.5, 0.5, 2] }], nodes: [] };
     const result = await client.callTool({ name: 'scene_create', arguments: { recipe } });
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /recipe\.materials\.0\.color\.2: Too big: expected number to be <=1 \(got 2\)/);

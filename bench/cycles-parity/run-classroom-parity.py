@@ -171,7 +171,7 @@ def cycles_command(blender, scene_json, prefix, samples, seed, extra):
 def tone_mapped_image(linear_rgb):
     import numpy
     import compare
-    return (numpy.clip(compare.tone_map_like_67js(linear_rgb), 0.0, 1.0) * 255.0 + 0.5).astype(numpy.uint8)
+    return (numpy.clip(compare.tone_map_like_crucible(linear_rgb), 0.0, 1.0) * 255.0 + 0.5).astype(numpy.uint8)
 
 
 def write_side_by_side(cook_path, cycles_path, output_path):

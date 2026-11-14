@@ -6,7 +6,7 @@
 export const AGENT_TOOL_EXAMPLES = Object.freeze({
   scene_create: Object.freeze({
     recipe: {
-      format: '67js.scene', schemaVersion: 1,
+      format: 'crucible.scene', schemaVersion: 1,
       geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
       materials: [{ id: 'wood', color: [0.55, 0.36, 0.2], roughness: 0.8 }, { id: 'stone', color: [0.5, 0.5, 0.52] }],
       nodes: [
@@ -27,7 +27,7 @@ export const AGENT_TOOL_EXAMPLES = Object.freeze({
   }),
   scene_create_asset: Object.freeze({
     recipe: {
-      format: '67js.asset', schemaVersion: 1,
+      format: 'crucible.asset', schemaVersion: 1,
       assetId: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       camera: { eye: [2, 1.5, 3], target: [0, 0.8, 0], fov: 40 },
       root: { rotation: [0, 0.7071, 0, 0.7071] },

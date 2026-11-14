@@ -122,7 +122,7 @@ function releaserFor(releasers) {
 
 /**
  * Decode the selected glTF scene into plain scene nodes, geometry sources, materials, textures and animation clips.
- * The result has the shape the Renderer67 conversion in gltf.js reads. Nothing here imports three.js: Draco, meshopt
+ * The result has the shape the CrucibleRenderer conversion in gltf.js reads. Nothing here imports three.js: Draco, meshopt
  * and KTX2 decoders arrive as `decoders` objects that the caller supplies.
  */
 export async function decodeGltf({ document, glbBinary, resourceBytes, decoders, limits, imageTargets = new Map(), sharedTextures }) {

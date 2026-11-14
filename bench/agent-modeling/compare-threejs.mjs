@@ -1,6 +1,6 @@
-// Joins one 67js run (run.mjs) and one three.js run (threejs.mjs) into the comparison file of issue #31 and prints
+// Joins one Crucible run (run.mjs) and one three.js run (threejs.mjs) into the comparison file of issue #31 and prints
 // the markdown tables.
-// node bench/agent-modeling/compare-threejs.mjs <67js run json> <three.js run json> <output json> [--pairwise <pairwise-judge result json>]
+// node bench/agent-modeling/compare-threejs.mjs <Crucible run json> <three.js run json> <output json> [--pairwise <pairwise-judge result json>]
 // With --pairwise it also prints wins per system, the exact binomial p and the position-bias control of pairwise-judge.mjs.
 import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
@@ -14,7 +14,7 @@ const codeRuns = await Promise.all(codePath.split(',').map(async path => JSON.pa
 const codeRun = { ...codeRuns[0], records: codeRuns.flatMap(run => run.records) };
 
 const SYSTEMS = [
-  { name: '67js MCP', run: mcpRun },
+  { name: 'Crucible MCP', run: mcpRun },
   { name: 'three.js by code', run: codeRun },
 ];
 const records = SYSTEMS.flatMap(({ name, run }) => run.records.map(record => ({ system: name, ...record })));
@@ -55,11 +55,11 @@ for (const { name } of SYSTEMS) {
 
 const pairwise = options.pairwise ? JSON.parse(await readFile(options.pairwise, 'utf8')) : null;
 const output = {
-  run: '2026-11-07-threejs-vs-67js',
+  run: '2026-11-07-threejs-vs-crucible',
   issue: 31,
   model: mcpRun.model,
   date: new Date().toISOString(),
-  scope: 'three.js half and 67js MCP side; the official Blender MCP half needs a VM and is not run',
+  scope: 'three.js half and Crucible MCP side; the official Blender MCP half needs a VM and is not run',
   threeVersion: codeRun.threeVersion,
   runsPerTaskPerSystem: 1,
   summary,

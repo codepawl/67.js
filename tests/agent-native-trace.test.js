@@ -43,7 +43,7 @@ test('a native request runs native when the package and its binary are present',
   assert.equal(choice.note, undefined);
 });
 
-test('the engine limits lower the 67js job limits and null declares none', async () => {
+test('the engine limits lower the Crucible job limits and null declares none', async () => {
   const found = await locatorFor(async () => builtTracer).find();
   assert.deepEqual(found.limits, { triangles: 1_500_000, instances: 500 });
   assert.equal(found.description.name, 'fake');

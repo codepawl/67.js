@@ -11,7 +11,7 @@ const BALL_RADIUS = 0.4;
 
 function recipe(nodes, cloth) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'sheet', type: 'grid', segments: SEGMENTS }, { id: 'ball', type: 'sphere' }],
     materials: [{ id: 'paint', color: [1, 1, 1] }],
     nodes, cloth,
@@ -114,7 +114,7 @@ test('with the drag matched, the sheet falls and lands like the Blender bake, th
   assert.ok(blender.longest < 1.1, 'Blender stretches little too, so stiffness is not the difference');
 });
 
-test('a sheet dropped on a ball stays outside it in 67js and in Blender, though the drape shapes differ', () => {
+test('a sheet dropped on a ball stays outside it in Crucible and in Blender, though the drape shapes differ', () => {
   const scene = createAgentScene(recipe(
     [{ id: 'sheet', geometry: 'sheet', material: 'paint', translation: [0, 1, 0], rotation: [-0.7071068, 0, 0, 0.7071068], scale: [1.6, 1.6, 1] },
       { id: 'ball', geometry: 'ball', material: 'paint', scale: [BALL_RADIUS, BALL_RADIUS, BALL_RADIUS] }],
@@ -122,6 +122,6 @@ test('a sheet dropped on a ball stays outside it in 67js and in Blender, though 
   ));
   scene.sampleMotion(golden.seconds);
   const nearest = points => Math.min(...points.map(point => Math.hypot(...point)));
-  assert.ok(nearest(worldPositions(scene)) > BALL_RADIUS - 0.01, 'no 67js particle inside the ball');
+  assert.ok(nearest(worldPositions(scene)) > BALL_RADIUS - 0.01, 'no Crucible particle inside the ball');
   assert.ok(nearest(golden.cases['drape-over-ball'].positions) > BALL_RADIUS - 0.03, 'no Blender vertex inside the ball');
 });

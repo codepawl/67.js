@@ -61,7 +61,7 @@ test('opacity bakes into base texture alpha, clearcoat and transmission into red
 
 test('a painted-over-rust material renders from one recipe', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     materials: [{ id: 'worn-paint', pattern: { type: 'graph', graph: paintedOverRust, resolution: 256 } }],
     geometries: [{ id: 'panel', type: 'mesh', base: { type: 'box', bevel: 0 } }],
     nodes: [{ id: 'panel', geometry: 'panel', material: 'worn-paint' }],
@@ -94,7 +94,7 @@ test('a painted-over-rust material renders from one recipe', () => {
 
 test('opacity blends the material, and the tracer cuts it out and says what it ignores', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     materials: [{ id: 'veil', pattern: { type: 'graph', graph: { color: PAINT, opacity: { uv: 'u' }, transmission: 0.5 }, resolution: 256 } }],
     geometries: [{ id: 'panel', type: 'mesh', base: { type: 'box', bevel: 0 } }],
     nodes: [{ id: 'panel', geometry: 'panel', material: 'veil' }],

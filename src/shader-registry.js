@@ -41,7 +41,7 @@ export function registerSplatSupport(functions) {
 
 export function requireSplatSupport() {
   if (!splatSupport.validate) {
-    throw new Error("Splat layers need their code: add import '@codepawlhq/67js/addons/splat-shader'.");
+    throw new Error("Splat layers need their code: add import '@codepawlhq/crucible/addons/splat-shader'.");
   }
   return splatSupport;
 }
@@ -58,7 +58,7 @@ export function requireFeatureCode(feature) {
   const slots = registeredFeatureCode.get(feature);
   if (!slots) {
     const addon = FEATURE_ADDONS[feature] ?? 'material-layer-shaders';
-    throw new Error(`The ${feature} feature needs its shader code: add import '@codepawlhq/67js/addons/${addon}' (a recipe: await loadAgentSceneModules(recipe)).`);
+    throw new Error(`The ${feature} feature needs its shader code: add import '@codepawlhq/crucible/addons/${addon}' (a recipe: await loadAgentSceneModules(recipe)).`);
   }
   return slots;
 }

@@ -20,7 +20,7 @@ try {
   await page.route('**/seams.html', route => route.fulfill({ contentType: 'text/html', body: '<canvas style="width:960px;height:540px;display:block"></canvas>' }));
   await page.goto(`${serverUrl}/seams.html`);
   const results = await page.evaluate(async () => {
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { box } = await import('/src/geometry.js');
     const { createTerrain } = await import('/src/terrain.js');
     const { applyWaterReflection, attachWaterReflection } = await import('/src/water-reflection.js');
@@ -38,7 +38,7 @@ try {
 
     function mirrorPicture(terrain) {
       const marked = applyWaterReflection([...terrain.parts, sea]);
-      const renderer = new Renderer67(canvas, marked.parts, { hdr: false, depth: true, world: true, ground: false, pixelRatio: 1, samples: 1 });
+      const renderer = new CrucibleRenderer(canvas, marked.parts, { hdr: false, depth: true, world: true, ground: false, pixelRatio: 1, samples: 1 });
       const context = renderer.context;
       const detach = attachWaterReflection(renderer, marked.surface);
       renderer.render({ eye: [0, 12, 160], target: [0, 4, -100], time: 1 });

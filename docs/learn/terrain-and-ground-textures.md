@@ -1,14 +1,14 @@
 # Terrain and ground textures
 
-`67js/addons/terrain` builds a chunked, seeded heightfield with distance level of detail. `67js/addons/texture-set` loads CC0 scans and a four-layer ground material draws them with slope, height and mask rules, height-based edge blending, triplanar cliffs and anti-tiling. Both are available from version `0.10.0`.
+`crucible/addons/terrain` builds a chunked, seeded heightfield with distance level of detail. `crucible/addons/texture-set` loads CC0 scans and a four-layer ground material draws them with slope, height and mask rules, height-based edge blending, triplanar cliffs and anti-tiling. Both are available from version `0.10.0`.
 
 ## Try the real terrain
 
 `createTerrain` builds the ground in chunks and swaps each chunk between detail levels as the eye moves. The example below calls it with a noise height, one circular hole and three levels. Drag to orbit, change the distance, and move the red ball with the slider. The console prints `heightAt` for the ball, whether it is over the hole, and after each `update(eye)` how many chunks changed level and how many triangles the ground holds.
 
 ```js live poster=terrain-rules
-import { Renderer67, sphere } from '67js';
-import { createTerrain } from '67js/addons/terrain';
+import { CrucibleRenderer, sphere } from 'crucible';
+import { createTerrain } from 'crucible/addons/terrain';
 
 const material = { color: [0.3, 0.5, 0.22], metallic: 0, roughness: 0.9 };
 const terrain = createTerrain({
@@ -30,7 +30,7 @@ placeMarker(0);
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, [...terrain.parts, marker], { world: true });
+const renderer = new CrucibleRenderer(canvas, [...terrain.parts, marker], { world: true });
 const state = { yaw: 0.5, pitch: 0.5, distance: 40 };
 console.log(`${terrain.triangleCount} triangles, chunk size ${terrain.chunkSize} m, bounds`, terrain.bounds);
 
@@ -84,7 +84,7 @@ The docs host has no CC0 scans to load, so the splat part of the call stays a pl
 3. Pass `terrain.heightAt` to `scatterVegetation` and to vehicles, and call `renderer.replaceParts` when `terrain.update(eye)` returns parts.
 
 ```js
-import { loadTextureSet } from '67js/addons/texture-set';
+import { loadTextureSet } from 'crucible/addons/texture-set';
 
 const material = { color: [1, 1, 1], metallic: 0, roughness: 1, tag: 'standard' };
 material.layers = [
@@ -116,7 +116,7 @@ material.splat = { rules: [undefined, { slope: [32, 90], slopeSoftness: 6 }] };
 | `normalStrength` | Scales the normal map tilt (default 1). |
 | `triplanar` | Projects from the sides on steep slopes, so cliffs do not stretch. |
 
-`material.splat.rules` has one entry per layer: `slope: [min, max]` in degrees, `height: [min, max]` in metres, each with `slopeSoftness` (4) and `heightSoftness` (1.5), and `mask: 'r' | 'g' | 'b' | 'a'` with `invertMask`. A layer with no rule takes what the others leave, so put grass first with no rule. Other `splat` options include `heightBlend` (0.22), `heightInfluence` (1), `triplanarStart` and `triplanarEnd` (38 and 52 degrees), `variation` (0 to 2, default 1), `edgeNoise` (0 to 2, default 1) and `parallax` (0 to 0.15 m, default 0.03). The [terrain contract](https://github.com/codepawl/67.js/blob/main/docs/terrain.md) lists every option.
+`material.splat.rules` has one entry per layer: `slope: [min, max]` in degrees, `height: [min, max]` in metres, each with `slopeSoftness` (4) and `heightSoftness` (1.5), and `mask: 'r' | 'g' | 'b' | 'a'` with `invertMask`. A layer with no rule takes what the others leave, so put grass first with no rule. Other `splat` options include `heightBlend` (0.22), `heightInfluence` (1), `triplanarStart` and `triplanarEnd` (38 and 52 degrees), `variation` (0 to 2, default 1), `edgeNoise` (0 to 2, default 1) and `parallax` (0 to 0.15 m, default 0.03). The [terrain contract](https://github.com/codepawl/crucible/blob/main/docs/terrain.md) lists every option.
 
 ## Cost
 

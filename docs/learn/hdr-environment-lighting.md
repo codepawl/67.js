@@ -1,13 +1,13 @@
 # HDR environment lighting
 
-Pass `environment: { map }` to light and reflect from an equirectangular HDR image. `loadHdri(url)` from `67js/addons/hdri` parses a Poly Haven `.hdr` file, and `createEnvironmentMap` accepts your own float data. Without a map, rendering is unchanged. The [lighting contract](/lighting.md#environment-maps-ibl) covers rotation, background display, memory and limits.
+Pass `environment: { map }` to light and reflect from an equirectangular HDR image. `loadHdri(url)` from `crucible/addons/hdri` parses a Poly Haven `.hdr` file, and `createEnvironmentMap` accepts your own float data. Without a map, rendering is unchanged. The [lighting contract](/lighting.md#environment-maps-ibl) covers rotation, background display, memory and limits.
 
 ```js
-import { Renderer67 } from '67js';
-import { loadHdri } from '67js/addons/hdri';
+import { CrucibleRenderer } from 'crucible';
+import { loadHdri } from 'crucible/addons/hdri';
 
 const map = await loadHdri('/studio_small_09_1k.hdr', { intensity: 1, rotation: 0.6 });
-const renderer = new Renderer67(canvas, parts, { hdr: true, environment: { map } });
+const renderer = new CrucibleRenderer(canvas, parts, { hdr: true, environment: { map } });
 ```
 
 `loadHdri(url, options)` fetches and parses a Radiance `.hdr` (RGBE, `-Y height +X width`, flat or run-length scanlines) and returns the descriptor. Poly Haven CC0 HDRIs at 1k or 2k work well, and larger files only cost load time. The examples below build the map from data so that they need no download.
@@ -17,7 +17,7 @@ const renderer = new Renderer67(canvas, parts, { hdr: true, environment: { map }
 `createEnvironmentMap({ width, height, data, intensity, rotation, showBackground, backgroundBlur })` takes a `Float32Array` of linear RGB or RGBA, top row first. The image centre looks toward -Z. The example paints a small sky with a bright sun, and the sphere row reflects it. Drag to orbit, and use the slider to turn the map with `{ ...map, rotation }`: maps spread from one created map reuse their GPU textures, so rotation animates for free.
 
 ```js live poster=hdr-rotate
-import { Renderer67, sphere, createEnvironmentMap } from '67js';
+import { CrucibleRenderer, sphere, createEnvironmentMap } from 'crucible';
 
 // A 128 x 64 sky: blue zenith, pale horizon, dark ground and one very bright sun.
 function paintSky(width, height) {
@@ -56,7 +56,7 @@ const parts = [0, 1, 2, 3].map(index => ({
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new CrucibleRenderer(canvas, parts, {
   ground: false,
   hdr: true,
   pixelRatio: 1.25,
@@ -107,7 +107,7 @@ Turn the slider and the sun glints slide around the three polished metal spheres
 Set `map: null` in a frame to return to studio lighting, and set the map again to switch back. The row below goes from a mirror to a rough metal. The checkbox toggles the map, and the slider scales its `intensity`.
 
 ```js live poster=hdr-compare
-import { Renderer67, sphere, createEnvironmentMap } from '67js';
+import { CrucibleRenderer, sphere, createEnvironmentMap } from 'crucible';
 
 const width = 64;
 const height = 32;
@@ -133,7 +133,7 @@ const parts = [0, 1, 2, 3, 4].map(index => ({
 }));
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts, { ground: false, hdr: true, pixelRatio: 1.25 });
+const renderer = new CrucibleRenderer(canvas, parts, { ground: false, hdr: true, pixelRatio: 1.25 });
 const state = { useMap: true, intensity: 1 };
 
 function draw() {

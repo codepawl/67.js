@@ -1,7 +1,7 @@
 import './view2d.css';
 import './brand.js';
 import { vec3 } from 'gl-matrix';
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import { createModel } from './model.js';
 import { createCanvas2D } from './canvas2d.js';
 import { cameraView, fitOrthographicHeight } from './camera.js';
@@ -97,7 +97,7 @@ function initialize() {
   setPlaying(false);
   renderer?.dispose();
   const parts = state.scene === 'poster' ? poster.parts : model;
-  renderer = new Renderer67(canvas, parts, { ground: false, samples: Number(parameters.get('samples') ?? 4), pixelRatio: exporting ? 1 : 1.25, memoryBudgetMiB: Number(parameters.get('memory') ?? 192) });
+  renderer = new CrucibleRenderer(canvas, parts, { ground: false, samples: Number(parameters.get('samples') ?? 4), pixelRatio: exporting ? 1 : 1.25, memoryBudgetMiB: Number(parameters.get('memory') ?? 192) });
   document.querySelector('#scene').value = state.scene;
   document.querySelector('#view-controls').hidden = state.scene === 'poster';
   document.querySelectorAll('[data-view]').forEach(control => control.setAttribute('aria-pressed', String(control.dataset.view === state.view)));
@@ -177,7 +177,7 @@ document.querySelector('#download').addEventListener('click', () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `67js-${state.scene}-${state.view}.png`;
+    link.download = `crucible-${state.scene}-${state.view}.png`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify('PNG saved');

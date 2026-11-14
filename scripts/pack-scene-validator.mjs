@@ -7,7 +7,7 @@ import { createAgentScene, loadAgentSceneModules } from '../src/agent-scene.js';
 export async function validatePackScene(kind, id, json) {
   const recipe = kind === 'recipes'
     ? json
-    : { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [{ ...json, id: json?.id ?? id }], nodes: [] };
+    : { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [{ ...json, id: json?.id ?? id }], nodes: [] };
   await loadAgentSceneModules(recipe);
   createAgentScene(recipe);
 }

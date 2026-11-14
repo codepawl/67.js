@@ -22,7 +22,7 @@ The clipping planes must satisfy `0 < near < far`. Keep `far / near` small, beca
 Most viewers turn the camera around the subject. Drag in the picture below to orbit, and use the wheel to zoom. On a phone, drag with one finger.
 
 ```js live poster=cameras-orbit
-import { Renderer67, box } from '67js';
+import { CrucibleRenderer, box } from 'crucible';
 
 function placeAt(x, y, z, width, height) {
   return new Float32Array([width, 0, 0, 0, 0, height, 0, 0, 0, 0, width, 0, x, y, z, 1]);
@@ -45,7 +45,7 @@ for (let row = -1; row <= 1; row++) {
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const orbit = { yaw: 0.7, pitch: 0.45, distance: 7 };
 
 function draw() {
@@ -84,7 +84,7 @@ Try `fov: 20` for a long lens with flat depth, or `fov: 80` for a wide lens with
 `cameraView(name, { target, height, distance })` returns a complete frame for the `'front'`, `'right'`, `'top'` or `'perspective'` view. The first three are orthographic, so parallel lines stay parallel. `fitOrthographicHeight(bounds, view, aspect, padding)` finds the `orthographicHeight` that shows the bounds without cropping. Bounds have `minimum` and `maximum` vectors.
 
 ```js live poster=cameras-front
-import { Renderer67, box, sphere, cameraView, fitOrthographicHeight } from '67js';
+import { CrucibleRenderer, box, sphere, cameraView, fitOrthographicHeight } from 'crucible';
 
 const placeAt = (x, y, z, size) => new Float32Array([size, 0, 0, 0, 0, size, 0, 0, 0, 0, size, 0, x, y, z, 1]);
 const parts = [
@@ -94,7 +94,7 @@ const parts = [
 const bounds = { minimum: [-0.5, 0, -0.5], maximum: [0.5, 1.9, 0.5] };
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 
 function draw() {
   const view = cameraView('front', { target: [0, 0.95, 0], distance: 6 });
@@ -111,14 +111,14 @@ new ResizeObserver(() => {
 
 The model fills the height of the picture with a margin of 20 percent. Change `'front'` to `'right'`, `'top'` or `'perspective'` to see the other views. A perspective view uses `fitPerspectiveDistance(bounds, view, aspect, padding)` instead, which returns the distance from the eye to the target.
 
-Flat 2D uses XY geometry, the `unlit` material tag and a front orthographic camera. The `67js/addons/canvas2d` addon supplies a poster scene that you can reuse.
+Flat 2D uses XY geometry, the `unlit` material tag and a front orthographic camera. The `crucible/addons/canvas2d` addon supplies a poster scene that you can reuse.
 
 ## Camera moves
 
 For a planned shot, `createCameraPath` samples the eye, the target, the field of view and the roll at a time. The frame that `path.sample(seconds)` returns goes straight to `renderer.render`.
 
 ```js live poster=cameras-path loop=4
-import { Renderer67, box, sphere, createCameraPath, fovFromFocalLength } from '67js';
+import { CrucibleRenderer, box, sphere, createCameraPath, fovFromFocalLength } from 'crucible';
 
 const placeAt = (x, y, z, size) => new Float32Array([size, 0, 0, 0, 0, size, 0, 0, 0, 0, size, 0, x, y, z, 1]);
 const parts = [
@@ -141,7 +141,7 @@ const path = createCameraPath({
 });
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 new ResizeObserver(() => renderer.resize()).observe(canvas);
 
 function frame(milliseconds) {
@@ -153,4 +153,4 @@ requestAnimationFrame(frame);
 
 ![The camera swings from left to right in front of a cube and a gold ball, then back](/docs-media/cameras-path.webm "A looping camera path with a 40 mm lens.")
 
-`fovFromFocalLength(40, { sensorHeight: 24 })` turns a lens of 40 mm on a full-frame sensor into a field of view in degrees. The [camera path contract](https://github.com/codepawl/67.js/blob/main/docs/camera-path.md) lists the channels, the tangents, the tracking options and the limits.
+`fovFromFocalLength(40, { sensorHeight: 24 })` turns a lens of 40 mm on a full-frame sensor into a field of view in degrees. The [camera path contract](https://github.com/codepawl/crucible/blob/main/docs/camera-path.md) lists the channels, the tangents, the tracking options and the limits.

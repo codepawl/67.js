@@ -1,12 +1,12 @@
 # Data-only packs
 
-A pack is a folder of material sets, recipes, looks, HDRIs and GLB models with a manifest and no code. Someone shares it as a zip, you unzip it into a local folder, and 67js checks it when the MCP server starts. Nothing in a pack runs, and nothing is downloaded by a tool call.
+A pack is a folder of material sets, recipes, looks, HDRIs and GLB models with a manifest and no code. Someone shares it as a zip, you unzip it into a local folder, and Crucible checks it when the MCP server starts. Nothing in a pack runs, and nothing is downloaded by a tool call.
 
 ## Make a pack
 
 ```
 my-pack/
-  67js-pack.json
+  crucible-pack.json
   models/crate.glb
   textures/brick.png
   looks/warm.cube
@@ -16,12 +16,12 @@ my-pack/
   previews/workshop.png
 ```
 
-`67js-pack.json` at the root:
+`crucible-pack.json` at the root:
 
 ```json
 {
-  "format": "67js.pack", "schemaVersion": 1,
-  "name": "my-pack", "version": "1.0.0", "engines": { "67js": ">=0.19.0" },
+  "format": "crucible.pack", "schemaVersion": 1,
+  "name": "my-pack", "version": "1.0.0", "engines": { "crucible": ">=0.19.0" },
   "license": "CC0-1.0", "author": "Your Name", "description": "One line about the pack.",
   "contents": {
     "assets":       [{ "id": "crate", "file": "models/crate.glb" }],
@@ -45,11 +45,11 @@ my-pack/
 
 Rules, all checked at load:
 
-- Keys are known ones only. `name` and ids are kebab-case; ids are unique per kind. `version` is three numbers. `engines["67js"]` is a range of space-separated comparators (`>=`, `>`, `<`, `<=`, `=`, `^`, `~`, such as `>=0.19.0 <1`) that the installed 67js satisfies.
+- Keys are known ones only. `name` and ids are kebab-case; ids are unique per kind. `version` is three numbers. `engines["crucible"]` is a range of space-separated comparators (`>=`, `>`, `<`, `<=`, `=`, `^`, `~`, such as `>=0.19.0 <1`) that the installed Crucible satisfies.
 - Paths are relative, with forward slashes, inside the pack: no `..`, no absolute or drive paths, no backslashes, only letters, digits, `.`, `_` and `-` in each part. Every listed file must exist and have the extension of its kind.
-- No symbolic links. A pack folder holds only these files, anywhere in it: `67js-pack.json`; the files listed in `contents` (and a recipe `preview`); and text documents named `LICENSE`, `LICENCE`, `README`, `NOTICE`, `CHANGELOG` or `AUTHORS` (any case, with an optional `.md` or `.txt`) that are valid UTF-8 without NUL bytes and at most 1 MiB. Any other file, including a script or program (`.js`, `.html`, `.svg`, `.wasm`, `.exe`, `.sh`, `.py`), a file with no extension and a dotfile, refuses the whole pack: list it in `contents` or remove it. `67js-pack.json` cannot be listed as content. Listed binaries must start with the signature of their kind (`glTF`, PNG, JPEG, WebP, `#?RADIANCE` or `#?RGBE`), so a script renamed to `.png` is refused.
+- No symbolic links. A pack folder holds only these files, anywhere in it: `crucible-pack.json`; the files listed in `contents` (and a recipe `preview`); and text documents named `LICENSE`, `LICENCE`, `README`, `NOTICE`, `CHANGELOG` or `AUTHORS` (any case, with an optional `.md` or `.txt`) that are valid UTF-8 without NUL bytes and at most 1 MiB. Any other file, including a script or program (`.js`, `.html`, `.svg`, `.wasm`, `.exe`, `.sh`, `.py`), a file with no extension and a dotfile, refuses the whole pack: list it in `contents` or remove it. `crucible-pack.json` cannot be listed as content. Listed binaries must start with the signature of their kind (`glTF`, PNG, JPEG, WebP, `#?RADIANCE` or `#?RGBE`), so a script renamed to `.png` is refused.
 - Limits (`src/pack-manifest.js`): 256 files, 256 MiB in total, 64 MiB per file, 1 MiB per JSON file, 64 items per kind; at most 32 packs load at once.
-- Recipe and material JSON nests at most 64 levels of objects and lists. They contain no remote URL, in a value or a key (`http:`, `https:`, `ftp:`, `//host`, a `data:` URL that is not a PNG, JPEG or WebP image). A recipe has `"format": "67js.scene"`. `npm run pack:check` also runs the validator `scene_create` uses (a material is checked as the only material of an empty scene); the server leaves that to `scene_create` and `scene_apply`, which run it when the agent uses the item.
+- Recipe and material JSON nests at most 64 levels of objects and lists. They contain no remote URL, in a value or a key (`http:`, `https:`, `ftp:`, `//host`, a `data:` URL that is not a PNG, JPEG or WebP image). A recipe has `"format": "crucible.scene"`. `npm run pack:check` also runs the validator `scene_create` uses (a material is checked as the only material of an empty scene); the server leaves that to `scene_create` and `scene_apply`, which run it when the agent uses the item.
 
 An error names the pack, the file and the field, and says what to pass instead.
 
@@ -63,10 +63,10 @@ It runs the same checks as the server and prints `ok` or `FAIL` with the error. 
 
 ## Install
 
-The [Marketplace page](https://67js.codepawl.com/marketplace.html) lists the published packs with a checksum. Unzip each pack into its own subfolder of one packs folder and start the server with that folder:
+The [Marketplace page](https://crucible.codepawl.com/marketplace.html) lists the published packs with a checksum. Unzip each pack into its own subfolder of one packs folder and start the server with that folder:
 
 ```sh
-67js-mcp --packs /absolute/path/to/packs
+crucible-mcp --packs /absolute/path/to/packs
 ```
 
 A pack that fails the checks is skipped and listed with its error under `packs.rejected` in `scene_asset_catalog`; the others still load. Changed files need a server restart, like `--assets`.
@@ -77,4 +77,4 @@ A pack that fails the checks is skipped and listed with its error under `packs.r
 
 ## Publish
 
-Zip the pack folder with `67js-pack.json` at the top of the archive, name the zip `name-version.zip` and host it anywhere, such as a GitHub release. State the license of every file in `license` and in a `LICENSE` file; 67js does not check licenses. Run `npm run pack:check` first, and say which 67js versions you tested.
+Zip the pack folder with `crucible-pack.json` at the top of the archive, name the zip `name-version.zip` and host it anywhere, such as a GitHub release. State the license of every file in `license` and in a `LICENSE` file; Crucible does not check licenses. Run `npm run pack:check` first, and say which Crucible versions you tested.

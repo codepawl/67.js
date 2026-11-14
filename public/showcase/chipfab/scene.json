@@ -239,10 +239,10 @@
   },
   "credits": [
     {
-      "model": "Chip fab cleanroom bay, built in Blender for 67js",
+      "model": "Chip fab cleanroom bay, built in Blender for Crucible",
       "author": "CodePawl",
       "licence": "MIT",
-      "source": "https://github.com/codepawl/67.js"
+      "source": "https://github.com/codepawl/crucible"
     },
     {
       "model": "Universal Base Characters, Universal Animation Library",

@@ -9,7 +9,7 @@ const syncHint = 'Run `npm run plugin:sync` to copy the version from package.jso
 
 test('the marketplace lists one plugin whose version matches package.json', () => {
   assert.equal(marketplace.plugins.length, 1);
-  assert.equal(plugin.name, '67js');
+  assert.equal(plugin.name, 'crucible');
   assert.equal(plugin.version, packageMetadata.version, syncHint);
 });
 
@@ -19,14 +19,14 @@ test('the plugin source is the skills folder, so the install cache stays small',
 });
 
 test('the plugin ships both skills that exist in the repository', () => {
-  assert.deepEqual(plugin.skills, ['./build-67js-scene', './render-67js-media']);
+  assert.deepEqual(plugin.skills, ['./build-crucible-scene', './render-crucible-media']);
   for (const skillPath of plugin.skills) {
     assert.ok(existsSync(new URL(`../skills/${skillPath}/SKILL.md`, import.meta.url)), `${skillPath} has no SKILL.md`);
   }
 });
 
 test('the plugin starts the published MCP bin and the npm package ships its files', () => {
-  const server = plugin.mcpServers['67js'];
+  const server = plugin.mcpServers['crucible'];
   assert.equal(server.command, 'npx');
   const [binName] = Object.keys(packageMetadata.bin);
   assert.deepEqual(server.args, ['-y', '-p', packageMetadata.name, binName]);

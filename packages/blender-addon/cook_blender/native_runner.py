@@ -23,10 +23,10 @@ def resolve_native_directory(preference_value, environment=None):
     if not candidate:
         raise CookSetupError(
             f"Cook does not know where the native tracer is. Set 'Native tracer folder' in Preferences > Add-ons > Cook, "
-            f"or set the {NATIVE_DIRECTORY_VARIABLE} environment variable, to a 67js checkout with Cook built (npm run cook:build)."
+            f"or set the {NATIVE_DIRECTORY_VARIABLE} environment variable, to a Crucible checkout with Cook built (npm run cook:build)."
         )
     directory = os.path.abspath(os.path.expanduser(candidate))
-    checks = [(TRACE_SCRIPT_PARTS, "Point it at the root of a 67js checkout.")]
+    checks = [(TRACE_SCRIPT_PARTS, "Point it at the root of a Crucible checkout.")]
     if not environment.get(ADDON_PATH_VARIABLE, "").strip():
         checks.append((NATIVE_ADDON_PARTS, f"Build it with: npm run cook:build, or set {ADDON_PATH_VARIABLE} to a built render-native.node."))
     for parts, fix in checks:

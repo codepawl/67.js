@@ -11,7 +11,7 @@ function demoteHeadings(markdown) {
 
 // A learn page links to its sibling docs with `../x.md`, which only resolves from `docs/learn/`. In the one-file guide
 // at `/guide.md` those links would 404, so they point at the page on GitHub like the links in `docs/guide.md`.
-const docsUrl = 'https://github.com/codepawl/67.js/blob/main/docs/';
+const docsUrl = 'https://github.com/codepawl/crucible/blob/main/docs/';
 
 export function absoluteDocsLinks(markdown) {
   return markdown.replace(/\]\(\.\.\/([^)\s]+)\)/g, (_match, path) => `](${docsUrl}${path})`);

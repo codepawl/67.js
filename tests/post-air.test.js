@@ -145,7 +145,7 @@ test('the new stages leave every existing post chain drawing exactly as before',
 
 function sceneWith(effects, tracks) {
   return createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'finish', color: [0.6, 0.6, 0.6], emission: 0 }],
     nodes: [{ id: 'bomb', geometry: 'box', material: 'finish' }],

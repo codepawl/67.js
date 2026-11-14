@@ -1,11 +1,11 @@
 # Player: controllers and camera rigs
 
-`67js/addons/player` gives a live game something to control and a camera that follows it. A controller is a [runtime](runtime.md) system that reads named [input](input.md) actions and axes and moves a body. A camera rig is a runtime system that places the camera. Both are swappable while the game runs, and a game can write its own with the same shape. The addon loads only when imported and adds no dependency.
+`crucible/addons/player` gives a live game something to control and a camera that follows it. A controller is a [runtime](runtime.md) system that reads named [input](input.md) actions and axes and moves a body. A camera rig is a runtime system that places the camera. Both are swappable while the game runs, and a game can write its own with the same shape. The addon loads only when imported and adds no dependency.
 
 ```js
-import { createRuntime } from '67js/addons/runtime';
-import { createInput, keyboardSource } from '67js/addons/input';
-import { createCharacterController, createFollowCamera } from '67js/addons/player';
+import { createRuntime } from 'crucible/addons/runtime';
+import { createInput, keyboardSource } from 'crucible/addons/input';
+import { createCharacterController, createFollowCamera } from 'crucible/addons/player';
 
 const input = createInput({
   sources: [keyboardSource()],

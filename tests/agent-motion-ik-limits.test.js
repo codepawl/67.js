@@ -16,7 +16,7 @@ function armRecipe(motion) {
     { id: 'elbow', parent: 'shoulder', translation: [0.5, 0, 0] },
     { id: 'tip', parent: 'elbow', translation: [0.4, 0, 0], geometry: 'box', material: 'paint', scale: [0.03, 0.03, 0.03] },
   ];
-  return { format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'box', type: 'box', bevel: 0 }], materials: SEGMENT_MATERIALS, nodes, motion };
+  return { format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'box', type: 'box', bevel: 0 }], materials: SEGMENT_MATERIALS, nodes, motion };
 }
 
 const arm = extra => ({ type: 'two-bone', root: 'shoulder', middle: 'elbow', end: 'tip', target: [0.3, 1.5, 0.2], pole: [0, 3, 0], ...extra });
@@ -60,7 +60,7 @@ const ASSET_ID = 'ab'.repeat(32);
 
 function robotScene(motion) {
   const asset = parseGltf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), { maxVertices: 500000 });
-  return asset.then(loaded => ({ loaded, scene: createAgentAssetScene(loaded, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID, motion }) }));
+  return asset.then(loaded => ({ loaded, scene: createAgentAssetScene(loaded, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID, motion }) }));
 }
 
 function translationOf({ loaded, scene }, name) {

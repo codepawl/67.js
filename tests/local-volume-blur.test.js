@@ -56,7 +56,7 @@ async function startServer(port) {
 async function drawRaster(page, extraParts, volumes) {
   const task = async ({ size, camera, extraParts: extras, volumes: localVolumes }) => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { createFloatOutput, readFloatPixels } = await import('/src/float-output.js');
     await import('/src/fog-shader.js');
     document.body.innerHTML = '';
@@ -70,7 +70,7 @@ async function drawRaster(page, extraParts, volumes) {
     const scaled = ([width, height, depth], [x, y, z]) => new Float32Array([width, 0, 0, 0, 0, height, 0, 0, 0, 0, depth, 0, x, y, z, 1]);
     const parts = [{ name: 'ground', geometry: box(0, 1), matrix: scaled([40, 0.2, 40], [0, -0.1, 0]), material: unlit([1, 1, 1]) }];
     extras.forEach((extra, index) => parts.push({ name: `black${index}`, geometry: box(0, 1), matrix: scaled(extra.size, extra.center), material: unlit([0, 0, 0]) }));
-    const renderer = new Renderer67(canvas, parts, { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+    const renderer = new CrucibleRenderer(canvas, parts, { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
     const output = createFloatOutput(renderer.context, size, size);
     const environment = { keyIntensity: 0, fillIntensity: 0, ambientIntensity: 0, localVolumes };
     renderer.render({ ...camera, time: 0, environment, outputFramebuffer: output.framebuffer });

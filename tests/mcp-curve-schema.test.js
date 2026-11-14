@@ -18,7 +18,7 @@ const bundle = {
 const growing = { id: 'growing', type: 'curve', shape: { type: 'spiral' }, grow: { name: 'grow', steps: 4 } };
 
 function recipeWith(geometry) {
-  return { format: '67js.scene', schemaVersion: 1, geometries: [geometry], materials: [], nodes: [] };
+  return { format: 'crucible.scene', schemaVersion: 1, geometries: [geometry], materials: [], nodes: [] };
 }
 
 async function connectRecordingServer() {
@@ -35,7 +35,7 @@ async function connectRecordingServer() {
     },
   };
   const server = createAgentMcpServer(runtime);
-  const client = new Client({ name: '67js-curve-schema-test', version: '1' });
+  const client = new Client({ name: 'crucible-curve-schema-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

@@ -19,7 +19,7 @@ const recipePath = process.argv.slice(2).find((argument, index, all) => argument
   ?? 'tests/fixtures/demo-room.recipe.json';
 const recipe = JSON.parse(await readFile(recipePath, 'utf8'));
 const metadata = JSON.parse(await readFile('package.json', 'utf8'));
-const consumer = await mkdtemp(join(tmpdir(), '67js-kernel-consumer-'));
+const consumer = await mkdtemp(join(tmpdir(), 'crucible-kernel-consumer-'));
 await writeFile(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
 
 const npmCli = process.env.npm_execpath ?? resolve(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
@@ -32,15 +32,15 @@ const packResult = JSON.parse(npm(['pack', process.cwd(), '--ignore-scripts', '-
 const packed = Array.isArray(packResult) ? packResult[0] : packResult[metadata.name];
 assert.ok(packed.files.some(file => file.path === 'build/kernel-worker.js'), 'The package must ship build/kernel-worker.js.');
 const archive = join(consumer, packed.filename).replaceAll('\\', '/');
-npm(['install', `67js@file:${archive}`, '--offline', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund']);
+npm(['install', `crucible@file:${archive}`, '--offline', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund']);
 // The demo recipe has boolean edits, which need the optional peer manifold-3d beside the package, as a user installs it.
 await cp(resolve('node_modules/manifold-3d'), join(consumer, 'node_modules', 'manifold-3d'), { recursive: true });
-const cli = join(consumer, 'node_modules', '67js', 'bin', '67js-mcp.mjs');
+const cli = join(consumer, 'node_modules', 'crucible', 'bin', 'crucible-mcp.mjs');
 
 const transport = new PatientStdioClientTransport({ command: process.execPath, args: [cli, '--backend', backend, '--memory', '192'], cwd: consumer, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
-const client = new Client({ name: '67js-kernel-worker-proof', version: '1' }, { versionNegotiation: { mode: 'legacy', probe: { timeoutMs: 180000 } } });
+const client = new Client({ name: 'crucible-kernel-worker-proof', version: '1' }, { versionNegotiation: { mode: 'legacy', probe: { timeoutMs: 180000 } } });
 try {
   await client.connect(transport, { timeout: 180000 });
   const startedAt = performance.now();

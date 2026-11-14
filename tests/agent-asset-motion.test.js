@@ -4,7 +4,7 @@ import { parseGltf } from '../src/gltf.js';
 import { createAgentAssetScene } from '../src/agent-asset.js';
 import { skinnedStripAsset } from './fixtures/skinned-strip.js';
 
-const recipe = () => ({ format: '67js.asset', schemaVersion: 1, assetId: 'ac'.repeat(32) });
+const recipe = () => ({ format: 'crucible.asset', schemaVersion: 1, assetId: 'ac'.repeat(32) });
 const motion = () => ({ duration: 2, tracks: [{ kind: 'node', id: 'node-3', property: 'rotation',
   keyframes: [{ time: 0, value: [0, 0, 0, 1] }, { time: 2, value: [0, 0, Math.SQRT1_2, Math.SQRT1_2] }] }] });
 const pose = scene => scene.parts.map(part => ({ matrix: [...part.matrix], palette: [...(part.skin?.jointMatrices ?? [])], weights: [...(part.morph?.weights ?? [])] }));

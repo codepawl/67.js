@@ -1,11 +1,11 @@
 # Skeleton pose layers and IK
 
-`67js/addons/skeleton-pose` builds a skeletal pose from clip layers, then corrects it with inverse kinematics. Use it to
+`crucible/addons/skeleton-pose` builds a skeletal pose from clip layers, then corrects it with inverse kinematics. Use it to
 wave while walking, add breathing on top of any clip, keep feet on uneven ground, reach for an object or look at a point.
 
 ```js
-import { loadGltf } from '67js/addons/gltf';
-import { clipFromGltfAnimation, createAssetPose } from '67js/addons/skeleton-pose';
+import { loadGltf } from 'crucible/addons/gltf';
+import { clipFromGltfAnimation, createAssetPose } from 'crucible/addons/skeleton-pose';
 
 const character = await loadGltf(url);
 const clip = name => clipFromGltfAnimation(character.animations.find(animation => animation.name === name), { loop: true });
@@ -52,11 +52,11 @@ that sets them.
 pose itself (the MCP asset recipe does, before it solves IK). The same time always gives the same result.
 
 `createSkeletonPose({ skin, rig, meshWorldMatrix, layers, ik })` is the lower level: it writes one skin's palette, or with
-only a `rig` just computes joint positions. `rig` defaults to `createRigFromSkin(skin)` from `67js/addons/retarget`; pass
+only a `rig` just computes joint positions. `rig` defaults to `createRigFromSkin(skin)` from `crucible/addons/retarget`; pass
 one with `rootMatrix` when a scaled node sits above the root joints.
 
 Anywhere a joint is named you can use the joint name or a humanoid bone name such as `leftUpperArm`
-(see [retargeting](https://67js.codepawl.com/retarget.md)), so a setup can move between rigs. An asset's joint names are its decoded node names, in
+(see [retargeting](https://crucible.codepawl.com/retarget.md)), so a setup can move between rigs. An asset's joint names are its decoded node names, in
 `asset.nodes[n].name`: the loader removes characters such as dots, so `Foot.L` in the file is `FootL` here.
 
 ## Layers
@@ -132,10 +132,10 @@ root rather than of the lower leg, so two-bone IK refuses them with an error; it
 ## Limits
 
 - A foot or hand held by IK keeps its rotation from the clip, so a foot on a slope does not tilt to match the ground.
-- Uniform scale only, as in the [retargeting](https://67js.codepawl.com/retarget.md) rig. Clip scale tracks are ignored.
+- Uniform scale only, as in the [retargeting](https://crucible.codepawl.com/retarget.md) rig. Clip scale tracks are ignored.
 - No joint angle limits. A pole keeps a knee on the right side, but nothing stops a target from bending it too far.
 - No full-body solve: moving a hand does not move the hips. Solvers run one at a time, so order them from the base of the
   body outward.
 - Clip layers and masks are code only. Recipes and imported assets get IK through MCP with [`motion.ik`](agent-motion.md#inverse-kinematics).
-- The [animation mixer](https://67js.codepawl.com/animation-mixer.md) works on rigid part transforms and has no layers, masks or IK. Use this addon
+- The [animation mixer](https://crucible.codepawl.com/animation-mixer.md) works on rigid part transforms and has no layers, masks or IK. Use this addon
   for skinned rigs.

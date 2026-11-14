@@ -7,7 +7,7 @@ Every renderer starts with a studio light rig: one key light that casts shadows,
 `environment.lightDirection` points from the scene toward the key light. Set it on the renderer, or override it in one frame with `frame.environment`. Drag across the picture below to move the light, and watch the shadows.
 
 ```js live poster=lighting-sun
-import { Renderer67, box, sphere, cylinder } from '67js';
+import { CrucibleRenderer, box, sphere, cylinder } from 'crucible';
 
 const placeAt = (x, y, z, width, height = width) => new Float32Array([width, 0, 0, 0, 0, height, 0, 0, 0, 0, width, 0, x, y, z, 1]);
 const parts = [
@@ -18,7 +18,7 @@ const parts = [
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 let sunAngle = 0.9;
 
 function draw() {
@@ -53,7 +53,7 @@ Set all three to 0 to see only your own lamps. The sky, emission and fog still s
 `environment.pointLights` adds up to 16 local lights. Each light has a `position`, a linear `color`, an `intensity`, a `radius` and a `range` in meters. To make the bulb itself glow, give its part `emission`, and add bloom in the frame.
 
 ```js live poster=lighting-lamp
-import { Renderer67, box, sphere } from '67js';
+import { CrucibleRenderer, box, sphere } from 'crucible';
 
 const placeAt = (x, y, z, width, height = width, depth = width) => new Float32Array([width, 0, 0, 0, 0, height, 0, 0, 0, 0, depth, 0, x, y, z, 1]);
 const bulbPosition = [0, 1.3, 0];
@@ -65,7 +65,7 @@ const parts = [
 ];
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new CrucibleRenderer(canvas, parts, {
   hdr: true,
   environment: {
     keyIntensity: 0.05,
@@ -116,7 +116,7 @@ renderer.render({
 
 ### Depth of field, motion blur and render passes
 
-Depth of field and camera motion blur live in `67js/addons/camera-effects`, so the core carries none of their shader text. Call `installCameraEffects(renderer)` on a renderer made with `depth: true`. Then set `effects.depthOfField: { blur: 0.6, focusDistance: 4 }` or `effects.motionBlur: { shutter: 0.1 }`.
+Depth of field and camera motion blur live in `crucible/addons/camera-effects`, so the core carries none of their shader text. Call `installCameraEffects(renderer)` on a renderer made with `depth: true`. Then set `effects.depthOfField: { blur: 0.6, focusDistance: 4 }` or `effects.motionBlur: { shutter: 0.1 }`.
 
 Motion blur also needs `frame.previousCamera` (`eye`, `target`, `up` and the lens fields) for the camera at `time - shutter`. Derive it from the frame time, so the result repeats on every seek. Each effect compiles and allocates its targets on the first frame that turns it on. The memory estimate does not include these targets.
 

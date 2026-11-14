@@ -1,25 +1,25 @@
 {
-  "name": "67js-addon-starter",
+  "name": "crucible-addon-starter",
   "version": "0.1.0",
-  "description": "A starter for a 67js addon: registers a hover controller kind.",
+  "description": "A starter for a Crucible addon: registers a hover controller kind.",
   "type": "module",
   "main": "./src/index.js",
   "exports": "./src/index.js",
   "files": ["src"],
   "license": "MIT",
-  "keywords": ["67js-addon", "67js", "three-d"],
+  "keywords": ["crucible-addon", "crucible", "three-d"],
   "scripts": {
     "test": "node --test tests/starter.spec.js"
   },
-  "67js": {
+  "crucible": {
     "range": ">=0.19.0 <1.0.0",
     "extensionPoints": ["registerController"],
     "bundleBytes": 2048
   },
   "peerDependencies": {
-    "@codepawlhq/67js": ">=0.19.0 <1.0.0"
+    "@codepawlhq/crucible": ">=0.19.0 <1.0.0"
   },
   "devDependencies": {
-    "@codepawlhq/67js": "^0.19.0"
+    "@codepawlhq/crucible": "^0.19.0"
   }
 }

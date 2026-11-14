@@ -1,4 +1,4 @@
-import { registerController } from '@codepawlhq/67js/addons/player';
+import { registerController } from '@codepawlhq/crucible/addons/player';
 
 const DEFAULT_HOVER_HEIGHT = 1.5;
 const DEFAULT_SPEED = 4;

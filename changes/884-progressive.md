@@ -1,1 +1,0 @@
-- The home hero draws its first live 3D frame from a 2 MB first view of the Port and swaps in the full world when it has arrived, so on a slow link the 3D shows in about 3.5 s instead of after the whole 9.7 MB (#884)

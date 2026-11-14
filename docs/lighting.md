@@ -2,10 +2,10 @@
 
 Available from version `0.4.0`.
 
-`Renderer67` accepts lighting in its existing `environment` option. `frame.environment` overrides selected fields for each frame. Lights use world-space positions and linear RGB colors. Use meters consistently when authoring a physically scaled scene.
+`CrucibleRenderer` accepts lighting in its existing `environment` option. `frame.environment` overrides selected fields for each frame. Lights use world-space positions and linear RGB colors. Use meters consistently when authoring a physically scaled scene.
 
 ```js
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new CrucibleRenderer(canvas, parts, {
   ground: false,
   world: true,
   hdr: true,
@@ -40,16 +40,16 @@ These controls do not disable the sky, emission, fog or special procedural floor
 An equirectangular HDR image can replace the procedural studio reflection and the fixed ambient term. Poly Haven CC0 HDRIs at 1k or 2k work well; larger files only cost load time.
 
 ```js
-import { Renderer67 } from '67js';
-import { loadHdri } from '67js/addons/hdri';
+import { CrucibleRenderer } from 'crucible';
+import { loadHdri } from 'crucible/addons/hdri';
 
 const map = await loadHdri('/studio_small_09_1k.hdr', { intensity: 1, rotation: 0.6 });
-const renderer = new Renderer67(canvas, parts, { hdr: true, environment: { map } });
+const renderer = new CrucibleRenderer(canvas, parts, { hdr: true, environment: { map } });
 ```
 
 `loadHdri(url, options)` fetches and parses a Radiance `.hdr` (RGBE, `-Y height +X width`, flat or run-length scanlines) and returns the descriptor. To build one from your own data, call `createEnvironmentMap({ width, height, data, intensity, rotation, showBackground, backgroundBlur })`, where `data` is a `Float32Array` of linear RGB or RGBA, top row first. The image centre looks toward -Z, `rotation` turns it about +Y in radians (0 to 1,000,000 as a finite number), `intensity` is 0 to 1000, `backgroundBlur` is 0 to 1.
 
-`sunFromEnvironmentMap(map)` finds the sun in an outdoor map: the brightest 3 by 3 block, then the luminance-weighted centre of the pixels within 10 degrees of it that reach half its brightness. It returns `{ lightDirection, keyColor, keyIntensity }` with `rotation` applied, or `null` when the peak is under 20 times the mean luminance (overcast). `keyLightFromHdri(map, { min, max })` wraps it for a scene box and returns `{ environment: { lightDirection, keyColor, keyIntensity }, shadowBounds }`, so `new Renderer67(canvas, parts, { environment: { map, ...lit.environment }, shadowBounds: lit.shadowBounds })` gets sun shadows with no hand-tuned numbers. `keyIntensity` is an estimate (sun irradiance over pi); tune it by eye. On Poly Haven san_giuseppe_bridge_4k with `rotation` pi the direction is 0.04 degrees from the hand-tuned one.
+`sunFromEnvironmentMap(map)` finds the sun in an outdoor map: the brightest 3 by 3 block, then the luminance-weighted centre of the pixels within 10 degrees of it that reach half its brightness. It returns `{ lightDirection, keyColor, keyIntensity }` with `rotation` applied, or `null` when the peak is under 20 times the mean luminance (overcast). `keyLightFromHdri(map, { min, max })` wraps it for a scene box and returns `{ environment: { lightDirection, keyColor, keyIntensity }, shadowBounds }`, so `new CrucibleRenderer(canvas, parts, { environment: { map, ...lit.environment }, shadowBounds: lit.shadowBounds })` gets sun shadows with no hand-tuned numbers. `keyIntensity` is an estimate (sun irradiance over pi); tune it by eye. On Poly Haven san_giuseppe_bridge_4k with `rotation` pi the direction is 0.04 degrees from the hand-tuned one.
 
 Set `environment.map` in the constructor or in `frame.environment`. Maps spread from one created map, such as `{ ...map, rotation: time }`, reuse its GPU textures, so rotation animates for free. Passing a different map prefilters it on first use, and `map: null` returns to studio lighting. With no map the output is pixel-identical to before.
 
@@ -67,7 +67,7 @@ Limits: the diffuse term uses L2 spherical harmonics, so a very small intense su
 
 ## Point lights
 
-At most 16 lights are supported per frame. Each light supplies `position`. Optional fields default to white `color`, `intensity: 1`, `radius: 0.05` and unlimited `range: 0`. `softFalloff: true` (point and spot lights, default false) makes a light with a radius an oriented disk facing the shaded point, as Blender's Soft Falloff; only the native `cycles` path tracer draws it, every other renderer keeps the sphere ([Cycles parity](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md#soft-falloff-lights-1060)).
+At most 16 lights are supported per frame. Each light supplies `position`. Optional fields default to white `color`, `intensity: 1`, `radius: 0.05` and unlimited `range: 0`. `softFalloff: true` (point and spot lights, default false) makes a light with a radius an oriented disk facing the shaded point, as Blender's Soft Falloff; only the native `cycles` path tracer draws it, every other renderer keeps the sphere ([Cycles parity](https://github.com/codepawl/crucible/blob/main/docs/cycles-parity.md#soft-falloff-lights-1060)).
 
 The light uses inverse-square falloff outside its radius. Doubling distance reduces incoming illumination to one quarter before material response. Intensity follows the candela convention for a point source, but the renderer's existing exposure and environment are not a calibrated photographic pipeline.
 
@@ -77,7 +77,7 @@ Inputs must be finite numbers. Positions are within ±1,000,000 scene units. Col
 
 Key/fill/ambient intensity is between zero and 100. Key color components are between zero and 1,000. Large coordinates still inherit Float32 rendering precision limits.
 
-A point light casts a shadow only with `castShadow: true` (see [Local shadows](#local-shadows)); without it the light can illuminate through opaque walls. The original directional shadow map remains in use. Source-only [volume fog](https://67js.codepawl.com/volumetric.md) receives directional scattering and shadows. Point-light scattering and indirect bounces remain unfinished.
+A point light casts a shadow only with `castShadow: true` (see [Local shadows](#local-shadows)); without it the light can illuminate through opaque walls. The original directional shadow map remains in use. Source-only [volume fog](https://crucible.codepawl.com/volumetric.md) receives directional scattering and shadows. Point-light scattering and indirect bounces remain unfinished.
 
 ## Spot lights
 
@@ -117,11 +117,11 @@ A point light costs about 0.04 to 0.05 ms and an area light about 0.04 ms at thi
 
 ## Bounced light in a lamp-lit room
 
-A closed room lit by point, spot or area lights gets the light its walls bounce without a bake and at no cost per frame. `groundBounceEnvironment(parts, environment)` (`67js/addons/ground-bounce`, the same call that adds the floor's bounce) finds the room with the closed-room ray test, measures the area of the faces that look at the middle of the scene and their mean albedo (colour times texture mean, per channel), and sets `bounce` on the environment map. With lamp flux `F` (point `4 pi I`, spot `2 pi (1 - cos angle) I`, area `pi I`, summed over the lamps inside the room), area `A` and albedo `rho`, the bounce is `0.8 * F / pi * rho / (A * (1 - rho))` in each colour channel, so red walls bounce red light. The renderer adds it to the diffuse light: it is one constant in the first irradiance coefficient, the map's data is shared, and a lamp that changes every frame rebuilds nothing. The 0.8 is fitted: at 1.0 `lit-interior` came out 10 percent brighter than Cycles.
+A closed room lit by point, spot or area lights gets the light its walls bounce without a bake and at no cost per frame. `groundBounceEnvironment(parts, environment)` (`crucible/addons/ground-bounce`, the same call that adds the floor's bounce) finds the room with the closed-room ray test, measures the area of the faces that look at the middle of the scene and their mean albedo (colour times texture mean, per channel), and sets `bounce` on the environment map. With lamp flux `F` (point `4 pi I`, spot `2 pi (1 - cos angle) I`, area `pi I`, summed over the lamps inside the room), area `A` and albedo `rho`, the bounce is `0.8 * F / pi * rho / (A * (1 - rho))` in each colour channel, so red walls bounce red light. The renderer adds it to the diffuse light: it is one constant in the first irradiance coefficient, the map's data is shared, and a lamp that changes every frame rebuilds nothing. The 0.8 is fitted: at 1.0 `lit-interior` came out 10 percent brighter than Cycles.
 
 It is left out when the scene has a bake (its light map holds the bounce), a sun (`keyColor` above zero or unset; a sun-lit room gets the light of its sunlit patches instead, see "Sunlit patches bounce light into a closed room"), no map, or `environment.roomBounce` is `false`. It is one average colour for the whole room, with no brighter corner beside a lamp and no colour bleeding next to a wall; a bake gives those, and `scene_inspect` names it (`closed-room-without-bake`, with the `standard` preset) for a closed room lit by lamps only.
 
-Luminance of the 67js picture over Cycles (linear, whole frame and 20th percentile, `bench/reference/luminance-ratio.py`, GPU renders against the committed Cycles panels):
+Luminance of the Crucible picture over Cycles (linear, whole frame and 20th percentile, `bench/reference/luminance-ratio.py`, GPU renders against the committed Cycles panels):
 
 | Scene | Mean before | Mean after | p20 before | p20 after |
 | --- | --- | --- | --- | --- |
@@ -140,7 +140,7 @@ The room test is `fittedClosedRoomShare` (`src/fitted-closed-room.js`), not the 
 
 `environment.sunBounce` is a number of 0 or more: 0 is off (the look before sun bounce existed, byte for byte: the pixels of all 6 scenes below match a tree without it), 1 is the default, fitted to Cycles on the reference halls (the tables below), above 1 is stronger. The 0.3 is fitted: at 0.6 `dark-shaft` came out brighter than Cycles around its patch (mean 1.19 times) and FLIP got worse by 0.01.
 
-Luminance of the 67js picture over Cycles in the ring around the lit patch (mean and 20th percentile, linear, 480 x 270 panels of the committed Cycles sheets, patch = Cycles pixels above 0.35 of its 99.5th percentile, ring from 3 to 25 pixels away), and FLIP of the whole panel against Cycles (RTX 3060, `bench/reference/render-gpu.mjs --sun-bounce <n>`, scored on the 960 x 540 draws scaled to the panel):
+Luminance of the Crucible picture over Cycles in the ring around the lit patch (mean and 20th percentile, linear, 480 x 270 panels of the committed Cycles sheets, patch = Cycles pixels above 0.35 of its 99.5th percentile, ring from 3 to 25 pixels away), and FLIP of the whole panel against Cycles (RTX 3060, `bench/reference/render-gpu.mjs --sun-bounce <n>`, scored on the 960 x 540 draws scaled to the panel):
 
 | Scene | Ring mean 0 / 1 / 2 | Ring p20 0 / 1 / 2 | FLIP 0 / 1 / 2 | FLIP main (#465) at 1 |
 | --- | --- | --- | --- | --- |
@@ -174,7 +174,7 @@ The other 19 reference scenes drew the same pixels (mean, p20 and FLIP identical
 
 ## Sky seen from the floor
 
-`applyFloorSkyVisibility(parts, { strength, includeClosedRooms, onlyClosedRooms })` (`67js/addons/floor-sky-visibility`) is opt-in and returns `{ parts, report }`. It cuts the floor parts into texels, shoots 64 cosine-weighted rays from each against the other opaque parts and stores the share that escapes as the floor's `skyVisibility`, so the world and sky light on a floor under a roof or between walls is scaled down and open ground is not. Pass the returned parts to the renderer. `strength` 1 uses the traced share, 0.5 keeps half of what it hides. `onlyClosedRooms: true` is the setting that helped: it traces closed rooms only, at strength 0.2 unless you pass one, and leaves open scenes alone. Use it for a room a sun lights through its openings (the reference halls); a room lit by lamps alone and open ground are better without it. A closed room is left alone unless `includeClosedRooms` is `true`, and a scene that is too large (over 200,000 triangles), has no floor or runs past `maxSeconds` (20) comes back unchanged with `report.reason`. The recipe path turns it on for closed rooms a sun lights (`environment.floorSkyTrace`, `false` opts out; see agent-look.md) via `applyDefaultFloorSky(parts, environment)`. Every other use is opt-in: on open ground it makes sunlit streets too dark (`long-street` +0.0135 FLIP at 0.5). The trace takes 0.5 to 1.7 s, and the floor grows to about 66,000 triangles, which adds 0.1 to 0.3 ms per frame in the reference scenes. Numbers: `bench/reference/README.md`, "Sky visibility traced from the floor texels".
+`applyFloorSkyVisibility(parts, { strength, includeClosedRooms, onlyClosedRooms })` (`crucible/addons/floor-sky-visibility`) is opt-in and returns `{ parts, report }`. It cuts the floor parts into texels, shoots 64 cosine-weighted rays from each against the other opaque parts and stores the share that escapes as the floor's `skyVisibility`, so the world and sky light on a floor under a roof or between walls is scaled down and open ground is not. Pass the returned parts to the renderer. `strength` 1 uses the traced share, 0.5 keeps half of what it hides. `onlyClosedRooms: true` is the setting that helped: it traces closed rooms only, at strength 0.2 unless you pass one, and leaves open scenes alone. Use it for a room a sun lights through its openings (the reference halls); a room lit by lamps alone and open ground are better without it. A closed room is left alone unless `includeClosedRooms` is `true`, and a scene that is too large (over 200,000 triangles), has no floor or runs past `maxSeconds` (20) comes back unchanged with `report.reason`. The recipe path turns it on for closed rooms a sun lights (`environment.floorSkyTrace`, `false` opts out; see agent-look.md) via `applyDefaultFloorSky(parts, environment)`. Every other use is opt-in: on open ground it makes sunlit streets too dark (`long-street` +0.0135 FLIP at 0.5). The trace takes 0.5 to 1.7 s, and the floor grows to about 66,000 triangles, which adds 0.1 to 0.3 ms per frame in the reference scenes. Numbers: `bench/reference/README.md`, "Sky visibility traced from the floor texels".
 
 ## Coloured and partial shadows
 
@@ -194,11 +194,11 @@ Shadows reach `range`, or 30 units when `range` is zero; farther surfaces are li
 
 ## Soft area shadows, soft sun and IES profiles
 
-Three opt-in looks share one lazy module (`67js/addons/light-shapes`, loaded by `loadAgentSceneModules` for a recipe that names them; a Renderer that is not fed by a recipe must import the addon, or `castShadow` on an area light and `ies` are ignored). A scene that uses none of them draws the same pixels as before (checked by hashing the default stills against main).
+Three opt-in looks share one lazy module (`crucible/addons/light-shapes`, loaded by `loadAgentSceneModules` for a recipe that names them; a Renderer that is not fed by a recipe must import the addon, or `castShadow` on an area light and `ies` are ignored). A scene that uses none of them draws the same pixels as before (checked by hashing the default stills against main).
 
 - **Area light shadows.** `castShadow: true` on an `areaLights` entry takes one tile of the local shadow atlas, drawn from the centre of the rectangle with a 170 degree view along its emitting side, after the point and spot tiles. The shader searches 16 taps for blockers, derives the penumbra as `half size * (receiver - blocker) / blocker` (the usual percentage closer soft shadow estimate, from the larger half side of the rectangle) and filters with 32 taps over that radius, clamped to 1 to 24 texels. Per-pixel rotation of the taps makes a little grain in a wide penumbra. The shadow comes from the centre, so a wide panel close to a wall can still leak a hard edge at the rectangle's border.
 - **Soft sun.** `environment.sunAngularRadius` is the radius of the sun disk in radians (0.0005 to 0.2; half a degree is 0.0087, which is what the path tracer always used and still uses when the field is absent). The path tracer and the GPU tracer sample that disk. The raster softens the sun shadow through the cascades: naming the field gives at least one slice (`shadowCascades: 0` keeps the single hard map), and the cascade shader searches 12 taps for blockers, sets the penumbra to `tan(radius) * gap` and filters with 16 taps. The shadow stays sharp at contact and widens with the distance between blocker and receiver.
-- **IES profiles.** `ies` on a spot or area light is a bundled name (`wide-flood`, `downlight`, `narrow-spot`, `batwing`, made for 67js as cosine powers) or `{ angles, candela }` (degrees from the axis, 2 to 32 rising points). It is stored as 16 values from 0 to 90 degrees divided by the axis value, so `intensity` stays the candela head on; a spot light multiplies its cone by it and an area light multiplies its Lambert emission by it. `parseIesPhotometry(text)` (`67js/addons/light-shapes`) turns an LM-63 file with `TILT=NONE` into that shape, averaging the horizontal planes. The raster and the CPU path tracer read the same samples; the GPU path tracer and the light bake ignore profiles. Point lights and bundled catalog file IDs for `.ies` files are not supported yet.
+- **IES profiles.** `ies` on a spot or area light is a bundled name (`wide-flood`, `downlight`, `narrow-spot`, `batwing`, made for Crucible as cosine powers) or `{ angles, candela }` (degrees from the axis, 2 to 32 rising points). It is stored as 16 values from 0 to 90 degrees divided by the axis value, so `intensity` stays the candela head on; a spot light multiplies its cone by it and an area light multiplies its Lambert emission by it. `parseIesPhotometry(text)` (`crucible/addons/light-shapes`) turns an LM-63 file with `TILT=NONE` into that shape, averaging the horizontal planes. The raster and the CPU path tracer read the same samples; the GPU path tracer and the light bake ignore profiles. Point lights and bundled catalog file IDs for `.ies` files are not supported yet.
 
 Frame time on an RTX 3060 at 480x270 with 4 samples (`node bench/lighting/soft-lights.mjs`, median of 3 runs of 60 frames, shared machine, read the spread as load): hard sun 0.94 ms (range 0.73 to 0.99), soft sun 0.92 (0.79 to 0.99); unshadowed area light 0.88 (0.71 to 0.93), shadowed 0.97 (0.82 to 1.08); spot 0.79 (0.63 to 1.17), spot with an IES profile 0.71 (0.60 to 0.96). The scene is tiny and the machine was loaded, so the differences are inside the spread: the soft paths cost under a tenth of a millisecond here, and cost more as more of the frame is penumbra. Render tests: \`tests/light-shapes.test.js\` (state, shaders inputs, tracer agreement) and the stills the bench writes.
 
@@ -207,10 +207,10 @@ Frame time on an RTX 3060 at 480x270 with 4 samples (`node bench/lighting/soft-l
 The directional light uses one 2048 x 2048 map over the box that `shadowBounds` gives. In a scene as long as a street that box is 100 m or more across, so a texel is 6 to 8 cm and a lamp post near the camera is two texels wide. Cascades cut the camera's view into up to four slices by depth and fit one map to each, so the slice near the camera has texels of about 1 cm.
 
 ```js
-import { Renderer67 } from '@codepawlhq/67js';
-import { createCascadedShadows } from '@codepawlhq/67js/addons/cascaded-shadows';
+import { CrucibleRenderer } from '@codepawlhq/crucible';
+import { createCascadedShadows } from '@codepawlhq/crucible/addons/cascaded-shadows';
 
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new CrucibleRenderer(canvas, parts, {
   world: true,
   shadowBounds, // still gives the light direction (eye minus target)
   shadowCascades: createCascadedShadows({ count: 3 }),
@@ -223,17 +223,17 @@ Recipes reach it through `environment.shadowCascades` (an integer from 1 to 4, o
 
 ### View transform and look
 
-`environment.viewTransform` picks the display curve: `aces` (default, contrasty), `agx` (Blender's default, keeps bright saturated colour without clipping; pick it for a lit scene or to compare with Blender) or `neutral` (Khronos PBR Neutral, base colours show as authored; pick it for product shots and brand colours). `environment.look` adds a graded look after the curve: `warm`, `cool`, `contrast` or `faded`. In code, `new Renderer67(canvas, parts, { viewTransform: 'agx', look })` takes a look from `parseCube(text)` (a 3D `.cube` file, up to size 65) in `@codepawlhq/67js/addons/view-transform`; recipes and MCP never take a file path. The curves and the look live in `@codepawlhq/67js/addons/view-transform-shader`, which a recipe loads through `loadAgentSceneModules`; the default curve costs nothing extra. The path tracer takes the same `viewTransform` and `look` options, so a still and its path-traced image match. The look is not applied to Gaussian splats.
+`environment.viewTransform` picks the display curve: `aces` (default, contrasty), `agx` (Blender's default, keeps bright saturated colour without clipping; pick it for a lit scene or to compare with Blender) or `neutral` (Khronos PBR Neutral, base colours show as authored; pick it for product shots and brand colours). `environment.look` adds a graded look after the curve: `warm`, `cool`, `contrast` or `faded`. In code, `new CrucibleRenderer(canvas, parts, { viewTransform: 'agx', look })` takes a look from `parseCube(text)` (a 3D `.cube` file, up to size 65) in `@codepawlhq/crucible/addons/view-transform`; recipes and MCP never take a file path. The curves and the look live in `@codepawlhq/crucible/addons/view-transform-shader`, which a recipe loads through `loadAgentSceneModules`; the default curve costs nothing extra. The path tracer takes the same `viewTransform` and `look` options, so a still and its path-traced image match. The look is not applied to Gaussian splats.
 
 ## Light linking
 
 A light can be limited to some parts, as Blender's receiver collection does. Give a light an `affects` list of part names (and `environment.keyAffects` for the sun) and pass the parts through `applyLightLinks`:
 
 ```js
-import { applyLightLinks } from '@codepawlhq/67js/addons/light-linking';
+import { applyLightLinks } from '@codepawlhq/crucible/addons/light-linking';
 
 const environment = { pointLights: [{ position: [-1.8, 2.4, 1.2], intensity: 14, affects: ['sphere-left'] }], keyAffects: ['floor'] };
-const renderer = new Renderer67(canvas, applyLightLinks(parts, environment), { environment });
+const renderer = new CrucibleRenderer(canvas, applyLightLinks(parts, environment), { environment });
 ```
 
 A part gets a bit mask in `material.lightMask` (bit 0 the sun, bits 1 to 16 the point lights, 17 to 24 the spot lights, 25 to 31 the area lights, in list order); the shader skips a light whose bit is clear. Linking changes what a light adds, not what it shadows: a part a light does not reach still blocks that light for the others, and in Blender too. Parts with different masks are different batches. The path tracer ignores linking and says so in `report.ignored`; the light bake honours it, so a lamp linked to some parts bakes no light onto the others, not even as a bounce off a part it lights.
@@ -261,6 +261,6 @@ Validation runs before light arrays or the framebuffer change. Invalid later lig
 
 Two shapes were considered: mutable light nodes with independent scene ownership, and serializable lights in the existing environment contract. Environment data was chosen because film samples already provide absolute-time frame overrides. Light hierarchy nodes and editor handles require a later authoring contract.
 
-[Three.js PointLight](https://threejs.org/docs/pages/PointLight.html) documents candela intensity, inverse-square attenuation and a smooth finite cutoff. [Blender light objects](https://docs.blender.org/manual/en/dev/render/lights/light_object.html) distinguish source size and emitted power. 67js radius currently regularizes attenuation. It does not reproduce Blender's spherical emitter or watt-based power.
+[Three.js PointLight](https://threejs.org/docs/pages/PointLight.html) documents candela intensity, inverse-square attenuation and a smooth finite cutoff. [Blender light objects](https://docs.blender.org/manual/en/dev/render/lights/light_object.html) distinguish source size and emitted power. Crucible radius currently regularizes attenuation. It does not reproduce Blender's spherical emitter or watt-based power.
 
 Run `node --test tests/lighting.test.js` for retained-state checks and `node scripts/smoke-lighting.mjs` with the development server running for linear HDR pixel checks, native GPU timing and before/after laboratory images.

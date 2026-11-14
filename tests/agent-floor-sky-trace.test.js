@@ -8,7 +8,7 @@ import { applyDefaultFloorSky } from '../src/floor-sky-visibility.js';
 function room(environment = {}) {
   const wall = (id, translation, scale) => ({ id, geometry: 'box', material: 'stone', translation, scale });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'stone', color: [0.5, 0.45, 0.4], roughness: 0.8 }],
     nodes: [

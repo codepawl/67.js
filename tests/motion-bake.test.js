@@ -13,7 +13,7 @@ const STEP = 0.05;
 
 function pathRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
     nodes: [
@@ -172,7 +172,7 @@ test('a ragdoll fall bakes to keys, simplifies and exports as a clip a viewer pl
 
 function armRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
     nodes: [

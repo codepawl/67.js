@@ -33,7 +33,7 @@ function withoutPhysics(recipe) {
 
 /** World-space triangles of every drawn node, with motion sampled at time zero. Asset recipes have none here. */
 export async function worldGeometriesOf(recipe) {
-  if (recipe.format === '67js.asset') return null;
+  if (recipe.format === 'crucible.asset') return null;
   await loadAllAgentSceneModules();
   if (needsMeshBooleans(recipe)) await loadMeshBooleans();
   const scene = createAgentScene(withoutPhysics(recipe));

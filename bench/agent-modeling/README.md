@@ -1,6 +1,6 @@
 # Agent modeling suite
 
-The suite measures how well an agent models through the 67js MCP tools. It records how often the agent succeeds and
+The suite measures how well an agent models through the Crucible MCP tools. It records how often the agent succeeds and
 what each success costs in tool calls, tokens and time. It is the yardstick from the modeling plan: a mesh feature
 earns its place only if it raises these numbers.
 
@@ -79,7 +79,7 @@ node bench/agent-modeling/run.mjs --claude <path to claude> --model sonnet --lab
 ```
 
 Each task gets a fresh non-interactive Claude Code session in an empty temporary folder. The session has only the
-67js MCP server, its built-in file and shell tools are disabled, and it runs under a per-task budget (`--budget`, in
+Crucible MCP server, its built-in file and shell tools are disabled, and it runs under a per-task budget (`--budget`, in
 USD, default 3) and timeout (`--timeout`, in seconds, default 1200). The budget is an estimate the bench adds up from streamed token usage and enforces itself in `run-guard.mjs`; it is never passed to claude as `--max-budget-usd`, because Claude Code shows that cap to the model and Haiku quit when it read the remainder as spent (#962). Pick tasks with `--tasks crate,bolt`. Raw
 transcripts and exported recipes go to `artifacts/agent-modeling/<run>/`. The summary, with the model ID reported by
 the session, goes to `results/<run>.json`. Grade one recipe by hand with
@@ -93,9 +93,9 @@ of one or two tasks as noise.
 ### The agent bench
 
 `bench.mjs` is the whole bench in one command. It runs the 28 tasks of `suite.mjs` (8 modeling, 3 revision, 3 scene,
-3 look, 4 light, 3 camera, 2 animation, 2 film), k times each, on each model, through headless `claude -p` with the 67js
+3 look, 4 light, 3 camera, 2 animation, 2 film), k times each, on each model, through headless `claude -p` with the Crucible
 MCP config. It calls `run.mjs` once per model, so every run is a fresh session in its own empty temp folder with only the
-67js tools, and the grader reads the exported recipe, never the transcript. Graders are the checks above plus the state
+Crucible tools, and the grader reads the exported recipe, never the transcript. Graders are the checks above plus the state
 checks in `scene-checks.mjs` (camera aim and orbit, lights, materials, fog, sun and camera tracks) and the rendered-look
 check, and every task has a reference solution that the tests grade. Runs use the Claude Code subscription (there is no API
 key), so the summary reports tokens, calls and seconds and never dollars.
@@ -114,7 +114,7 @@ pipeline, `--tasks a,b` picks tasks, and `--resume` (same label, models and `--r
 
 A run that makes no scene call is classified in its record (`zeroCalls`, see `zero-calls.mjs`). `infra` causes
 (`start-up-failure`, `mcp-server-failed`, `timeout`, `toolsearch-empty`: claude -p or the MCP server never got going, or
-ToolSearch never showed the 67js tools) are retried once, and a run that still ends that way is marked `infra`, counted in the
+ToolSearch never showed the Crucible tools) are retried once, and a run that still ends that way is marked `infra`, counted in the
 `infra` column and left out of pass@1. `model` causes (`toolsearch-then-quit` after ToolSearch showed the tools, `refusal`,
 `no-tool-use`) stay counted as failures and are listed under the table.
 
@@ -180,7 +180,7 @@ score and cannot be regraded. The next run records one.
 
 ## Baseline
 
-`results/2026-10-30-07-48-sonnet-baseline.json`: `claude-sonnet-5-5`, one run per task, without the `build-67js-scene` skill, 67js 0.11.0.
+`results/2026-10-30-07-48-sonnet-baseline.json`: `claude-sonnet-5-5`, one run per task, without the `build-crucible-scene` skill, Crucible 0.11.0.
 10 of 10 passed with 67 tool calls and $4.76 in total. The `bracket` record comes from a rerun after its prompt was
 made unambiguous about the total height; the others were graded again after three checker fixes, without new agent runs.
 
@@ -434,7 +434,7 @@ By task (pass of 2, mean tool calls):
 
 - Haiku passed everything but needed about twice the tool calls. Sonnet used fewer calls and failed one `crate` run: it wrote a single `inset_region` over four faces in 2 calls, never inspected the mesh, and got one loop per panel instead of two. That is a model shortcut, not a schema defect, and one failure in ten is within the noise of this sample.
 - The no-MCP task is `llms-only.mjs`: a fresh folder with the package installed from a packed archive and a copy of `llms.txt`, no web access, no MCP. The agent writes a script that renders a red sphere on a ground plane to `scene.png`; `png-check.mjs` requires a real 512 px PNG with many colours. Both models pass.
-- Friction found: in both sonnet runs the first `cd node_modules/67js` failed, because the guide's script assumes the `67js` alias install and the task installed `@codepawlhq/67js` plainly. Fixed in `docs/guide.md` and `public/llms.txt`, which now state both install names. These two sonnet runs predate that fix.
+- Friction found: in both sonnet runs the first `cd node_modules/crucible` failed, because the guide's script assumes the `crucible` alias install and the task installed `@codepawlhq/crucible` plainly. Fixed in `docs/guide.md` and `public/llms.txt`, which now state both install names. These two sonnet runs predate that fix.
 - The Inspector CLI starts a new server per command, so it cannot show a preview image; that is the client, not the server.
 - Every page that `llms.txt` and the README link to is checked against the package and the site by `tests/other-clients.test.js`.
 
@@ -452,40 +452,40 @@ Not run:
 
 `llms-only.mjs --agent agy --agy <agy executable> --model <model>` drives the Antigravity CLI, which offers Gemini 4 Argon, Gemini 3.8 Flash and GPT-OSS 120B. Headless mode denies every shell command, so the runner passes a session-only settings file (`--settings`, never saved) with one rule, `permissions.allow: ["command(*)"]`, and removes it after the run. The CLI cannot switch its web tools off, so the runner records any web tool call as `usedWeb` and fails it. Run `npm run build:lib` first: the pack skips scripts, and the runner stops when `build/` is missing. With 2 attempts per model (`results/2026-11-07-agy.json`): Gemini 4 Argon 2 of 2, Gemini 3.8 Flash 2 of 2, GPT-OSS 120B 0 of 2 (it searched the web in every attempt despite the prompt, then timed out waiting for the page). One Gemini 4 Argon PNG was 768 px, which the check accepts because it requires a minimum side only. The MCP suite is not run through this CLI: `agy` reads MCP servers only from its global config, and `--settings` rejects `mcpServers`.
 
-## Agent friendliness: 67js MCP against three.js by code (2026-11-07, issue #31)
+## Agent friendliness: Crucible MCP against three.js by code (2026-11-07, issue #31)
 
-The three.js half of issue #31 and the 67js side of the same table. The Blender MCP half is in the next section. Model `sonnet`, headless `claude -p` on the subscription, 6 suite tasks (`crate`, `bolt`, `window`, `table`, `fence`, `bracket`), 1 run each per system, so 12 records in `results/2026-11-07-threejs-vs-67js.json`. Tokens and tool calls are reported; there is no API dollar figure.
+The three.js half of issue #31 and the Crucible side of the same table. The Blender MCP half is in the next section. Model `sonnet`, headless `claude -p` on the subscription, 6 suite tasks (`crate`, `bolt`, `window`, `table`, `fence`, `bracket`), 1 run each per system, so 12 records in `results/2026-11-07-threejs-vs-crucible.json`. Tokens and tool calls are reported; there is no API dollar figure.
 
-- 67js MCP: `run.mjs`, the task prompt behind the usual MCP preamble.
+- Crucible MCP: `run.mjs`, the task prompt behind the usual MCP preamble.
 - three.js: `threejs.mjs`, the same task text behind a different preamble. The agent gets an empty folder with `three` installed from npm, Bash, Read, Write, Edit, Glob and Grep, no web and no MCP. It writes `build.mjs`, which builds the object, writes `geometry.json` (world-space triangles per mesh) and renders `scene.png` with headless Chrome on SwiftShader.
 - Same grading: the task's own checks run on `geometry.json` (corners welded before the closed-surface, hole and loop counts; the grader passes the suite's reference geometry of all six tasks, see `tests/agent-threejs-grade.test.js`), and the look score is the suite's silhouette overlap from the three fixed cameras. A three.js run passes when every check passes and `scene.png` is a real picture.
 
 | System | Pass | Mean tool calls | Mean tokens (in+out) | Mean look | Mean wall seconds |
 | --- | --- | --- | --- | --- | --- |
-| 67js MCP | 6/6 | 3.2 | 375k | 0.932 | 24 |
+| Crucible MCP | 6/6 | 3.2 | 375k | 0.932 | 24 |
 | three.js by code | 5/6 | 8.8 | 269k | 0.926 | 359 |
 | Blender MCP (official server) | 6/6 | 3.8 | 177k | 0.926 | 517 |
 
 | Task | System | Pass | Tool calls (errors) | Look | Failure |
 | --- | --- | --- | --- | --- | --- |
-| crate | 67js MCP | yes | 4 (0) | 1.000 | |
+| crate | Crucible MCP | yes | 4 (0) | 1.000 | |
 | crate | three.js | yes | 9 (1) | 1.000 | |
-| bolt | 67js MCP | yes | 2 (0) | 1.000 | |
+| bolt | Crucible MCP | yes | 2 (0) | 1.000 | |
 | bolt | three.js | yes | 7 (3) | 0.964 | |
-| window | 67js MCP | yes | 4 (0) | 1.000 | |
+| window | Crucible MCP | yes | 4 (0) | 1.000 | |
 | window | three.js | no, 4/5 | 11 (0) | 1.000 | closed-surface check: the frame has open or doubled edges |
-| table | 67js MCP | yes | 2 (0) | 0.592 | |
+| table | Crucible MCP | yes | 2 (0) | 0.592 | |
 | table | three.js | yes | 8 (1) | 0.592 | |
-| fence | 67js MCP | yes | 2 (0) | 1.000 | |
+| fence | Crucible MCP | yes | 2 (0) | 1.000 | |
 | fence | three.js | yes | 11 (1) | 1.000 | |
-| bracket | 67js MCP | yes | 5 (0) | 1.000 | |
+| bracket | Crucible MCP | yes | 5 (0) | 1.000 | |
 | bracket | three.js | yes | 7 (0) | 1.000 | |
 
-- Measured: 67js needed about a third of the tool calls and finished in about 24 s against about 6 minutes, most of the three.js time going to getting headless Chrome to write a PNG. Both systems built the same shapes: the look means are within noise, and `table` scores 0.592 for both, which points at the task's reference rather than at either system.
-- Tokens are not lower for 67js: inferred: the MCP tool schemas and server instructions are re-read on every call, so its input tokens are higher even with fewer calls. The three.js `table` run reports only 44k input tokens although it ran 871 s, so treat that one count as unreliable.
-- 67js failures: none in the checks. One harness fault: the `bracket` look images failed because the look page could not fetch the boolean wasm (`both async and sync fetching of the wasm failed`), which threw away the whole look record, silhouette included. The silhouette was scored again afterwards from the exported recipe, and the record carries `imagesError`. `scoreLook` should score the silhouette before it renders images.
-- A first attempt of the 67js run failed on every task because the checkout had no `build/mcp` folder (`npm run build:lib` creates it); those results were discarded. The first three.js run stopped after `bolt` when its process disappeared, so `window`, `table`, `fence` and `bracket` were run again as a second run and joined with `compare-threejs.mjs`.
-- Limits: 1 run per cell, one model, tasks the 67js suite was built around (they favour 67js's checks, not three.js). The `window` three.js failure label came from an earlier wording of the same check.
+- Measured: Crucible needed about a third of the tool calls and finished in about 24 s against about 6 minutes, most of the three.js time going to getting headless Chrome to write a PNG. Both systems built the same shapes: the look means are within noise, and `table` scores 0.592 for both, which points at the task's reference rather than at either system.
+- Tokens are not lower for Crucible: inferred: the MCP tool schemas and server instructions are re-read on every call, so its input tokens are higher even with fewer calls. The three.js `table` run reports only 44k input tokens although it ran 871 s, so treat that one count as unreliable.
+- Crucible failures: none in the checks. One harness fault: the `bracket` look images failed because the look page could not fetch the boolean wasm (`both async and sync fetching of the wasm failed`), which threw away the whole look record, silhouette included. The silhouette was scored again afterwards from the exported recipe, and the record carries `imagesError`. `scoreLook` should score the silhouette before it renders images.
+- A first attempt of the Crucible run failed on every task because the checkout had no `build/mcp` folder (`npm run build:lib` creates it); those results were discarded. The first three.js run stopped after `bolt` when its process disappeared, so `window`, `table`, `fence` and `bracket` were run again as a second run and joined with `compare-threejs.mjs`.
+- Limits: 1 run per cell, one model, tasks the Crucible suite was built around (they favour Crucible's checks, not three.js). The `window` three.js failure label came from an earlier wording of the same check.
 
 ### Blind pairwise look judge (2026-11-13, issue #987)
 
@@ -493,14 +493,14 @@ The silhouette look score does not say which render a person or a vision model p
 
 ```sh
 node bench/agent-modeling/pairwise-judge.mjs --name <result name> --model sonnet --tasks crate,bolt,window,table,fence,bracket --attempts 1 \
-  --a "67js MCP=artifacts/agent-modeling/<67js run>/look/{attempt}/{task}-three-quarter.png" \
+  --a "Crucible MCP=artifacts/agent-modeling/<Crucible run>/look/{attempt}/{task}-three-quarter.png" \
   --b "three.js by code=artifacts/agent-modeling/<three.js run>/{task}-{attempt}.png"
-node bench/agent-modeling/compare-threejs.mjs <67js run json> <three.js run json> <output json> --pairwise bench/agent-modeling/results/<result name>.json
+node bench/agent-modeling/compare-threejs.mjs <Crucible run json> <three.js run json> <output json> --pairwise bench/agent-modeling/results/<result name>.json
 ```
 
-Each side is `label=image pattern` with `{task}` and `{attempt}` filled in. `--control-only` skips the pairing and runs only the control on side A; `--seed` changes the order. The judge writes `results/<result name>.json` (summary and one record per call, with the note the judge gave), and `compare-threejs.mjs --pairwise` prints wins per system, the p and the control next to the usual tables. Run records also carry `fixRounds`, next to `toolCalls` and `toolErrors`: the number of write steps after the first render (`scene_apply` or `scene_create_asset` after the first `scene_look` or render for 67js; `Write` or `Edit` after the first `node` run for three.js). A run that renders once has 0. Records from before this change have none and print `-`.
+Each side is `label=image pattern` with `{task}` and `{attempt}` filled in. `--control-only` skips the pairing and runs only the control on side A; `--seed` changes the order. The judge writes `results/<result name>.json` (summary and one record per call, with the note the judge gave), and `compare-threejs.mjs --pairwise` prints wins per system, the p and the control next to the usual tables. Run records also carry `fixRounds`, next to `toolCalls` and `toolErrors`: the number of write steps after the first render (`scene_apply` or `scene_create_asset` after the first `scene_look` or render for Crucible; `Write` or `Edit` after the first `node` run for three.js). A run that renders once has 0. Records from before this change have none and print `-`.
 
-Run on 2026-11-13 (measured): the raw renders of the 2026-11-07 head-to-head run are no longer on disk (only the scene numbers are in the result file), so the pairing was not re-run. The control ran on the 67js three-quarter renders that exist (`crate`, `bolt`, `table`, `chair`, `gear`, three attempts each, Sonnet, 15 calls, $1.76): the judge picked "first" 7 times and "second" 8 times, p = 1.0, so no position bias at this size. `results/2026-11-13-pairwise-control-67js.json`. The next three.js run saves `scene.png` in `artifacts/agent-modeling/<run>/`, which is what the `--b` pattern above reads.
+Run on 2026-11-13 (measured): the raw renders of the 2026-11-07 head-to-head run are no longer on disk (only the scene numbers are in the result file), so the pairing was not re-run. The control ran on the Crucible three-quarter renders that exist (`crate`, `bolt`, `table`, `chair`, `gear`, three attempts each, Sonnet, 15 calls, $1.76): the judge picked "first" 7 times and "second" 8 times, p = 1.0, so no position bias at this size. `results/2026-11-13-pairwise-control-crucible.json`. The next three.js run saves `scene.png` in `artifacts/agent-modeling/<run>/`, which is what the `--b` pattern above reads.
 
 ### Blender MCP half (2026-11-07, issue #31)
 
@@ -518,4 +518,4 @@ The official Blender MCP server (Blender Lab, v1.0.3, add-on and server) driving
 - Measured: no failures. Tool calls exclude the `ToolSearch` call that loads the one tool the agent uses (`execute_blender_code`), as in the other runs. Look matches the other two systems (`table` 0.592 again, so it is the reference).
 - Wall time is not a fair figure. Measured in the transcripts: `crate` hit Claude Code's 300 s no-response abort on its render call while the files were still written; the other four runs with an error and about 600 s show the same wall time. Inferred: the render is a CPU Cycles render of an x86 Blender under emulation, which a native Blender would finish much faster; `fence`, whose render stayed under the limit, took 38 s. Treat the 517 s mean as environment cost, not as Blender MCP latency.
 - Every run but `fence` spent one call on a failed first attempt (a Python traceback or the timeout) and then repaired it. The tool takes raw `bpy` code, so the agent writes the mesh code, the Z-up to Y-up conversion and the export itself, as in the three.js run; unlike three.js it needs no browser for the picture.
-- Limits: 1 run per cell, one model, tasks built around 67js. The server's own screenshot and render tools were never used; the agents rendered from their own code. The container has outbound network access (the model's code could reach the internet); only the scratch folder is shared with the host.
+- Limits: 1 run per cell, one model, tasks built around Crucible. The server's own screenshot and render tools were never used; the agents rendered from their own code. The container has outbound network access (the model's code could reach the internet); only the scratch folder is shared with the host.

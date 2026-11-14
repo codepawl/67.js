@@ -31,7 +31,7 @@ try {
   }));
   await page.goto('http://127.0.0.1:5173/primitive-seams-smoke.html');
   const report = await page.evaluate(async () => {
-    const { Renderer67, fitPerspectiveDistance } = await import('/src/index.js');
+    const { CrucibleRenderer, fitPerspectiveDistance } = await import('/src/index.js');
     const { createModel } = await import('/src/model.js');
     const { createModel: createBefore } = await import('/artifacts/model-before-mesh-query.mjs');
     const before = createBefore();
@@ -59,7 +59,7 @@ try {
       camera.eye = camera.eye.map((value, axis) => camera.target[axis] + (value - camera.target[axis]) * distance / original);
     }
     function draw(parts) {
-      const renderer = new Renderer67(canvas, parts, {
+      const renderer = new CrucibleRenderer(canvas, parts, {
         world: true, ground: false, transparent: true, hdr: true, samples: 2, pixelRatio: 1, memoryBudgetMiB: 128,
       });
       renderer.render({ ...camera, time: 0, effects: { grain: 0, bloom: { strength: 0 } } });

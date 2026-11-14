@@ -8,17 +8,17 @@ It does not execute JavaScript, access the DOM, or provide an MCP transport.
 Recipes also retain [lighting, fog, effects and directional shadow coverage](agent-look.md).
 Their patches and checkpoints share the same atomic revision contract as model edits.
 
-To see what changed, including changes not yet released, read `https://67js.codepawl.com/changelog.json`.
+To see what changed, including changes not yet released, read `https://crucible.codepawl.com/changelog.json`.
 
 Release `0.7.0` adds optional [procedural motion](agent-motion.md) and transient `sampleMotion(time)` seeks.
 Recipe edits retain authored keyframes. Sampling preserves revisions and geometry while updating rendered transforms, materials and camera.
 
 ```js
-import { Renderer67 } from '67js';
-import { createAgentScene, AGENT_SCENE_CAPABILITIES } from '67js/addons/agent-scene';
+import { CrucibleRenderer } from 'crucible';
+import { createAgentScene, AGENT_SCENE_CAPABILITIES } from 'crucible/addons/agent-scene';
 
 const scene = createAgentScene({
-  format: '67js.scene',
+  format: 'crucible.scene',
   schemaVersion: 1,
   geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
   materials: [{ id: 'blue', color: [0.1, 0.3, 0.8] }],
@@ -28,7 +28,7 @@ const scene = createAgentScene({
   ],
 });
 
-const renderer = new Renderer67(canvas, scene.parts, { ground: false });
+const renderer = new CrucibleRenderer(canvas, scene.parts, { ground: false });
 const checkpoint = scene.checkpoint();
 scene.apply([
   { type: 'set-node', id: 'group', translation: [1, 0, 0] },
@@ -54,7 +54,7 @@ primitives pays about half the bytes. `createAgentScene` and `apply` stay synchr
 load its code first; a missing module throws an error that names this call.
 
 ```js
-import { createAgentScene, loadAgentSceneModules } from '67js/addons/agent-scene';
+import { createAgentScene, loadAgentSceneModules } from 'crucible/addons/agent-scene';
 
 await loadAgentSceneModules(recipe);
 const scene = createAgentScene(recipe);
@@ -308,7 +308,7 @@ A node with an `asset` field places a GLB from the `--assets` catalog inside the
 
 ### Vegetation
 
-A node with a `vegetation` field is a group that grows trees from the addon in [Vegetation](https://67js.codepawl.com/vegetation.md). Its parts become generated child nodes like placed assets (`<node>/<instance>/<bark|foliage>`), left out of `scene_inspect` nodes and `scene_export_recipe`.
+A node with a `vegetation` field is a group that grows trees from the addon in [Vegetation](https://crucible.codepawl.com/vegetation.md). Its parts become generated child nodes like placed assets (`<node>/<instance>/<bark|foliage>`), left out of `scene_inspect` nodes and `scene_export_recipe`.
 
 ```json
 { "id": "forest", "vegetation": { "mix": { "broadleaf": 3, "conifer": 2, "bush": 2 }, "seed": 11, "season": 0.4,
@@ -316,7 +316,7 @@ A node with a `vegetation` field is a group that grows trees from the addon in [
 ```
 
 - One tree: `{ "species": "conifer", "seed": 2, "height": 9, "leaves": "cards" }` grows at the node transform. A scatter takes `mix` (species weights, also `grass` and `flowers`) and `scatter`: `ground` (a node drawing a terrain geometry; give the group the same transform), `density` per square metre, `slopeLimit` degrees, `area` `{min,max}` in `[x,z]`, `exclude` (circles, boxes or a node and radius; terrain holes always stay clear), `variants` and `scale`.
-- The same options give the same instances as `scatterVegetation` from `67js/addons/vegetation`: the recipe path calls it with the terrain's `heightAt` and `isHole`.
+- The same options give the same instances as `scatterVegetation` from `crucible/addons/vegetation`: the recipe path calls it with the terrain's `heightAt` and `isHole`.
 - Levels of detail come from the recipe camera `eye` when the scene is built or edited (`distanceScale`, `cullDistance`), never from the frame being drawn, so a seek, a camera track or a shot cannot change them. Edit the camera with `set-camera` to regrow the levels for another viewpoint.
 - `season` runs 0 summer, 0.35 gold, 0.6 orange, 0.85 brown; 0.9 and above drops the leaves of broadleaf, birch and bush, while conifer and palm stay green. Cards recolour their leaf sprite and mesh leaves and grass blades recolour the material.
 - Materials with tag `foliage` or `grass` sway. `environment.wind` is `{ "strength": 0.3, "direction": 0 }` (strength 0 to 4; direction in degrees, 0 toward +x and 90 toward +z, turning the sway and the grass gusts). The wind clock is the render time, so a render job or `scene_review` `rendererTime` gives the same frame at the same time.
@@ -324,7 +324,7 @@ A node with a `vegetation` field is a group that grows trees from the addon in [
 
 ### Crowds
 
-An asset placement with a `crowd` field fills its group node with `count` (1 to 1000) copies of one catalog character playing one clip, each at its own time offset and rate, drawn as one batch per material. Options and measurements are in [Crowds](https://67js.codepawl.com/retarget.md).
+An asset placement with a `crowd` field fills its group node with `count` (1 to 1000) copies of one catalog character playing one clip, each at its own time offset and rate, drawn as one batch per material. Options and measurements are in [Crowds](https://crucible.codepawl.com/retarget.md).
 
 ```json
 { "id": "people", "asset": { "id": "<catalog asset id>", "crowd": { "clip": 3, "count": 200, "seed": 7, "spacing": 2, "farDistance": 25, "farRate": 6 } } }
@@ -343,7 +343,7 @@ Five node fields change how a node renders; `add-node` and `set-node` take them,
 
 - `visible: false` hides the node and every child: nothing is drawn and nothing casts a shadow, but the parts stay in their batches, so a film can cut between shots without parking parts out of view. Key it in a motion track with `{ "kind": "node", "id": "robot", "property": "visible", "keyframes": [{ "time": 0, "value": 1 }, { "time": 2, "value": 0 }] }`; values are 1 or 0 and the track steps by default.
 - `castShadow: false` and `receiveShadow: false` (mesh nodes) stop a mesh casting or receiving shadows. Both default to true; glass casts none unless `castShadow` is set.
-- `holdout: true` writes zero colour and zero alpha where the mesh covers, and still hides what is behind it and still casts its shadow. `shadowCatcher: true` draws only the shadow it receives, black with the shadow as premultiplied alpha, and casts none. Both are for compositing over footage and need a transparent canvas: `new Renderer67(canvas, parts, { transparent: true })`. A node is never both. The shadow catcher shows the sun shadow only.
+- `holdout: true` writes zero colour and zero alpha where the mesh covers, and still hides what is behind it and still casts its shadow. `shadowCatcher: true` draws only the shadow it receives, black with the shadow as premultiplied alpha, and casts none. Both are for compositing over footage and need a transparent canvas: `new CrucibleRenderer(canvas, parts, { transparent: true })`. A node is never both. The shadow catcher shows the sun shadow only.
 
 - `shadowOnly: true` (mesh nodes) keeps the node in the shadow passes and leaves it out of the picture, the same as Blender's Ray Visibility > Camera off. Use it for a gobo, such as a window frame outside the shot that throws bars of sun onto a wall. It is also left out of depth, object ID and wireframe passes. It defaults to false, so no scene changes. A node cannot set `shadowOnly` together with `castShadow: false`, `holdout` or `shadowCatcher`. Every backend honours it: the raster renderer, and Cook on the cpu, gpu (WebGL2), webgpu and native backends (both native kernels). Cook leaves the node out of camera rays (the first hit of each path) and keeps it for shadow and bounce rays, so a mirror or glass can still show it. No backend lists it as an ignored feature.
 

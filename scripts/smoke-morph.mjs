@@ -13,7 +13,7 @@ try {
   await page.route('**/morph-smoke.html', route => route.fulfill({ contentType: 'text/html', body: '<canvas style="width:640px;height:480px;display:block"></canvas>' }));
   await page.goto('http://127.0.0.1:5173/morph-smoke.html');
   const report = await page.evaluate(async () => {
-    const { Renderer67, box, createMorphPose } = await import('/build/67.module.js');
+    const { CrucibleRenderer, box, createMorphPose } = await import('/build/67.module.js');
     const { mat4 } = await import('/node_modules/gl-matrix/esm/index.js');
     const geometry = box();
     const deltas = new Float32Array(geometry.positions.length);
@@ -32,7 +32,7 @@ try {
     const second = { name: 'negative blend', geometry, matrix: mat4.fromTranslation(mat4.create(), [-1.5, 0, 0]), material, morph: secondPose };
     const options = { ground: false, world: true, samples: 1, pixelRatio: 1, memoryBudgetMiB: 64 };
     const frame = { eye: [2, 2, 6], target: [-0.4, 0, 0], fov: 40, time: 0, effects: { grain: 0, bloom: { strength: 0 } } };
-    const renderer = new Renderer67(canvas, [first, second], options);
+    const renderer = new CrucibleRenderer(canvas, [first, second], options);
     const record = renderer.morphTextures.get(geometry);
     const buffers = renderer.batches.map(batch => batch.instanceBuffer);
     const weights = renderer.batches.map(batch => batch.morphWeights);
@@ -86,7 +86,7 @@ try {
       for (let index = 0; index < positions.length; index++) positions[index] = geometry.positions[index] + deltas[index] * amount;
       return { ...part, morph: undefined, geometry: { positions, normals: geometry.normals, indices: geometry.indices } };
     });
-    const reference = new Renderer67(canvas, referenceParts, options);
+    const reference = new CrucibleRenderer(canvas, referenceParts, options);
     reference.render(frame);
     const referencePixels = new Uint8Array(blended.length);
     reference.context.readPixels(0, 0, canvas.width, canvas.height, reference.context.RGBA, reference.context.UNSIGNED_BYTE, referencePixels);

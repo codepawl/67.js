@@ -9,7 +9,7 @@ const WEAR = { mask: 'edge', dirt: { mask: 'cavity' } };
 
 function recipeWith(material = {}) {
   return {
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     geometries: [{
       id: 'hatch',

@@ -13,7 +13,7 @@ const DEGREES = Math.PI / 180;
 
 function sampled(nodes, constraint) {
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
     nodes: nodes.map(node => ({ geometry: 'box', material: 'paint', ...node })),
@@ -142,7 +142,7 @@ test('maintain_volume, damped_track, pivot, follow_path, clamp_to, shrinkwrap an
 
   // follow_path
   const pathScene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
     nodes: [{ id: 'owner', geometry: 'box', material: 'paint' }],
@@ -168,7 +168,7 @@ test('maintain_volume, damped_track, pivot, follow_path, clamp_to, shrinkwrap an
 
   // armature constraint
   const armScene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
     nodes: [

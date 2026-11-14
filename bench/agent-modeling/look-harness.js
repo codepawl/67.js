@@ -2,7 +2,7 @@
 import { createAgentScene, loadAllAgentSceneModules, loadMeshBooleans, needsMeshBooleans } from '/src/agent-scene.js';
 import { agentEnvironmentMap, resolveAgentShadow } from '/src/agent-look.js';
 import { agentGroundPlacement, createAgentGround } from '/src/agent-ground.js';
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 
 const CLIPPED_CHANNEL = 250;
 const CRUSHED_LUMA = 12;
@@ -50,7 +50,7 @@ async function renderLookViews(recipe, views, measure = false) {
   const environment = { ...scene.environment, map: agentEnvironmentMap(scene.environment) };
   const effects = scene.effects;
   const placement = agentGroundPlacement(scene.parts, scene.environment);
-  const renderer = new Renderer67(canvas, scene.parts, {
+  const renderer = new CrucibleRenderer(canvas, scene.parts, {
     ground: placement ? createAgentGround(placement) : false, hdr: true, depth: true, samples: 1, pixelRatio: 1, memoryBudgetMiB: 512,
     world: environment.world, environment,
     shadowBounds: resolveAgentShadow(scene.shadow, environment.lightDirection),

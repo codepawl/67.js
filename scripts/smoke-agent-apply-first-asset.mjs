@@ -22,7 +22,7 @@ const transport = new StdioClientTransport({
 });
 let diagnostics = '';
 transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
-const client = new Client({ name: '67js-apply-first-asset-proof', version: '1' }, {
+const client = new Client({ name: 'crucible-apply-first-asset-proof', version: '1' }, {
   versionNegotiation: { mode: { pin: '2026-07-28' }, probe: { timeoutMs: 180000 } },
 });
 async function call(name, argumentsValue = {}, { expectError = false } = {}) {
@@ -40,7 +40,7 @@ try {
   await client.connect(transport, { timeout: 180000 });
   const robot = (await call('scene_asset_catalog')).structuredContent.assets.find(asset => asset.name === 'robot.glb').assetId;
   const created = (await call('scene_create', { recipe: {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'floor', type: 'terrain', size: 12, resolution: 16, amplitude: 0.1 }],
     materials: [{ id: 'sand', color: [0.6, 0.55, 0.4], roughness: 0.9 }],
     nodes: [{ id: 'ground', geometry: 'floor', material: 'sand' }],

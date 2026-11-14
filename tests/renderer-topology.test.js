@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4 } from 'gl-matrix';
 import { box, sphere } from '../src/geometry.js';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import '../src/replace-textured-parts.js';
 
 function part(name, geometry) {
@@ -10,7 +10,7 @@ function part(name, geometry) {
 }
 
 function allocationRenderer() {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const liveBuffers = new Set();
   const liveArrays = new Set();
   const uploads = [];

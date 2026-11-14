@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ktx2WorkerConfigFor, describeCompressedImage } from '../src/compressed-texture.js';
-import { Renderer67, textureDescriptorInfo } from '../src/renderer.js';
+import { CrucibleRenderer, textureDescriptorInfo } from '../src/renderer.js';
 
 const BC7 = 0x8e8c;
 const BC7_SRGB = 0x8e8d;
@@ -117,6 +117,6 @@ test('createTexture uploads a compressed image without generating mips', () => {
   };
   const map = { image: describeCompressedImage(BC7, bc7Levels(), 'map', 'srgb'), colorSpace: 'srgb' };
   const renderer = { context, textures: new Map(), applyAnisotropy: () => calls.push('anisotropy') };
-  Renderer67.prototype.createTexture.call(renderer, map);
+  CrucibleRenderer.prototype.createTexture.call(renderer, map);
   assert.deepEqual(calls, ['texStorage2D', 'compressedTexSubImage2D', 'compressedTexSubImage2D', 'compressedTexSubImage2D', 'compressedTexSubImage2D']);
 });

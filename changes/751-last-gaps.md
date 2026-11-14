@@ -1,1 +1,0 @@
-- The path tracer lifts ranked faces of skinned parts at their pose too, and the flicker probe draws its face-id frame without MSAA, so ids round-trip exactly (#751)

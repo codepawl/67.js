@@ -43,7 +43,7 @@ async function connect(context) {
     activeSessionId() { return null; },
   };
   const server = createAgentMcpServer(runtime);
-  const client = new Client({ name: '67js-response-format-test', version: '1' });
+  const client = new Client({ name: 'crucible-response-format-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

@@ -1,9 +1,9 @@
-# How much of a Cycles frame is reflection, and how far 67js is from the frame with and without it (issue #506).
+# How much of a Cycles frame is reflection, and how far Crucible is from the frame with and without it (issue #506).
 #   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/reflection-share.py \
 #     <cycles directory> <frames directory> <output directory> <scene id>,<scene id> [--labels a,b]
 # The Cycles directory holds <id>-cycles.npy, and optionally <id>-cycles-noglossy.npy (render-blender.py --no-glossy) and <id>-materials.npy and
-# <id>-materials.json (--material-ids). The frames directory holds the 67js frames as <id>-<label>.png for each label (default before,after; a label may also be a subdirectory holding <id>.png).
-# Writes <output>/metrics.json and one sheet per scene: each 67js frame, Cycles without glossy, Cycles full.
+# <id>-materials.json (--material-ids). The frames directory holds the Crucible frames as <id>-<label>.png for each label (default before,after; a label may also be a subdirectory holding <id>.png).
+# Writes <output>/metrics.json and one sheet per scene: each Crucible frame, Cycles without glossy, Cycles full.
 import json
 import sys
 from pathlib import Path
@@ -19,7 +19,7 @@ LABEL_HEIGHT = 22
 LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
@@ -101,10 +101,10 @@ def main():
     sheets = []
     for scene_id in scene_ids:
         full_linear = np.load(cycles_directory / f"{scene_id}-cycles.npy")
-        full = tone_map_like_67js(full_linear)
+        full = tone_map_like_crucible(full_linear)
         without_path = cycles_directory / f"{scene_id}-cycles-noglossy.npy"
         without_linear = np.load(without_path) if without_path.exists() else None
-        without = tone_map_like_67js(without_linear) if without_linear is not None else None
+        without = tone_map_like_crucible(without_linear) if without_linear is not None else None
         entry = {"cycles-full": frame_statistics(full)}
         if without is not None:
             entry["cycles-noglossy"] = frame_statistics(without)

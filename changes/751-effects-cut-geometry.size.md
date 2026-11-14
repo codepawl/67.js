@@ -1,1 +1,0 @@
-- entry:path-tracer: 680 bytes gzip so a face the flush pass ranked in front of another is the one a ray hits; without it the face behind showed through (the fix of #751 for traces).

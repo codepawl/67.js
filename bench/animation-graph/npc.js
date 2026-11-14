@@ -2,7 +2,7 @@
 // The follower steers along the route, writes its speed to the graph, and moves by the graph's root motion.
 // Open bench/animation-graph/npc.html with `npm run dev`. The walk is simulated once at load (it is deterministic), then replayed;
 // the readout gives the time to reach the goal and the largest foot slide measured on the planted feet.
-import { Renderer67, box } from '/src/index.js';
+import { CrucibleRenderer, box } from '/src/index.js';
 import { createAssetPose } from '/src/skeleton-pose.js';
 import { createAnimationClip } from '/src/animation.js';
 import { createPathFollower } from '/src/animation-graph.js';
@@ -130,7 +130,7 @@ const scenery = [
 const parts = [...asset.parts, ...scenery];
 
 const canvas = document.querySelector('canvas');
-const renderer = new Renderer67(canvas, parts, { ground: true, hdr: false, samples: 4, memoryBudgetMiB: 512 });
+const renderer = new CrucibleRenderer(canvas, parts, { ground: true, hdr: false, samples: 4, memoryBudgetMiB: 512 });
 renderer.resize();
 
 const replay = {

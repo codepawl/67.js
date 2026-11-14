@@ -2,7 +2,7 @@ import './view2d.css';
 import './brand.js';
 import './asset-viewer.css';
 import { vec3 } from 'gl-matrix';
-import { Renderer67, exportGlb, cameraView, fitOrthographicHeight } from './index.js';
+import { CrucibleRenderer, exportGlb, cameraView, fitOrthographicHeight } from './index.js';
 import { loadGltf, parseGltf } from './gltf.js';
 import { createMotionScene } from './motion.js';
 
@@ -116,7 +116,7 @@ function showAsset(loaded, title) {
   asset = null;
   let nextRenderer;
   try {
-    nextRenderer = new Renderer67(canvas, loaded.parts, { ground: false, hdr: true, samples: Number(parameters.get('samples') ?? 4), pixelRatio: parameters.get('export') === '1' ? 1 : Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: Number(parameters.get('memory') ?? 256), shadowBounds: { target: center, eye: [center[0] - extent, center[1] + extent * 2, center[2] + extent], extent: extent * 1.5, near: extent * 0.01, far: extent * 8 } });
+    nextRenderer = new CrucibleRenderer(canvas, loaded.parts, { ground: false, hdr: true, samples: Number(parameters.get('samples') ?? 4), pixelRatio: parameters.get('export') === '1' ? 1 : Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: Number(parameters.get('memory') ?? 256), shadowBounds: { target: center, eye: [center[0] - extent, center[1] + extent * 2, center[2] + extent], extent: extent * 1.5, near: extent * 0.01, far: extent * 8 } });
   } catch (error) {
     loaded.dispose();
     throw error;
@@ -136,7 +136,7 @@ function showAsset(loaded, title) {
   syncAnimation();
   document.querySelector('#metrics').textContent = `${asset.parts.length.toLocaleString()} parts · ${renderer.batches.length} draws`;
   document.querySelector('#notice').hidden = true;
-  document.title = `${title} · 67js asset viewer`;
+  document.title = `${title} · Crucible asset viewer`;
   invalidate();
 }
 
@@ -209,7 +209,7 @@ document.querySelector('#save').addEventListener('click', async () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = '67js-asset.png';
+  link.download = 'crucible-asset.png';
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   notice('Image saved');

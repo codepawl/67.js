@@ -188,7 +188,7 @@ export async function buildMcp({ outDir = join(root, 'build', 'mcp'), libraryDir
     publicDir: false,
     build: { write: false, copyPublicDir: false, emptyOutDir: false, outDir: destination, sourcemap: false, minify: true },
   };
-  const legalBanner = '/*! 67js MCP bundle. Complete license texts and notices: ./LICENSES.md */';
+  const legalBanner = '/*! Crucible MCP bundle. Complete license texts and notices: ./LICENSES.md */';
   const previewChunks = await reachablePreviewChunks(build, libraryDirectory);
   const server = singleModule(await build({
     ...configuration,
@@ -215,7 +215,7 @@ export async function buildMcp({ outDir = join(root, 'build', 'mcp'), libraryDir
       throw new Error(`server.mjs includes scene engine code (${marker}). Import plain data from agent-scene-capabilities.js instead of agent-scene.js.`);
     }
   }
-  // bin/67js-mcp.mjs imports each of these from the bundle.
+  // bin/crucible-mcp.mjs imports each of these from the bundle.
   const requiredExports = ['createAgentMcpServer', 'runMcpCli', 'runCheckUpdateCli'];
   const missingExports = requiredExports.filter(name => !server.exports.includes(name));
   if (missingExports.length > 0) {

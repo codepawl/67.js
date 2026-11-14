@@ -1,6 +1,6 @@
 // Times a lit frame of a large sea with dense terrain and many small parts, with the water reflection off and on, and counts
 // what the mirror pass draws. GPU time comes from a native timer query, so run it through the GPU lock:
-//   bash ~/.agents/tools/gpu-lock.sh node scripts/benchmark-water-reflection.mjs [--width 1920] [--height 1080] [--parts 20000] [--mirror-levels N] [--rounds 3] [--stills folder]
+//   node scripts/benchmark-water-reflection.mjs [--width 1920] [--height 1080] [--parts 20000] [--mirror-levels N] [--rounds 3] [--stills folder]
 // --counts-only skips the timer and runs on SwiftShader, so it needs no GPU lock and prints draw counts only.
 // --stills writes a PNG of the lit frame for the off, on and half-scale variants, for a side-by-side check.
 // The draw counts (calls, instances, triangles in the mirror pass) do not need the GPU and stay valid when the lock is busy.
@@ -32,7 +32,7 @@ try {
   await page.route('**/water-benchmark.html', route => route.fulfill({ contentType: 'text/html', body: `<canvas style="width:${width}px;height:${height}px;display:block"></canvas>` }));
   await page.goto(`${serverUrl}/water-benchmark.html`);
   const results = await page.evaluate(async ({ smallPartCount, samples, rounds, wantStills, countsOnly, mirrorLevels }) => {
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { box } = await import('/src/geometry.js');
     const { createTerrain } = await import('/src/terrain.js');
     const { applyWaterReflection, attachWaterReflection } = await import('/src/water-reflection.js');
@@ -55,7 +55,7 @@ try {
     const marked = applyWaterReflection([...terrain.parts, ...smallParts, sea]);
     const applyMilliseconds = performance.now() - applyStarted;
     const mirrorMeshBytes = terrain.parts.reduce((sum, part) => sum + (part.lods ?? []).filter(lod => lod.mirrorOnly).reduce((inner, lod) => inner + lod.geometry.positions.byteLength + lod.geometry.normals.byteLength + lod.geometry.uvs.byteLength + lod.geometry.skyVisibility.byteLength + lod.geometry.indices.byteLength, 0), 0);
-    const renderer = new Renderer67(canvas, marked.parts, { hdr: true, depth: true, world: true, ground: false, pixelRatio: 1, samples: 4 });
+    const renderer = new CrucibleRenderer(canvas, marked.parts, { hdr: true, depth: true, world: true, ground: false, pixelRatio: 1, samples: 4 });
     const context = renderer.context;
     const timer = context.getExtension('EXT_disjoint_timer_query_webgl2');
     if (!timer && !countsOnly) throw new Error('Native GPU timer unavailable');
@@ -71,8 +71,8 @@ try {
       tally.triangles += (count / 3) * instances;
       originalDraw(mode, count, type, offset, instances);
     };
-    const prototypeRender = Renderer67.prototype.render;
-    Renderer67.prototype.render = function (frame) {
+    const prototypeRender = CrucibleRenderer.prototype.render;
+    CrucibleRenderer.prototype.render = function (frame) {
       const previous = phase;
       phase = frame.reflectionTarget ? 'mirror' : 'main';
       try {

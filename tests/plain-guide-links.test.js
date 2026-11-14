@@ -6,7 +6,7 @@ test('a ../ link from a learn page becomes an absolute GitHub link', () => {
   const result = absoluteDocsLinks('See the [bridge](../three-bridge.md) and [site](https://example.com/a.md).');
   assert.equal(
     result,
-    'See the [bridge](https://github.com/codepawl/67.js/blob/main/docs/three-bridge.md) and [site](https://example.com/a.md).',
+    'See the [bridge](https://github.com/codepawl/crucible/blob/main/docs/three-bridge.md) and [site](https://example.com/a.md).',
   );
 });
 

@@ -13,15 +13,15 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const WIDTH = 320;
 const HEIGHT = 240;
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-material-snippet-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-material-snippet-'));
 const jobs = join(directory, 'jobs');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 let diagnostics = '';
 
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '128', '--jobs', jobs], cwd: directory, stderr: 'pipe' });
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-material-snippet-proof', version: '1' });
+const client = new Client({ name: 'crucible-material-snippet-proof', version: '1' });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 60000 });
@@ -64,7 +64,7 @@ function differenceBetween(first, second) {
 // A wide floor, and a slab high above it. The camera looks straight down at the shadow, and the slab itself is outside the
 // frame, so any change in the shadow comes from the shadow pass and not from the slab's own pixels.
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'block', type: 'box' }],
   materials: [{ id: 'floor', color: [0.7, 0.7, 0.7], roughness: 0.9 }, { id: 'slab', color: [0.4, 0.5, 0.8], roughness: 0.6 },
     { id: 'wood', pattern: { type: 'wood', size: 0.6, axis: 'z' }, roughness: 0.8 }],

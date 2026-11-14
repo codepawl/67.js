@@ -45,7 +45,7 @@ function makePng(size, pixelAt) {
 }
 
 async function checkBytes(bytes) {
-  const folder = await mkdtemp(join(tmpdir(), '67js-png-check-'));
+  const folder = await mkdtemp(join(tmpdir(), 'crucible-png-check-'));
   try {
     const path = join(folder, 'scene.png');
     await writeFile(path, bytes);
@@ -70,7 +70,7 @@ test('a flat picture, a tiny picture and a file that is not a PNG fail', async (
 });
 
 test('a missing file fails with a reason', async () => {
-  const result = await checkPng(join(tmpdir(), '67js-no-such-scene.png'));
+  const result = await checkPng(join(tmpdir(), 'crucible-no-such-scene.png'));
   assert.equal(result.pass, false);
   assert.match(result.detail, /does not exist/);
 });

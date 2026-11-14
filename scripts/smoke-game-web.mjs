@@ -13,12 +13,12 @@ import { MIXAMO_LIKE, UNREAL_LIKE, humanoidGlb, humanoidJoints, walkTracks } fro
 // only MCP tools, exports it as a static web build, and a recorded input replay wins the game in headless Chrome on the GPU.
 // A second sample drives a car through 3 gates to a finish line, and a third walks a placed, retargeted humanoid to a goal while
 // its idle and walk clips blend by speed (the page loads the exported assets/<id>.glb files). Run it through your GPU lock if the machine is shared:
-// node scripts/smoke-game-web.mjs [path to 67js-mcp.mjs] [creature|drive|character]
+// node scripts/smoke-game-web.mjs [path to crucible-mcp.mjs] [creature|drive|character]
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const CHROME_PATH = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const directory = await mkdtemp(join(tmpdir(), '67js-game-web-'));
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const directory = await mkdtemp(join(tmpdir(), 'crucible-game-web-'));
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const MIME_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm' };
 
 const assetsDirectory = join(directory, 'assets');
@@ -26,7 +26,7 @@ await mkdir(assetsDirectory);
 const transport = new StdioClientTransport({ command: process.execPath, args: [cli, '--backend', 'cpu', '--memory', '128', '--jobs', join(directory, 'jobs'), '--assets', assetsDirectory], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-game-web-proof', version: '1' });
+const client = new Client({ name: 'crucible-game-web-proof', version: '1' });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 60000 });
@@ -44,7 +44,7 @@ function creatureSample() {
   const COINS = [[0, 0.5, -3], [0, 0.5, -6], [0, 0.5, -9]];
   const GOAL = [0, 1, -12];
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }, { id: 'ball', type: 'sphere' }],
     materials: [
       { id: 'grass', color: [1, 1, 1], pattern: { type: 'stone', size: 2 } }, { id: 'fur', color: [0.85, 0.45, 0.2] },
@@ -101,7 +101,7 @@ function driveSample() {
   const checkpointZs = [-10, -20, -30];
   const finishZ = -40;
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'asphalt', color: [0.2, 0.2, 0.22] }, { id: 'paint', color: [0.8, 0.15, 0.1] }, { id: 'gate', color: [0.95, 0.75, 0.1] }],
     nodes: [
@@ -142,7 +142,7 @@ function characterSample() {
   const sourceId = idOf(sourceBytes);
   const heroId = idOf(heroBytes);
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'grass', color: [0.2, 0.45, 0.2] }],
     nodes: [
@@ -191,7 +191,7 @@ function puzzleSample() {
   const plateZoneIds = ['plate-zone-a', 'plate-zone-b'];
   const crateIds = ['crate-a', 'crate-b'];
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0.03 }, { id: 'cylinder', type: 'cylinder', segments: 24 }, { id: 'dome', type: 'sphere' }],
     materials: [
       { id: 'flagstone', color: [1, 1, 1], roughness: 0.9, pattern: { type: 'stone', size: 2 } },

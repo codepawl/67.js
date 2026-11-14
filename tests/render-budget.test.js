@@ -4,7 +4,7 @@ import { normalizeJobSettings } from '../scripts/agent-render-jobs.mjs';
 import { estimateRenderJob } from '../scripts/agent-render-estimate.mjs';
 import { budgetCandidates, chooseBudgetSettings, parseBudget } from '../scripts/agent-render-budget.mjs';
 
-const recipe = { format: '67js.scene' };
+const recipe = { format: 'crucible.scene' };
 const size = { parts: 40, assetParts: 0, triangles: 60000, materials: 4, textures: 0, lights: 3 };
 const base = { kind: 'image', width: 1280, height: 720 };
 

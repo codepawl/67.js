@@ -1,13 +1,13 @@
 # Performance and memory
 
-A frame costs CPU time to prepare and GPU time to draw. Most wins come from drawing less: fewer draw calls, fewer triangles, fewer pixels and fewer render targets. This page covers what 67js does for you, what you control, and how to measure it. Every number below comes from the repository's own benchmarks, with the date and the conditions, and your machine will differ.
+A frame costs CPU time to prepare and GPU time to draw. Most wins come from drawing less: fewer draw calls, fewer triangles, fewer pixels and fewer render targets. This page covers what Crucible does for you, what you control, and how to measure it. Every number below comes from the repository's own benchmarks, with the date and the conditions, and your machine will differ.
 
 ## Measure first
 
 Time a frame on your own machine before you change anything. Reading one pixel back with `readPixels` waits for the GPU, so a loop around it includes the draw work and not only the CPU. Press a button to rebuild the scene in a mode and read the averages in the console.
 
 ```js live poster=performance-batching
-import { Renderer67, box, sphere } from '67js';
+import { CrucibleRenderer, box, sphere } from 'crucible';
 
 const canvas = document.querySelector('#scene');
 const count = 400;
@@ -39,7 +39,7 @@ function setup(label, sharedGeometry, batching) {
   clearInterval(timer);
   renderer?.dispose();
   const parts = makeParts(sharedGeometry);
-  renderer = new Renderer67(canvas, parts, { batching });
+  renderer = new CrucibleRenderer(canvas, parts, { batching });
   const view = { eye: [0, 7, 9], target: [0, 0, 0], fov: 45 };
   renderer.render(view);
   forceGpu();
@@ -76,7 +76,7 @@ The numbers depend on your GPU and on what else it is drawing. The goal is to se
 
 Parts that share a geometry and a material go into one batch, and a batch is one instanced draw. The renderer batches by default (`batching: true`). A scene of 1,000 boxes with one geometry is one draw, and 1,000 boxes that each own a geometry is 1,000 draws. So build a geometry once with `box`, `sphere`, `cylinder` or `torus` and reuse the object for every part, and share material objects when parts look the same.
 
-The benchmark `instanced-objects` (bench/runtime/README.md, measured twice on 2026-11-04 at 960 by 540 with 4 samples) shows the effect. On an RTX 3060, 67js took 0.83 to 1.04 ms per frame and three.js with separate meshes took 2.44 to 2.61 ms. A three.js `InstancedMesh` took 0.25 ms, so an engine-level instance buffer is still faster than batching. On SwiftShader, the CPU path an agent uses, the same scene took 104 to 119 ms in 67js and 34 to 35 ms in three.js. The GPU was shared with other jobs during the runs, so the RTX numbers are noisy.
+The benchmark `instanced-objects` (bench/runtime/README.md, measured twice on 2026-11-04 at 960 by 540 with 4 samples) shows the effect. On an RTX 3060, Crucible took 0.83 to 1.04 ms per frame and three.js with separate meshes took 2.44 to 2.61 ms. A three.js `InstancedMesh` took 0.25 ms, so an engine-level instance buffer is still faster than batching. On SwiftShader, the CPU path an agent uses, the same scene took 104 to 119 ms in Crucible and 34 to 35 ms in three.js. The GPU was shared with other jobs during the runs, so the RTX numbers are noisy.
 
 Move existing transforms with `renderer.updateParts(parts)`. Adding or removing parts needs `replaceParts`, and an unchanged identity set is cheaper. Do not create a renderer per frame.
 
@@ -89,7 +89,7 @@ Levels of detail swap a mesh for a coarser one by pixel error. Give a part `lods
 ```js
 const levels = generateGeometryLods(rock, { ratios: [0.25, 0.06] });
 const parts = positions.map((position, index) => ({ name: `rock-${index}`, geometry: rock, lods: levels, matrix: translate(position), material }));
-const renderer = new Renderer67(canvas, parts, { lodPixelError: 1 });
+const renderer = new CrucibleRenderer(canvas, parts, { lodPixelError: 1 });
 ```
 
 The scene `large-outdoor` (6,000 spheres of about 1,000 triangles over 600 by 600 units, seen from the edge, 960 by 540, measured on 2026-10-31) shows what this saves:
@@ -101,7 +101,7 @@ The scene `large-outdoor` (6,000 spheres of about 1,000 triangles over 600 by 60
 | Culling and levels | 1.55 | 270,474 | 517 |
 | three.js, per-mesh culling | 6.00 | 4,359,372 | 944 |
 
-Culling alone gives the same picture pixel for pixel. Levels change 1.9 percent of the pixels by more than 8 levels out of 255. The GPU was shared with other jobs (1 to 87 percent busy), so the GPU column is noisy. [Culling, levels and adaptive resolution](https://github.com/codepawl/67.js/blob/main/docs/culling-lod.md) holds the contract. Vegetation chooses its own levels by distance with `selectLevels`, and can fade between them.
+Culling alone gives the same picture pixel for pixel. Levels change 1.9 percent of the pixels by more than 8 levels out of 255. The GPU was shared with other jobs (1 to 87 percent busy), so the GPU column is noisy. [Culling, levels and adaptive resolution](https://github.com/codepawl/crucible/blob/main/docs/culling-lod.md) holds the contract. Vegetation chooses its own levels by distance with `selectLevels`, and can fade between them.
 
 ## Shadow cost and render targets
 
@@ -112,12 +112,12 @@ What you can do about it:
 - A scene with no shadow caster allocates a one texel shadow map instead of 16 MB. Bloom, ambient occlusion, cascades and the point light atlas allocate only when used.
 - Fewer samples cut the largest target. `samples: 2` halves the multisampled colour.
 - With `shadowCascades` on, a scene also holds the cascade array (48 MB for three 2048 slices). A scene that does not need cascades should leave them off. A scene wider than 40 m gets three cascades by default because one map would cover more than 80 m, so a texel would be 4 cm or wider; set `shadowCascades: 0` to keep the single map.
-- The opt-in addon `useCompactColor(renderer)` from `67js/addons/compact-color` stores the frame and multisample colour as R11F_G11F_B10F. At 1920 by 1080, 110.92 MB became 71.37 MB, 39.55 MB less. The 26 reference pictures differ from the default by a mean FLIP of 0.002 to 0.030 (median 0.021), so it changes pixels slightly.
+- The opt-in addon `useCompactColor(renderer)` from `crucible/addons/compact-color` stores the frame and multisample colour as R11F_G11F_B10F. At 1920 by 1080, 110.92 MB became 71.37 MB, 39.55 MB less. The 26 reference pictures differ from the default by a mean FLIP of 0.002 to 0.030 (median 0.021), so it changes pixels slightly.
 
 Rebuild a renderer with other options and read the totals yourself. This example swaps samples and shadows, disposes the old renderer, and prints the new target list.
 
 ```js live poster=performance-memory
-import { Renderer67, box, sphere, estimateFrameBytes } from '67js';
+import { CrucibleRenderer, box, sphere, estimateFrameBytes } from 'crucible';
 
 const canvas = document.querySelector('#scene');
 const parts = [
@@ -128,7 +128,7 @@ const parts = [
 let renderer = null;
 function rebuild(samples, hdr) {
   renderer?.dispose();
-  renderer = new Renderer67(canvas, parts, { samples, hdr });
+  renderer = new CrucibleRenderer(canvas, parts, { samples, hdr });
   renderer.render({ eye: [0, 2.2, 6], target: [0, 0.8, 0], fov: 40 });
   const report = renderer.memoryReport();
   console.log(`samples ${samples}, hdr ${hdr}: ${report.totalMegabytes} MB in ${report.targets.length} targets`);
@@ -152,7 +152,7 @@ addEventListener('pagehide', () => renderer?.dispose());
 
 ## Textures and KTX2
 
-Reuse decoded textures and never decode the same image twice. A texture is stored as RGBA8 with a mip chain, which is a third more than the base level, so a 2K map takes about 22 MB. A KTX2 file keeps the texture GPU-compressed. When your KTX2 loader transcodes to BC7, BC1, BC3, ASTC 4x4 or ETC2, the renderer uploads each mip with `compressedTexSubImage2D`, and a 2K map takes about a quarter of the memory of RGBA8 (change 304). `ktx2WorkerConfigFor(context)` from `67js/addons/gltf` gives the loader the formats that the context accepts, and the loader falls back to RGBA8 where the GPU takes none. Large glTF texture sets are scaled down at load when they pass `maxTexturePixels`: 40 maps of 1024 px load as 512 px with the default options. `bench/ktx2/measure.mjs` measures the upload with a Khronos sample asset; run it yourself for numbers on your GPU.
+Reuse decoded textures and never decode the same image twice. A texture is stored as RGBA8 with a mip chain, which is a third more than the base level, so a 2K map takes about 22 MB. A KTX2 file keeps the texture GPU-compressed. When your KTX2 loader transcodes to BC7, BC1, BC3, ASTC 4x4 or ETC2, the renderer uploads each mip with `compressedTexSubImage2D`, and a 2K map takes about a quarter of the memory of RGBA8 (change 304). `ktx2WorkerConfigFor(context)` from `crucible/addons/gltf` gives the loader the formats that the context accepts, and the loader falls back to RGBA8 where the GPU takes none. Large glTF texture sets are scaled down at load when they pass `maxTexturePixels`: 40 maps of 1024 px load as 512 px with the default options. `bench/ktx2/measure.mjs` measures the upload with a Khronos sample asset; run it yourself for numbers on your GPU.
 
 ## Adaptive quality
 
@@ -172,7 +172,7 @@ The planner includes geometry, textures and mipmaps, shadows, MSAA, HDR, bloom a
 
 ## Where three.js still wins
 
-Be honest about the comparison. On 2026-11-04 (two runs, 960 by 540) three.js had the faster full frame on SwiftShader in all seven benchmark scenes and on the RTX 3060 in five of seven, and a faster first frame in all seven. 67js drew `instanced-objects` and `moving-shadows` faster than three.js with separate meshes. Run `npm run benchmark:runtime` for your own numbers; it takes about 8 minutes and needs Chrome and a GPU.
+Be honest about the comparison. On 2026-11-04 (two runs, 960 by 540) three.js had the faster full frame on SwiftShader in all seven benchmark scenes and on the RTX 3060 in five of seven, and a faster first frame in all seven. Crucible drew `instanced-objects` and `moving-shadows` faster than three.js with separate meshes. Run `npm run benchmark:runtime` for your own numbers; it takes about 8 minutes and needs Chrome and a GPU.
 
 ## Common mistakes
 

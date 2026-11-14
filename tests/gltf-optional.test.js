@@ -42,7 +42,7 @@ test('a file that only lists KHR_lights_punctual, KHR_materials_unlit or EXT_tex
   assert.deepEqual(avif.warnings, ['EXT_texture_avif is accepted but not rendered.']);
 });
 
-test('an optional extension that 67js does not know is ignored and named in the warnings', async () => {
+test('an optional extension that Crucible does not know is ignored and named in the warnings', async () => {
   const asset = await parseGltf(triangleDocument(document => {
     document.extensionsUsed = ['VENDOR_made_up'];
     document.materials[0].extensions = { VENDOR_made_up: {} };
@@ -63,7 +63,7 @@ test('line and point primitives are skipped with a warning that names the mesh',
     document.meshes[0].primitives.push({ attributes: { POSITION: 0 }, mode: 1 }, { attributes: { POSITION: 0 }, mode: 0 });
   }));
   assert.equal(asset.parts.length, 1);
-  assert.deepEqual(asset.warnings, ['Skipped 1 LINES, 1 POINTS primitive(s) in mesh "Body": 67js draws triangles only.']);
+  assert.deepEqual(asset.warnings, ['Skipped 1 LINES, 1 POINTS primitive(s) in mesh "Body": Crucible draws triangles only.']);
 });
 
 test('a file with only line primitives has nothing to draw and says so', async () => {

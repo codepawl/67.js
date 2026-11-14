@@ -3,7 +3,7 @@
 import { constants, setPriority } from 'node:os';
 import { mat3, mat4 } from 'gl-matrix';
 import { box } from '../src/geometry.js';
-import { Renderer67, groupParts } from '../src/renderer.js';
+import { CrucibleRenderer, groupParts } from '../src/renderer.js';
 import { materialLayerState } from '../src/material-layers.js';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
@@ -22,7 +22,7 @@ function createParts(count) {
 }
 
 function createRenderer(parts) {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData() {} };
   renderer.updateSkins = new Set();
   renderer.updateBatches = new Set();

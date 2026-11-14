@@ -1,6 +1,6 @@
 # Optimise agent runs
 
-This page shows how to make an agent finish a 67js task with fewer tool calls, fewer tokens and less waiting. Each number says how it was obtained. Tool sizes were measured on 2026-11-07 with `node scripts/measure-tool-cost.mjs` in a source checkout of 0.15.0. Timings come from one machine under normal load, so read them as ranges.
+This page shows how to make an agent finish a Crucible task with fewer tool calls, fewer tokens and less waiting. Each number says how it was obtained. Tool sizes were measured on 2026-11-07 with `node scripts/measure-tool-cost.mjs` in a source checkout of 0.15.0. Timings come from one machine under normal load, so read them as ranges.
 
 ## Where the tokens go
 
@@ -20,9 +20,9 @@ An agent pays for three things: the tool list, the results of its calls, and the
 Claude Code loads tool schemas on demand through tool search by default, so it pays this cost only for the tools that a task uses. Other harnesses can send the whole list on every turn. If your harness does that, cut the list to the tools that your task needs:
 
 ```toml
-[mcp_servers.67js-scene]
+[mcp_servers.crucible-scene]
 command = "npx"
-args = ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu"]
+args = ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu"]
 disabled_tools = ["mesh_edit", "mesh_stack", "mesh_inspect", "scene_create_asset", "scene_asset_catalog"]
 ```
 
@@ -82,7 +82,7 @@ A picture costs tokens and an agent can misread it. The text results hold facts 
 - `scene_look` with `labels: true` returns the pixel position of each named part. The agent finds the part to fix.
 - `committed` and `renderSucceeded` in an edit result say whether the edit stuck and drew.
 
-Ask the agent to check these numbers first and to take a picture only when the numbers pass. The [agent modeling suite](https://github.com/codepawl/67.js/tree/main/bench/agent-modeling) grades the same way: it reads bounds, connected parts and holes from the exported recipe and never looks at the picture.
+Ask the agent to check these numbers first and to take a picture only when the numbers pass. The [agent modeling suite](https://github.com/codepawl/crucible/tree/main/bench/agent-modeling) grades the same way: it reads bounds, connected parts and holes from the exported recipe and never looks at the picture.
 
 ## Keep the state in the server
 
@@ -109,7 +109,7 @@ Chrome starts only on the first scene call, so a harness that connects and never
 
 ## What agents achieve
 
-The repository has a suite that measures how an agent models through these tools. Each task runs in a fresh Claude Code session that has only the 67js tools. The numbers below are from the run of 2026-11-04. It used 5 tasks (crate, bolt, window, table, mug), 2 runs each, and the `cpu` backend.
+The repository has a suite that measures how an agent models through these tools. Each task runs in a fresh Claude Code session that has only the Crucible tools. The numbers below are from the run of 2026-11-04. It used 5 tasks (crate, bolt, window, table, mug), 2 runs each, and the `cpu` backend.
 
 | Model | Runs passed | Mean tool calls | Mean turns |
 | --- | --- | --- | --- |
@@ -133,7 +133,7 @@ Two features did not show a clear gain in these runs. Branches saved 2 of 17 cal
 ## A prompt that applies all of this
 
 ```text
-Use 67js through MCP. Call scene_capabilities once and do not call it again.
+Use Crucible through MCP. Call scene_capabilities once and do not call it again.
 Build the scene with one scene_create. Make every later change as one scene_apply batch.
 Preview at 512 by 320 and use scene_review for several views.
 Check bounds and lint with scene_inspect and mesh_inspect before you look at a picture.

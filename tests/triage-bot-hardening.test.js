@@ -50,12 +50,12 @@ test('reference-style images, link definitions and outside links are removed', (
   const clean = sanitizeComment('![x][r]\n\n[r]: https://evil.example/p.png?d=1\n[click](https://evil.example) see https://evil.example/y and www.evil.example');
   assert.doesNotMatch(clean, /evil\.example|!\[/);
   assert.match(clean, /click/);
-  const kept = sanitizeComment('See [guide](https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.md) and https://67js.codepawl.com/docs');
+  const kept = sanitizeComment('See [guide](https://github.com/codepawl/crucible/blob/main/CONTRIBUTING.md) and https://crucible.codepawl.com/docs');
   const keptAddresses = linkedAddresses(kept);
-  assert.deepEqual(keptAddresses.map(address => address.hostname), ['github.com', '67js.codepawl.com']);
-  assert.equal(keptAddresses[0].pathname, '/codepawl/67.js/blob/main/CONTRIBUTING.md');
+  assert.deepEqual(keptAddresses.map(address => address.hostname), ['github.com', 'crucible.codepawl.com']);
+  assert.equal(keptAddresses[0].pathname, '/codepawl/crucible/blob/main/CONTRIBUTING.md');
   assert.equal(keptAddresses[1].pathname, '/docs');
-  assert.doesNotMatch(sanitizeComment('https://github.com/codepawl/67.js.evil.example/x'), /evil/);
+  assert.doesNotMatch(sanitizeComment('https://github.com/codepawl/crucible.evil.example/x'), /evil/);
   assert.doesNotMatch(sanitizeComment('mail me at someone@evil.example'), /evil/);
 });
 

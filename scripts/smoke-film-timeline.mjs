@@ -13,17 +13,17 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-timeline-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-timeline-'));
 const jobs = join(directory, 'jobs');
 const audioFolder = join(directory, 'audio');
 await mkdir(audioFolder);
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const backend = process.argv[3] ?? 'cpu';
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', backend, '--memory', '128', '--jobs', jobs, '--audio', audioFolder], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-timeline-proof', version: '1' });
+const client = new Client({ name: 'crucible-timeline-proof', version: '1' });
 const SIZE = 128;
 const FILM_SECONDS = Number(process.env.FILM_SECONDS ?? 6);
 const FRAMES_PER_SECOND = FILM_SECONDS > 30 ? 15 : 10;
@@ -69,7 +69,7 @@ async function runJob(sessionId, settings) {
 function recipe() {
   const shotSeconds = FILM_SECONDS / 3;
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }, { id: 'sphere', type: 'sphere', segments: 24, rings: 16 }],
     materials: [{ id: 'floor', color: [0.05, 0.05, 0.06], roughness: 0.9 }, { id: 'glow', color: [1, 1, 1], emission: 3 }],
     nodes: [

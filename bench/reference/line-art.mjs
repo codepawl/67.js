@@ -1,6 +1,6 @@
-// Line art reference for issue #285: draws bench/reference/line-art-scene.json with outlines in 67js at a preview size and
+// Line art reference for issue #285: draws bench/reference/line-art-scene.json with outlines in Crucible at a preview size and
 // at 4K, draws the same scene in Blender 5.2 with Freestyle, and compares the line masks.
-//   node bench/reference/line-art.mjs [--backend gpu|cpu] [--skip-blender] [--reuse-67js] [--width <pixels>]
+//   node bench/reference/line-art.mjs [--backend gpu|cpu] [--skip-blender] [--reuse-crucible] [--width <pixels>]
 // Writes PNGs and a side-by-side sheet to artifacts/line-art/ (gitignored) and prints the numbers.
 import { spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -56,13 +56,13 @@ async function loadPair(prefix) {
   return { withoutLines, withLines, strength: lineStrength(withoutLines, withLines) };
 }
 
-if (!argumentsGiven.includes('--reuse-67js')) await drawWithJs67();
+if (!argumentsGiven.includes('--reuse-crucible')) await drawWithJs67();
 const widthRows = [];
 for (const size of SIZES) {
   const pair = await loadPair(`js67-${size.name}`);
   const widths = verticalEdgeWidths(pair.strength, size.width, size.height, { rowStep: 3, slopeRows: Math.round(6 * size.width / 960) });
   widthRows.push({ size: size.name, edges: widths.length, median: median(widths) });
-  console.log(`67js ${size.name} ${size.width}x${size.height}: requested width ${lineWidth}, median vertical-edge width ${median(widths).toFixed(2)} px over ${widths.length} samples`);
+  console.log(`Crucible ${size.name} ${size.width}x${size.height}: requested width ${lineWidth}, median vertical-edge width ${median(widths).toFixed(2)} px over ${widths.length} samples`);
 }
 
 if (!argumentsGiven.includes('--skip-blender')) {
@@ -80,7 +80,7 @@ if (!argumentsGiven.includes('--skip-blender')) {
     js67Found: maskOverlap(maskJs, dilate(maskBlender, preview.width, preview.height, 2)).intersection / maskJs.reduce((sum, value) => sum + value, 0),
     blenderFound: maskOverlap(maskBlender, dilate(maskJs, preview.width, preview.height, 2)).intersection / maskBlender.reduce((sum, value) => sum + value, 0),
   };
-  console.log(`edge mask IoU ${exact.iou.toFixed(3)}; with 2 px tolerance, ${(tolerant.js67Found * 100).toFixed(1)}% of 67js line pixels lie on a Blender line and ${(tolerant.blenderFound * 100).toFixed(1)}% of Blender line pixels lie on a 67js line`);
+  console.log(`edge mask IoU ${exact.iou.toFixed(3)}; with 2 px tolerance, ${(tolerant.js67Found * 100).toFixed(1)}% of Crucible line pixels lie on a Blender line and ${(tolerant.blenderFound * 100).toFixed(1)}% of Blender line pixels lie on a Crucible line`);
   const sheet = await sharp({ create: { width: preview.width * 2, height: preview.height, channels: 3, background: '#fff' } })
     .composite([{ input: `${output}/js67-preview-on.png`, left: 0, top: 0 }, { input: `${output}/blender-on.png`, left: preview.width, top: 0 }])
     .png().toBuffer();

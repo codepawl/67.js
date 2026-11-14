@@ -96,7 +96,7 @@ test('the shadow shaders run the same hook so a discarded fragment casts no shad
 test('materials with different snippets land in different batches, and a stored snippet normalizes again', async () => {
   const snippet = normalizeMaterialSnippet(dissolve());
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'hooked', snippet: dissolve() }, { id: 'plain' }],
     nodes: ['a', 'b', 'c'].map((id, index) => ({ id, geometry: 'box', material: id === 'b' ? 'plain' : 'hooked', translation: [index * 2, 0, 0] })),
@@ -130,7 +130,7 @@ test('probing a snippet maps the driver log to snippet lines and names the parts
 
 test('a recipe sets, edits and clears the snippet and scene_capabilities reports the limits', async () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'stone', color: [0.5, 0.5, 0.5], snippet: dissolve() }, { id: 'plain', color: [0.2, 0.2, 0.2] }],
     nodes: [{ id: 'a', geometry: 'box', material: 'stone' }, { id: 'b', geometry: 'box', material: 'plain', translation: [2, 0, 0] }],

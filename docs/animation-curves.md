@@ -53,7 +53,7 @@ Camera channels and material tracks take the same fields. glTF has no easing, so
 
 Spline overshoot clamps emission to zero or greater and metallic to `[0, 1]`.
 It clamps roughness to `[1e-8, 1]` and scale components to `1e-8` or greater.
-These constraints protect 67js material and positive-scale domains. They can flatten a curve near its limits.
+These constraints protect Crucible material and positive-scale domains. They can flatten a curve near its limits.
 Translation and generic `value` tracks keep their finite overshoot.
 
 Nonfinite spline output and zero interpolated quaternions throw `RangeError`.

@@ -11,7 +11,7 @@ const SLAB_TOP = 0.1;
 
 function dropRecipe(system, { colliderScale = [4, 0.2, 4], extra = {} } = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'speck', type: 'box', bevel: 0 }, { id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'glow', color: [1, 0.5, 0.1], emission: 4 }],
     nodes: [

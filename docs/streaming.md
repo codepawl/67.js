@@ -1,10 +1,10 @@
 # Streaming: load and free assets while a game plays
 
-`67js/addons/streaming` is a [runtime](runtime.md) system. It loads assets when the player gets near or the game asks, keeps the bytes in use under a budget, frees low priority assets and swaps detail levels. It loads only when imported and adds no dependency. The GLB loader imports the glTF parser on first use.
+`crucible/addons/streaming` is a [runtime](runtime.md) system. It loads assets when the player gets near or the game asks, keeps the bytes in use under a budget, frees low priority assets and swaps detail levels. It loads only when imported and adds no dependency. The GLB loader imports the glTF parser on first use.
 
 ```js
-import { createRuntime } from '67js/addons/runtime';
-import { createStreaming } from '67js/addons/streaming';
+import { createRuntime } from 'crucible/addons/runtime';
+import { createStreaming } from 'crucible/addons/streaming';
 
 const streaming = createStreaming({
   budgetBytes: 256 * 1024 * 1024,

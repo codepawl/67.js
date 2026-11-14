@@ -11,14 +11,14 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-path-tracer-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-path-tracer-'));
 const jobs = join(directory, 'jobs');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '128', '--jobs', jobs], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-path-tracer-proof', version: '1' });
+const client = new Client({ name: 'crucible-path-tracer-proof', version: '1' });
 const SIZE = 96;
 
 async function call(name, argumentsValue = {}, timeout = 60000) {
@@ -52,7 +52,7 @@ async function renderedBytes(sessionId, settings) {
 }
 
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'box', type: 'box' }, { id: 'sphere', type: 'sphere', segments: 24, rings: 16 }],
   materials: [
     { id: 'floor', color: [0.5, 0.5, 0.5], roughness: 0.8 },
@@ -84,7 +84,7 @@ try {
   assert.notDeepEqual(rasterized.bytes, first.bytes, 'The path tracer must not return the rasterizer image.');
 
   // denoise "oidn" runs the native tool of the optional package when it is installed; without it the job says it used the wavelet filter.
-  const { findOidnBinary } = await import('@codepawlhq/67js-denoise-oidn').catch(() => ({ findOidnBinary: () => null }));
+  const { findOidnBinary } = await import('@codepawlhq/crucible-denoise-oidn').catch(() => ({ findOidnBinary: () => null }));
   const external = await renderedBytes(sessionId, { ...base, renderer: { ...tracer, denoise: 'oidn' } });
   if (findOidnBinary()) {
     assert.equal(external.metrics.pathTracer.denoiser, 'oidn');

@@ -1,6 +1,6 @@
 # Working with agents
 
-This page shows what to ask an agent, which tools it calls, and what each tool returns. It assumes that you [connected the MCP server](#connect-mcp). The results below are real. They came from the `67js-mcp` server, version 0.15.0, started with `--backend cpu`.
+This page shows what to ask an agent, which tools it calls, and what each tool returns. It assumes that you [connected the MCP server](#connect-mcp). The results below are real. They came from the `crucible-mcp` server, version 0.15.0, started with `--backend cpu`.
 
 ## Prompts and the tools they trigger
 
@@ -8,7 +8,7 @@ An agent picks tools from your words. You do not name tools. These prompts show 
 
 | You say | The agent calls |
 | --- | --- |
-| "What can 67js do here? What are the limits?" | `scene_capabilities` |
+| "What can Crucible do here? What are the limits?" | `scene_capabilities` |
 | "Build a wooden table with four legs." | `scene_create` |
 | "Show me." | `scene_look` |
 | "What parts does the scene have? How big are they?" | `scene_inspect` |
@@ -38,7 +38,7 @@ The client sends `initialize`. The server answers with its name, version and ins
   "capabilities": {
     "tools": {"listChanged":true}
   },
-  "serverInfo": {"name":"67js-scene","version":"0.15.0"},
+  "serverInfo": {"name":"crucible-scene","version":"0.15.0"},
   "instructions": "Start with scene_capabilities. ..."
 }
 ```
@@ -50,7 +50,7 @@ The client sends `initialize`. The server answers with its name, version and ins
 ```json
 {
   "scene": {
-    "format": "67js.scene",
+    "format": "crucible.scene",
     "schemaVersion": 1,
     "geometryTypes": ["box","cylinder","sphere","torus","lathe","extrude","tube","curve","text","grid","terrain","mesh"],
     "...": "..."
@@ -387,21 +387,21 @@ While a job runs, previews and edits pause. Inspection and recipe export still w
 
 A skill is a folder with a `SKILL.md` file. It gives an agent a procedure and the names of the files to read. The npm package includes two skills:
 
-- `build-67js-scene` for building scenes through the MCP tools: look, light, camera, film and animation, and error recovery.
-- `render-67js-media` for PNG, pass and MP4 render jobs, with limits and error recovery.
+- `build-crucible-scene` for building scenes through the MCP tools: look, light, camera, film and animation, and error recovery.
+- `render-crucible-media` for PNG, pass and MP4 render jobs, with limits and error recovery.
 
-Copy them from the installed package into the skill folder of your harness. Run this in your project folder, after `npm install 67js@npm:@codepawlhq/67js`:
+Copy them from the installed package into the skill folder of your harness. Run this in your project folder, after `npm install crucible@npm:@codepawlhq/crucible`:
 
 ```sh
 mkdir -p .agents/skills
-cp -r node_modules/67js/skills/build-67js-scene node_modules/67js/skills/render-67js-media .agents/skills/
+cp -r node_modules/crucible/skills/build-crucible-scene node_modules/crucible/skills/render-crucible-media .agents/skills/
 ```
 
 In PowerShell, run this instead:
 
 ```powershell
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
-Copy-Item -Recurse node_modules/67js/skills/build-67js-scene, node_modules/67js/skills/render-67js-media .agents/skills/
+Copy-Item -Recurse node_modules/crucible/skills/build-crucible-scene, node_modules/crucible/skills/render-crucible-media .agents/skills/
 ```
 
 Each harness reads its own folder:
@@ -413,13 +413,13 @@ Each harness reads its own folder:
 | Gemini CLI | `.gemini/skills/` or `.agents/skills/` | `~/.gemini/skills/` or `~/.agents/skills/` | [Gemini CLI skills docs](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md) |
 | Cursor | `.cursor/skills/` or `.agents/skills/` | `~/.cursor/skills/` or `~/.agents/skills/` | [Cursor skills docs](https://cursor.com/docs/skills) |
 
-For Claude Code, replace `.agents/skills` in the commands above with `.claude/skills`. The other harnesses in [Connect the MCP server](#connect-mcp) have no skill folder that this page confirmed. For those, tell the agent to read the two `SKILL.md` files, or add the line `Read node_modules/67js/skills/build-67js-scene/SKILL.md before you build a scene` to the project's `AGENTS.md`.
+For Claude Code, replace `.agents/skills` in the commands above with `.claude/skills`. The other harnesses in [Connect the MCP server](#connect-mcp) have no skill folder that this page confirmed. For those, tell the agent to read the two `SKILL.md` files, or add the line `Read node_modules/crucible/skills/build-crucible-scene/SKILL.md before you build a scene` to the project's `AGENTS.md`.
 
-The skills were written for work in a 67js source checkout. Some steps name files such as `scripts/render-media.mjs`. With the npm package, the agent finds the scene and render guides in `node_modules/67js/docs/`, for example `agent-scene.md` and `agent-render-jobs.md`.
+The skills were written for work in a Crucible source checkout. Some steps name files such as `scripts/render-media.mjs`. With the npm package, the agent finds the scene and render guides in `node_modules/crucible/docs/`, for example `agent-scene.md` and `agent-render-jobs.md`.
 
 ## Without MCP
 
-Some harnesses have no MCP support. An agent can still use 67js. Give it these two things:
+Some harnesses have no MCP support. An agent can still use Crucible. Give it these two things:
 
 1. The map of the docs at [`/llms.txt`](/llms.txt) and the full text at [`/guide.md`](/guide.md).
 2. A script that renders a picture. [Render a PNG from a script without MCP](#render-a-png-from-a-script-without-mcp) has one that was tested.

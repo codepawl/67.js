@@ -40,7 +40,7 @@ test('the largest flat water part sets the level and optics; a ribbon that is no
 });
 
 test('a recipe water material carries resolved optics and other tags refuse them', () => {
-  const recipe = (material) => ({ format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'sheet', type: 'box', bevel: 0 }], materials: [{ id: 'water', ...material }], nodes: [{ id: 'sheet', geometry: 'sheet', material: 'water', scale: [10, 0.1, 10] }] });
+  const recipe = (material) => ({ format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'sheet', type: 'box', bevel: 0 }], materials: [{ id: 'water', ...material }], nodes: [{ id: 'sheet', geometry: 'sheet', material: 'water', scale: [10, 0.1, 10] }] });
   const scene = createAgentScene(recipe({ tag: 'water', waterPreset: 'sea', turbidity: 0.3 }));
   const material = scene.parts[0].material;
   assert.equal(material.tag, 'water');

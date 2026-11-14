@@ -1,6 +1,6 @@
 // Sample for src/runtime.js: a ball bouncing in a fixed-step system and a cube spinning in a variable-step system,
 // shown live in each update mode. Open bench/runtime-loop/index.html with `npm run dev`; ?mode=fixed|variable|both picks the start mode.
-import { Renderer67, box, sphere } from '/src/index.js';
+import { CrucibleRenderer, box, sphere } from '/src/index.js';
 import { createRuntime } from '/src/runtime.js';
 import { createInput, gamepadSource, keyboardSource } from '/src/input.js';
 import { createAudio } from '/src/audio.js';
@@ -184,7 +184,7 @@ function createRig(kind) {
 }
 
 const canvas = document.querySelector('canvas');
-const renderer = new Renderer67(canvas, parts, { samples: 4, memoryBudgetMiB: 256 });
+const renderer = new CrucibleRenderer(canvas, parts, { samples: 4, memoryBudgetMiB: 256 });
 renderer.resize();
 
 // The player box is drawn between its last two fixed steps, turned to its heading, and hidden when the camera is inside it.

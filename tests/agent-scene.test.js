@@ -6,7 +6,7 @@ import { createAgentScene, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS,
 import * as lightweightCapabilities from '../src/agent-scene-capabilities.js';
 
 test('the plain-data capabilities module matches the scene engine', () => {
-  const scene = createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] });
+  const scene = createAgentScene({ format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] });
   assert.deepEqual(scene.limits, lightweightCapabilities.AGENT_SCENE_DEFAULT_LIMITS);
   assert.equal(AGENT_SCENE_DEFAULT_LIMITS, lightweightCapabilities.AGENT_SCENE_DEFAULT_LIMITS);
   assert.equal(AGENT_SCENE_CAPABILITIES, lightweightCapabilities.AGENT_SCENE_CAPABILITIES);
@@ -14,7 +14,7 @@ test('the plain-data capabilities module matches the scene engine', () => {
 });
 
 function recipe() {
-  return { format: '67js.scene', schemaVersion: 1,
+  return { format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'finish', color: [0.2, 0.4, 0.6] }],
     nodes: [{ id: 'child', parent: 'root', geometry: 'box', material: 'finish', translation: [1, 2, 0] },
@@ -337,7 +337,7 @@ test('detached privileged adapter matrices cannot partially publish a transactio
 });
 
 test('all seven generators remain within conservative aggregate vertex and byte estimates', () => {
-  const input = { format: '67js.scene', schemaVersion: 1, materials: [{ id: 'material' }], nodes: [], geometries: [
+  const input = { format: 'crucible.scene', schemaVersion: 1, materials: [{ id: 'material' }], nodes: [], geometries: [
     { id: 'box', type: 'box', subdivisions: 2 },
     { id: 'cylinder', type: 'cylinder', segments: 8, bevelSegments: 2 },
     { id: 'sphere', type: 'sphere', segments: 8, rings: 4 },
@@ -362,7 +362,7 @@ test('all seven generators remain within conservative aggregate vertex and byte 
 });
 
 function emptyRecipe() {
-  return { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] };
+  return { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] };
 }
 
 test('topology can grow from an empty session while sharing resources and preserving existing part identities', () => {
@@ -630,15 +630,15 @@ test('an existing default material is reused and a node with only a material sti
 });
 
 test('a recipe without a materials or geometries list reads them as empty, and the export lists them', () => {
-  const minimal = { format: '67js.scene', schemaVersion: 1,
+  const minimal = { format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     nodes: [{ id: 'part', geometry: 'box' }] };
   const exported = createAgentScene(minimal).exportRecipe();
   assert.deepEqual(exported.materials.map(material => material.id), ['default']);
-  const bare = createAgentScene({ format: '67js.scene', schemaVersion: 1, nodes: [{ id: 'group' }] }).exportRecipe();
+  const bare = createAgentScene({ format: 'crucible.scene', schemaVersion: 1, nodes: [{ id: 'group' }] }).exportRecipe();
   assert.deepEqual(bare.geometries, []);
   assert.deepEqual(bare.materials, []);
-  assert.throws(() => createAgentScene({ format: '67js.scene', schemaVersion: 1 }), /nodes/);
+  assert.throws(() => createAgentScene({ format: 'crucible.scene', schemaVersion: 1 }), /nodes/);
 });
 
 test("recipe materials accept alphaMode 'add' and keep it when opacity is below one", () => {

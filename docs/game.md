@@ -1,6 +1,6 @@
 # Game: a playable scene from a recipe
 
-A scene recipe can carry a `game` section. It names the node the player controls, the controller, camera and input preset, and a [game rules](game-rules.md) document. `67js/addons/game` plays it in a page, and the MCP tool `scene_export_web` writes it as a static web build. The section is plain data: there is no script, so an agent can create and edit it without running anything it wrote.
+A scene recipe can carry a `game` section. It names the node the player controls, the controller, camera and input preset, and a [game rules](game-rules.md) document. `crucible/addons/game` plays it in a page, and the MCP tool `scene_export_web` writes it as a static web build. The section is plain data: there is no script, so an agent can create and edit it without running anything it wrote.
 
 ## Build one through MCP
 
@@ -53,14 +53,14 @@ A rules part named like a scene node is hidden and shown with it, which is how a
 
 ## The web build
 
-`scene_export_web` writes one folder: `index.html`, `game.json` (the recipe) and `engine/` (the built 67js modules, found by following the imports from `build/game.js`). It runs from any static host with no server code, and the folder is bounded: the engine stays under 12 MiB, the recipe under 1 MiB, and the newest four builds are kept. Placed catalog assets (and the assets whose clips a character retargets) are copied to `assets/<id>.glb`, up to 64 MiB together; grown vegetation is refused with the fix. The page shows the variables and the verdict in a corner label and exposes the running game as `window.__game` (`rules.state`, `controller.state`, `scene`, `runtime`).
+`scene_export_web` writes one folder: `index.html`, `game.json` (the recipe) and `engine/` (the built Crucible modules, found by following the imports from `build/game.js`). It runs from any static host with no server code, and the folder is bounded: the engine stays under 12 MiB, the recipe under 1 MiB, and the newest four builds are kept. Placed catalog assets (and the assets whose clips a character retargets) are copied to `assets/<id>.glb`, up to 64 MiB together; grown vegetation is refused with the fix. The page shows the variables and the verdict in a corner label and exposes the running game as `window.__game` (`rules.state`, `controller.state`, `scene`, `runtime`).
 
-`index.html?replay=name.json` plays a recording (`recordInput`, see [input](input.md#custom-and-scripted-input)) from the same folder instead of the keyboard. `scripts/smoke-game-web.mjs` builds a creature that collects 3 coins (each hidden by a rule) on a stone-pattern floor and reaches a goal through the MCP tools, exports it, and wins it from a replay in headless Chrome, with a head-bob animation graph that the page must play. `node scripts/smoke-game-web.mjs bin/67js-mcp.mjs puzzle` plays the [physics puzzle](#physics). `node scripts/smoke-game-web.mjs bin/67js-mcp.mjs drive` does the same for a car that passes 3 gates and reaches a finish line under a `chase` camera.  The `character` sample walks a placed, retargeted humanoid (idle and walk clips of another file) to a goal, and checks that the page loads `assets/<id>.glb` and the character's limbs move. A game with a pattern or map material makes the export ship `engine/replace-textured-parts.js` and `startGame` load it; without it the first scene update and every hide or show fail with a replaceParts error, so the creature sample keeps a textured floor to catch that.
+`index.html?replay=name.json` plays a recording (`recordInput`, see [input](input.md#custom-and-scripted-input)) from the same folder instead of the keyboard. `scripts/smoke-game-web.mjs` builds a creature that collects 3 coins (each hidden by a rule) on a stone-pattern floor and reaches a goal through the MCP tools, exports it, and wins it from a replay in headless Chrome, with a head-bob animation graph that the page must play. `node scripts/smoke-game-web.mjs bin/crucible-mcp.mjs puzzle` plays the [physics puzzle](#physics). `node scripts/smoke-game-web.mjs bin/crucible-mcp.mjs drive` does the same for a car that passes 3 gates and reaches a finish line under a `chase` camera.  The `character` sample walks a placed, retargeted humanoid (idle and walk clips of another file) to a goal, and checks that the page loads `assets/<id>.glb` and the character's limbs move. A game with a pattern or map material makes the export ship `engine/replace-textured-parts.js` and `startGame` load it; without it the first scene update and every hide or show fail with a replaceParts error, so the creature sample keeps a textured floor to catch that.
 
 ## From code
 
 ```js
-import { startGame } from '67js/addons/game';
+import { startGame } from 'crucible/addons/game';
 const game = await startGame(canvas, recipe, { replay, showStatus: true });
 game.dispose();
 ```

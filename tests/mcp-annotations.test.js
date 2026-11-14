@@ -70,7 +70,7 @@ test('structuredContent validates against the outputSchema and the text content 
 });
 
 test('a render result returns the PNG as image content and a resource link to each file', async context => {
-  const directory = await mkdtemp(join(tmpdir(), '67js-annotations-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-annotations-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const imagePath = join(directory, 'image.png');
   const videoPath = join(directory, 'video.mp4');

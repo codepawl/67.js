@@ -15,7 +15,7 @@ const options = { width: Number(widthText), height: Number(heightText), resoluti
 // Runs in the page.
 async function playSequence({ width, height, resolution, frameCount, draws }) {
   const { box } = await import('/src/geometry.js');
-  const { Renderer67 } = await import('/src/renderer.js');
+  const { CrucibleRenderer } = await import('/src/renderer.js');
   const { encodeVolumeGrid, registerVolumeGrid } = await import('/src/volume-grid.js');
   await import('/src/fog-shader.js');
   const voxels = resolution ** 3;
@@ -55,7 +55,7 @@ async function playSequence({ width, height, resolution, frameCount, draws }) {
   canvas.width = width;
   canvas.height = height;
   document.body.append(canvas);
-  const renderer = new Renderer67(canvas, parts, { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+  const renderer = new CrucibleRenderer(canvas, parts, { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
   const pixel = new Uint8Array(4);
   const draw = time => {
     renderer.render({ eye: [0, 3.5, 9], target: [0, 2, 0], fov: 40, time, environment: { keyIntensity: 1.1, fillIntensity: 0.25, ambientIntensity: 0.35, localVolumes: [volume] } });

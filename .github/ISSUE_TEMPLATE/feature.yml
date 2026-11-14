@@ -1,16 +1,16 @@
 name: Feature request
-description: Something 67js or its MCP tools should be able to do.
+description: Something Crucible or its MCP tools should be able to do.
 labels: [enhancement, needs-triage]
 body:
   - type: markdown
     attributes:
       value: |
-        Check [ROADMAP.md](https://github.com/codepawl/67.js/blob/main/ROADMAP.md) and the [open issues](https://github.com/codepawl/67.js/issues) first.
+        Check [ROADMAP.md](https://github.com/codepawl/crucible/blob/main/ROADMAP.md) and the [open issues](https://github.com/codepawl/crucible/issues) first.
   - type: textarea
     id: why
     attributes:
       label: Why
-      description: What you are trying to make, and where 67js stops you today. A picture of the result you want helps.
+      description: What you are trying to make, and where Crucible stops you today. A picture of the result you want helps.
     validations:
       required: true
   - type: textarea

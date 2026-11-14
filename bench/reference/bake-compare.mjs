@@ -25,7 +25,7 @@ try {
   page.setDefaultTimeout(0);
   // The native backend traces in this process, the way the agent runtime serves a recipe bake.
   const nativeLocator = createNativeTracerLocator();
-  await page.exposeFunction('__67jsNativeBake', async request => {
+  await page.exposeFunction('__crucibleNativeBake', async request => {
     const found = await nativeLocator.find();
     if (request.action === 'probe') return { available: Boolean(found.tracer) };
     if (!found.tracer) return { error: found.reason };

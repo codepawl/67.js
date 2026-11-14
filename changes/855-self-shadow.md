@@ -1,1 +1,0 @@
-- The sky light of a scattering local volume passes through the volume's own depth (up and four side directions, one tap each, in the rasterizer and the CPU path tracer), so the core of a thick smoke is darker than its rim; `scatter: 0` is unchanged (#855)

@@ -213,7 +213,7 @@ The figures remain stylized silhouettes, without photorealistic character assets
 
 ## 0.3.0
 
-The package is `@codepawlhq/67js`, installed locally through the `67js` alias. The display name remains 67js.
+The package is `@codepawlhq/crucible`, installed locally through the `crucible` alias. The display name remains Crucible.
 
 | Check | Measured result |
 | --- | --- |
@@ -239,7 +239,7 @@ Resource lookup normalizes URLs, and hierarchy validation visits roots before de
 
 ## Historical 0.2.0 checks
 
-The early archive used the unscoped `67js` name before npm rejected that name. The scoped organization package supersedes it.
+The early archive used the unscoped `crucible` name before npm rejected that name. The scoped organization package supersedes it.
 
 | Check | Measured result |
 | --- | --- |

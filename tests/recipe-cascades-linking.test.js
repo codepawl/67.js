@@ -11,7 +11,7 @@ import { SUN_BIT, POINT_FIRST_BIT } from '../src/light-linking.js';
 function sceneRecipe(environment = {}, shadow = undefined) {
   const node = (id, x) => ({ id, geometry: 'box', translation: [x, 0.5, 0] });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [],
     nodes: [node('left', -2), node('right', 2), node('floor', 0)],

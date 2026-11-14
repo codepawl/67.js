@@ -5,7 +5,7 @@ import { mat4 } from 'gl-matrix';
 import { parseGltf } from '../src/gltf.js';
 import { clipFromGltfAnimation, createAssetPose } from '../src/skeleton-pose.js';
 import { createCrowd } from '../src/retarget.js';
-import { groupParts, Renderer67 } from '../src/renderer.js';
+import { groupParts, CrucibleRenderer } from '../src/renderer.js';
 import { validateMorphGeometry } from '../src/morph.js';
 import { InstanceSelection, extractFrustumPlanes, selectInstances } from '../src/render-culling.js';
 import {
@@ -140,7 +140,7 @@ test('the renderer culls crowd instances with the bound of the whole clip, and r
   const matrices = [[0, 0, 0], [400, 0, 0], [0, 0, 40], [0, 0, -300]].map(position => mat4.fromTranslation(new Float32Array(16), position));
   const set = createCrowdParts({ rig, palette, instances: matrices.map(matrix => ({ matrix })) });
   const batch = groupParts(set.parts).find(group => group[0].crowd);
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const culling = renderer.createCullingState(batch);
   assert.equal(culling.cullable, true);
   assert.ok(culling.bounds.radius >= palette.bounds.radius);

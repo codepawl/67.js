@@ -1,11 +1,11 @@
 # Lifecycle and troubleshooting
 
-This page lists the problems that new users meet most often. Each section starts with what you see, then gives the cause and the fix. Most errors from 67js name the part or the value that failed, so read the full message in the browser console first.
+This page lists the problems that new users meet most often. Each section starts with what you see, then gives the cause and the fix. Most errors from Crucible name the part or the value that failed, so read the full message in the browser console first.
 
 ## The canvas stays empty
 
 - **The canvas has no size.** The renderer reads the CSS size of the canvas. A canvas inside an element with no height is 0 pixels high. Give the canvas or its parent a height in CSS, as in [step 1 of the tutorial](#first-scene/add-a-canvas).
-- **Nothing calls `render`.** `new Renderer67()` uploads the parts but does not draw. Call `renderer.render(frame)` after you make the renderer, and again after each `resize()`.
+- **Nothing calls `render`.** `new CrucibleRenderer()` uploads the parts but does not draw. Call `renderer.render(frame)` after you make the renderer, and again after each `resize()`.
 - **The camera looks away from the parts.** Put `target` near the parts, and keep `eye` outside them. Start with `eye: [3, 2, 4]` and `target: [0, 0.5, 0]`.
 - **The parts are too small or too large.** `box()` has sides of 1 and `sphere()` has a radius of 1. A model in centimeters can be 100 times larger than you expect. [Load a GLB file](#import-and-export-models/load-a-glb-file) frames a model from its size.
 
@@ -49,7 +49,7 @@ A browser can drop the WebGL context when the graphics driver resets or when too
 
 ## A feature in these docs is missing
 
-The site shows the current source, which can be newer than the npm release. Compare `VERSION` from `import { VERSION } from '67js'` with the [release metadata](/release.json), and read the [changelog](/changelog.html) for the version that adds the feature.
+The site shows the current source, which can be newer than the npm release. Compare `VERSION` from `import { VERSION } from 'crucible'` with the [release metadata](/release.json), and read the [changelog](/changelog.html) for the version that adds the feature.
 
 ## Clean up a scene
 

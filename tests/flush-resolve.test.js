@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { flushOrderOf, MAXIMUM_FLUSH_RANK } from '../src/depth-layer.js';
 import { resolveFlush } from '../src/flush-resolve.js';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { vertexShader } from '../src/shaders.js';
 
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -237,9 +237,9 @@ function recordingContext() {
 test('a depth rank is a metric bias plus a slope-only offset, switched off for rank 0, mirrored for reversed depth', () => {
   const { calls, context } = recordingContext();
   const fake = { context, uniforms: {} };
-  Renderer67.prototype.applyDepthRank.call(fake, 2);
-  Renderer67.prototype.applyDepthRank.call(fake, 0);
-  Renderer67.prototype.applyDepthRank.call(fake, 16, 1);
+  CrucibleRenderer.prototype.applyDepthRank.call(fake, 2);
+  CrucibleRenderer.prototype.applyDepthRank.call(fake, 0);
+  CrucibleRenderer.prototype.applyDepthRank.call(fake, 16, 1);
   assert.deepEqual(calls, [
     ['bias', 2e-4, 2 * 2 ** -19, -2 * 2 ** -22], ['enable', 'fill'], ['offset', -2 / 64, 0],
     ['bias', 0, 0, 0], ['disable', 'fill'],
@@ -249,9 +249,9 @@ test('a depth rank is a metric bias plus a slope-only offset, switched off for r
 
 test('a ranked batch draws one range per rank above its own layer and ends on the layer', () => {
   const { calls, context } = recordingContext();
-  const fake = { context, uniforms: {}, applyDepthRank: Renderer67.prototype.applyDepthRank };
+  const fake = { context, uniforms: {}, applyDepthRank: CrucibleRenderer.prototype.applyDepthRank };
   const ranges = [{ start: 0, count: 6, rank: 0 }, { start: 6, count: 12, rank: 3 }];
-  Renderer67.prototype.drawFlushRanges.call(fake, { depthLayer: 1 }, ranges, 5);
+  CrucibleRenderer.prototype.drawFlushRanges.call(fake, { depthLayer: 1 }, ranges, 5);
   assert.deepEqual(calls.filter(call => call[0] === 'draw'), [['draw', 6, 0, 5], ['draw', 12, 24, 5]]);
   assert.deepEqual(calls.filter(call => call[0] === 'bias').map(call => Math.round(call[1] / 1e-4)), [16, 19, 16]);
 });
@@ -263,7 +263,7 @@ test('the bias moves depth to where the point would be that much closer to the e
   const view = IDENTITY;
   const perspective = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, (far + near) / (near - far), -1, 0, 0, 2 * far * near / (near - far), 0];
   const { calls, context } = recordingContext();
-  Renderer67.prototype.setFlushProjection.call({ context, uniforms: {}, view }, perspective);
+  CrucibleRenderer.prototype.setFlushProjection.call({ context, uniforms: {}, view }, perspective);
   const clipPerMetre = calls[0][1];
   const clip = point => [0, 1, 2, 3].map(row => perspective[row] * point[0] + perspective[4 + row] * point[1] + perspective[8 + row] * point[2] + perspective[12 + row]);
   const point = [3, -2, -250];

@@ -23,7 +23,7 @@ const mixer = createAnimationMixer(graph.animationTargets);
 mixer.clipAction(armClip).play();
 mixer.apply(1);
 graph.update();
-// graph.parts contains mesh nodes with published world matrices for Renderer67.
+// graph.parts contains mesh nodes with published world matrices for CrucibleRenderer.
 ```
 
 ## Definitions and retained objects

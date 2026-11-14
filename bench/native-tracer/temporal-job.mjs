@@ -61,13 +61,13 @@ function windowLitRoom(recipe) {
 }
 
 async function renderVideo(recipe, { name, blend, jobSamples }) {
-  const workDirectory = await mkdtemp(join(tmpdir(), '67js-temporal-job-'));
+  const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-temporal-job-'));
   const transport = new StdioClientTransport({ command: process.execPath,
-    args: [resolve('bin/67js-mcp.mjs'), '--backend', runtimeBackend, '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
+    args: [resolve('bin/crucible-mcp.mjs'), '--backend', runtimeBackend, '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
     cwd: workDirectory, stderr: 'pipe', env: { ...process.env, JS67_NATIVE_TEMPORAL: blend ? 'on' : 'off' } });
   let diagnostics = '';
   transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
-  const client = new Client({ name: '67js-temporal-job', version: '1' });
+  const client = new Client({ name: 'crucible-temporal-job', version: '1' });
   const call = (name, toolArguments) => client.callTool({ name, arguments: toolArguments }, { timeout: 600000 });
   try {
     await client.connect(transport);

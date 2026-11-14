@@ -1,1 +1,0 @@
-- `scene_apply` takes a `fracture-node` operation that breaks a convex node into 2 to 64 glued Voronoi pieces with physics bodies and breakable joints (#979)

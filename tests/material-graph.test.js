@@ -133,7 +133,7 @@ test('a noise tiles by default and differs from the endless one (tile false) onl
 
 test('patterns with mapping uv use the geometry UVs from uv_unwrap instead of box projection', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'crate', type: 'mesh', base: { type: 'box', bevel: 0 }, stack: [{ op: 'uv_unwrap' }] }],
     materials: [{ id: 'wall', pattern: graphPattern({ mapping: 'uv' }) }, { id: 'boxed', pattern: { type: 'wood', resolution: 256 } }],
     nodes: [{ id: 'part', geometry: 'crate', material: 'wall' }],
@@ -154,7 +154,7 @@ test('patterns with mapping uv use the geometry UVs from uv_unwrap instead of bo
 
 test('a graph that makes emission, roughness or metallic passes it through by default', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'lamp', pattern: { type: 'graph', graph: { emission: { checker: { count: 4 } }, metallic: 1 }, mapping: 'uv', resolution: 256 } }],
     nodes: [{ id: 'part', geometry: 'block', material: 'lamp' }],
@@ -257,7 +257,7 @@ test('hostile strings never reach a texture, a recipe or a shader', () => {
   const accepted = normalizeMaterialPattern({ type: 'graph', graph: { height: { noise: { scale: 4 } } }, resolution: 256 });
   assert.equal(JSON.stringify(accepted).includes(marker), false);
   const recipe = {
-    format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'block', type: 'box', bevel: 0 }],
+    format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'bad', pattern: { type: 'graph', graph: { color: { wave: { direction: marker } } } } }],
     nodes: [{ id: 'part', geometry: 'block', material: 'bad' }],
   };

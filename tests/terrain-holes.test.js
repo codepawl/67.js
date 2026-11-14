@@ -76,7 +76,7 @@ test('hostile hole lists are rejected with a clear error', () => {
 });
 
 const baseRecipe = terrain => ({
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'ground', ...terrain }],
   materials: [{ id: 'grass', color: [0.3, 0.6, 0.2] }],
   nodes: [{ id: 'ground', geometry: 'ground', material: 'grass' }],

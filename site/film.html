@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#080909" />
-    <meta name="description" content="OPPENHEIMER. A 3D trailer study rendered live in 67js, inspired by the Oppenheimer New Trailer." />
-    <title>OPPENHEIMER · A 67js trailer study</title>
+    <meta name="description" content="OPPENHEIMER. A 3D trailer study rendered live in Crucible, inspired by the Oppenheimer New Trailer." />
+    <title>OPPENHEIMER · A Crucible trailer study</title>
   <link rel="icon" href="/favicon.svg" />
   </head>
   <body>
-    <main class="film-stage" aria-label="OPPENHEIMER, a 67js 3D trailer study">
+    <main class="film-stage" aria-label="OPPENHEIMER, a Crucible 3D trailer study">
       <canvas id="film-canvas" aria-label="Procedural 3D film"></canvas>
       <div id="film-flash" class="film-flash" aria-hidden="true"></div>
       <div id="film-title" class="film-title" aria-hidden="true">
@@ -17,9 +17,9 @@
         <p id="subtitle-text"></p>
       </div>
       <header class="film-header player-interface">
-        <a class="brand" href="./">67js</a>
+        <a class="brand" href="./">Crucible</a>
         <span class="film-name">OPPENHEIMER</span>
-        <nav aria-label="Explore 67js">
+        <nav aria-label="Explore Crucible">
           <a href="./object.html">Object</a>
           <a href="./nature.html">Nature</a>
           <a href="./film.html" aria-current="page">Film</a>
@@ -30,14 +30,14 @@
         <div class="transport-actions">
           <button id="film-play" class="play-button" type="button" aria-label="Play film"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">Play film</span></button>
           <button id="film-replay" type="button"><span aria-hidden="true">↺</span> Replay</button>
-          <a class="download" data-icon="download" href="./media/critical.mp4" download="67js-oppenheimer.mp4">Download film</a>
+          <a class="download" data-icon="download" href="./media/critical.mp4" download="crucible-oppenheimer.mp4">Download film</a>
         </div>
         <div class="scrubber">
           <label for="film-time" class="visually-hidden">Film position in seconds</label>
           <input id="film-time" type="range" min="0" max="187" step="0.01" value="0" />
           <output id="film-clock" for="film-time">0:00 / 3:07</output>
         </div>
-        <p class="film-caption">A 67js 3D study · Original synthesized score · <a href="https://www.youtube.com/watch?v=uYPbbksJxIg">Trailer reference: Universal Pictures</a></p>
+        <p class="film-caption">A Crucible 3D study · Original synthesized score · <a href="https://www.youtube.com/watch?v=uYPbbksJxIg">Trailer reference: Universal Pictures</a></p>
       </section>
       <p id="film-error" class="film-error player-interface" role="alert" hidden></p>
     </main>

@@ -1,1 +1,0 @@
-- `scene_apply` nodes take `shadowOnly: true`, and the Cook cpu backend leaves a shadow-only node out of camera rays while it still blocks shadow rays and shows in bounces (#958)
