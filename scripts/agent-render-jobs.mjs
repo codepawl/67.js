@@ -3,7 +3,7 @@ import { mkdir, open, readFile, writeFile, rename, link, unlink, rmdir, readdir,
 import { randomUUID, createHash } from 'node:crypto';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
-import { RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, VIDEO_ENCODERS, AUDIO_FILE_PATTERN, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS } from '../src/agent-scene-capabilities.js';
+import { RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, MAXIMUM_JOB_FRAMES, VIDEO_ENCODERS, AUDIO_FILE_PATTERN, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS } from '../src/agent-scene-capabilities.js';
 import { parseQuality } from './agent-render-quality.mjs';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { normalizeFilmTimeline, filmTimelineDuration } from '../src/film-timeline.js';
@@ -120,7 +120,7 @@ function settingsFrom(input, clips, recipe) {
   const defaultDuration = timelineStart === undefined || input.kind === 'image' ? bakeDefault ?? 1 : filmTimelineDuration(recipe.timeline) - timelineStart;
   const duration = boundedNumber(input.duration ?? defaultDuration, 0.1, MAXIMUM_VIDEO_SECONDS, 'duration');
   const frameCount = input.kind === 'image' ? 1 : input.kind === 'stills' ? 8 : Math.ceil(fps * duration);
-  if (frameCount > 900) throw new RangeError('Job exceeds 900 frames.');
+  if (frameCount > MAXIMUM_JOB_FRAMES) throw new RangeError(`Job exceeds ${MAXIMUM_JOB_FRAMES} frames. Lower fps or duration.`);
   const result = { kind: input.kind, width, height, fps, duration, frameCount };
   if (input.passes !== undefined) result.passes = passesFrom(input.passes, input.kind);
   if (input.renderer !== undefined) result.renderer = rendererFrom(input.renderer, input.passes);
