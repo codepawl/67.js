@@ -15,6 +15,7 @@ import { MAX_STORED_MORPH_TARGETS, createMorphPose, validateMorphGeometry, valid
 // The defaults fit one large exported scene (a 240 MB GLB of 8 million vertices with 8K textures) and still bound a hostile file.
 const DEFAULT_LIMITS = Object.freeze({
   maxBytes: 256 * 1024 * 1024,
+  maxDecodedBytes: 1024 * 1024 * 1024,
   maxVertices: 8_000_000,
   maxParts: 65_536,
   maxResources: 256,
@@ -109,8 +110,10 @@ function usesSecondUvSet(material) {
   return materialTextureReferences(material ?? {}).some(([, reference]) => uvChannelOf(reference) === 1);
 }
 
+// Without its own value, the decoded-bytes budget is four times maxBytes, as it was before the option existed.
 function limitsFor(options) {
   const limits = Object.fromEntries(Object.entries(DEFAULT_LIMITS).map(([name, value]) => [name, options[name] ?? value]));
+  limits.maxDecodedBytes = options.maxDecodedBytes ?? limits.maxBytes * 4;
   for (const [name, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive safe integer.`);
   }
@@ -498,7 +501,7 @@ function validateDocument(document, limits, allowedExtensions) {
     if (!components[accessor.type]) throw new Error('Unsupported glTF accessor shape.');
     decodedBytes += accessor.count * components[accessor.type] * 4;
   }
-  overLimit(overruns, 'decoded accessor bytes', decodedBytes, 'maxBytes', limits.maxBytes, 4);
+  overLimit(overruns, 'decoded accessor bytes', decodedBytes, 'maxDecodedBytes', limits.maxDecodedBytes);
   return { vertices, ignoredExtensions, overruns };
 }
 
@@ -897,6 +900,8 @@ function releaseDecodedGeometry(source, remainingUsers) {
   source.index = null;
   source.morphPositions = null;
   source.morphNormals = null;
+  // The loader closes over the file bytes; a finished source must not keep them alive.
+  source.load = null;
 }
 
 async function convertGeometry(source, primitive, secondUvSet, onIgnoredVertexAlpha, onRepair, checkpoint) {
@@ -1284,7 +1289,7 @@ export async function parseGltf(data, options = {}) {
   let gltf;
   try {
     gltf = await decodeGltf({ document, glbBinary: binaryChunk(data), resourceBytes, decoders, limits, imageTargets: textureScaling.targetByImageIndex, sharedTextures: options.sharedTextures });
-    // The decoded sources hold everything the conversion reads. Dropping the file bytes lets a 200 MB GLB leave memory before the copies below are made.
+    // Accessors are decoded one primitive at a time as the conversion reaches them, so the file bytes stay until the last one is read.
     data = null;
     if (resampler) warnings.push(...resampler.apply(gltf, limits));
     const parts = [];
@@ -1335,6 +1340,7 @@ export async function parseGltf(data, options = {}) {
         const mirrored = singular ? false : determinant < 0;
         const geometryKey = `${node.geometry.uuid}:${uvKey}:${secondUvSet}`;
         if (!geometries.has(geometryKey)) {
+          await node.geometry.load();
           actualVertices += node.geometry.attributes.position.count * (1 + (primitive.targets?.length ?? 0));
           throwOverruns(overLimit([], 'decoded vertices', actualVertices, 'maxVertices', limits.maxVertices));
           try {

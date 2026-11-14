@@ -36,6 +36,7 @@ The optional `signal` aborts those fetches.
 | Option | Default | Limit |
 | --- | ---: | --- |
 | `maxBytes` | 268,435,456 | Total encoded input and fetched external resources. |
+| `maxDecodedBytes` | 1,073,741,824 | Decoded accessor bytes, estimated from the accessor counts before anything is decoded. Left unset while `maxBytes` is set, it is four times `maxBytes`. |
 | `maxVertices` | 8,000,000 | Declared and decoded geometry vertices. Indices have a separate ceiling of twelve times this value. |
 | `maxParts` | 65,536 | Declared nodes and decoded mesh parts. |
 | `maxResources` | 256 | Unique resource URIs. |
@@ -51,7 +52,8 @@ The file size and the decoded geometry and parts are checked as they are read, s
 The MCP server decodes catalog files with tighter limits: 64 MiB a file, 1,000,000 vertices, 4,096 parts, 1,024 joints, 4,194,304 texture pixels (larger images are scaled down), 256 clips and 64 files, all from `src/agent-asset-limits.js`. The reason is the hand-off: the server reads the whole file, base64-encodes it and sends it to the preview page in one browser call. Measured with a local Chrome, a 64 MiB file crossed that call (a 128 MiB rise in server memory, 2.7 s), 72 MiB took 4.9 s, and 80 MiB and above crashed the page. A file over a limit fails with an error that names the limit and the value it hit. A larger scene loads through `loadGltf` in code, where the defaults above apply and the file never crosses that call; meshopt compression shrinks a file for the catalog. See [mcp.md](mcp.md).
 The importer rejects cyclic hierarchies, multiple parents, and hierarchies deeper than 256 levels.
 It checks PNG, JPEG and WebP dimensions before browser image decoding.
-Decoded accessor data has a separate ceiling of four times `maxBytes`.
+Decoded accessor data has its own budget, `maxDecodedBytes`, and a file over it fails before any accessor is read: `decoded accessor bytes 1200000000, over maxDecodedBytes 1073741824. Fix: pass { maxDecodedBytes: 1200000000 }`.
+Accessors are decoded one primitive at a time while the scene is converted, and each is released after the last node that uses it, so decoding holds the file bytes plus the converted geometry plus one primitive, not every accessor at once. The file bytes stay until the last primitive is read; drop your own reference to them after the call returns.
 These limits bound asset inputs and geometry, rather than the renderer's total GPU allocation.
 The renderer retains its separate memory budget.
 
