@@ -31,7 +31,13 @@ before you promise a size or a sound track.
 3. For video, verify with ffprobe when it is installed:
    `ffprobe -v error -count_frames -show_entries stream=codec_name,width,height,r_frame_rate,nb_read_frames:format=duration,size -of json <file>`.
 4. With audio, read `metrics.sync` (`differenceSeconds` under 0.05). It proves alignment, not that the sound is good.
-5. The framebuffer figure is an allocation model, not total VRAM, and Node and browser heap samples do not cover every
+5. For a path-traced film, measure flicker before anyone sees it. A still can look clean while the film shimmers: OIDN
+   leaves slow blotches that change every frame. Take one second of frames and compute the mean absolute temporal
+   second difference `|f[t+1] - 2 f[t] + f[t-1]|` in 8-bit grey. Smooth camera motion cancels in it; noise stays. A
+   still-looking film scores about 1. Above 2, fix it before showing anyone: blend each denoised frame into the
+   reprojected history of the frames before it (first-hit depth and the two cameras). More samples alone did not fix
+   it in a room lit through one window: 1024 spp still scored 2 (An caught it, 2026-11-13).
+6. The framebuffer figure is an allocation model, not total VRAM, and Node and browser heap samples do not cover every
    allocation. Report them as estimates.
 
 ## Speed
