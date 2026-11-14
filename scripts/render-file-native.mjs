@@ -10,7 +10,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareFileScene } from './file-scene.mjs';
-import { traceFrameNative } from './agent-native-trace.mjs';
+import { collectExportChunks, traceFrameNative } from './agent-native-trace.mjs';
 import { MissingAddonError, USAGE, listIgnoredFrameEffects, parseArguments } from './render-file-native-options.mjs';
 
 function freePort() {
@@ -43,9 +43,15 @@ async function startViteServer(root) {
   return { server, port };
 }
 
+// Runs in the page: one chunk (base64) of a table that exportTablesInPage left there.
+async function readExportChunkInPage({ name, offset }) {
+  const { readExportChunk } = await import('/scripts/native-bake-page.js');
+  return readExportChunk(window.__nativeExportTables, name, offset);
+}
+
 // Runs in the page: packs the loaded scene into the tables the native tracer reads, like the MCP render job does.
 async function exportTablesInPage({ width, height, bounces, seed, instancing, camera, listParts, hideParts, patchMaterials }) {
-  const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes, resolveTexture }, pack, { buildNativeInput }, { buildJobNativeInput, buildFlattenedJobNativeInput }, { exportNativeSceneTables }] = await Promise.all([
+  const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes, resolveTexture }, pack, { buildNativeInput }, { buildJobNativeInput, buildFlattenedJobNativeInput }, { exportNativeSceneTables, splitExportForChunks }] = await Promise.all([
     import('/src/path-tracer.js'), import('/src/path-tracer-scene.js'), import('/src/path-tracer-gpu-pack.js'),
     import('/node_modules/@codepawlhq/cook/pack-input.mjs'), import('/node_modules/@codepawlhq/cook/job-input.mjs'), import('/scripts/native-bake-page.js'),
   ]);
@@ -65,8 +71,12 @@ async function exportTablesInPage({ width, height, bounces, seed, instancing, ca
   const hidden = new Set(matchingParts(hideParts, window.__scene.parts));
   const parts = window.__scene.parts.filter(part => !hidden.has(part));
   const tracerCamera = createCamera(camera, width, height);
-  const exported = exportNativeSceneTables({ parts, environment, camera: tracerCamera, options: { width, height, bounces, seed, fireflyClamp: 20, noiseThreshold: 0 }, kernel: 'cycles', instancing,
+  const packed = exportNativeSceneTables({ parts, environment, camera: tracerCamera, options: { width, height, bounces, seed, fireflyClamp: 20, noiseThreshold: 0 }, kernel: 'cycles', instancing, transport: 'chunks',
     modules: { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } });
+  // The tables stay in the page for readExportChunkInPage: no single message has to carry the scene.
+  const { manifest, tables } = splitExportForChunks(packed);
+  window.__nativeExportTables = tables;
+  const exported = manifest;
   return { ...exported, ignored: describeIgnoredFeatures(parts, environment, 'cpu', { kernelMaterials: exported.wholeMaterials }), partCount: parts.length, hiddenCount: hidden.size, listedParts };
 }
 
@@ -177,8 +187,10 @@ async function main() {
     if (loadError) throw new Error(`Scene file failed to load: ${loadError}`);
     const loadSeconds = (performance.now() - loadStarted) / 1000;
     const packStarted = performance.now();
-    const exported = await page.evaluate(exportTablesInPage, { width: options.width, height: options.height, bounces: options.bounces, seed: options.seed, instancing: options.instancing, camera,
+    const manifest = await page.evaluate(exportTablesInPage, { width: options.width, height: options.height, bounces: options.bounces, seed: options.seed, instancing: options.instancing, camera,
       listParts: options.listParts ?? null, hideParts: options.hideParts ?? null, patchMaterials: options.patchMaterials });
+    const exported = await collectExportChunks(manifest, (name, offset) => page.evaluate(readExportChunkInPage, { name, offset }));
+    await page.evaluate(() => { window.__nativeExportTables = null; });
     const packSeconds = (performance.now() - packStarted) / 1000;
     const denoiser = options.denoise === 'oidn' ? await loadOidnIfAvailable() : null;
     const { traced, peak } = await traceWithGpuMemory({ tracer, exported, width: options.width, height: options.height, samples: options.samples, bounces: options.bounces, seed: options.seed,
