@@ -1,4 +1,4 @@
-import test, { after } from 'node:test';
+import test, { after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentRuntime } from '../scripts/agent-runtime.mjs';
 import { isPreviewHost } from '../scripts/preview-host.mjs';
@@ -40,7 +40,13 @@ import { ANNOTATE_LIMITS } from '../src/agent-annotate.js';
 import * as packLimits from '../src/pack-manifest.js';
 import { createPackRegistry } from '../scripts/agent-packs.mjs';
 
-test('runtime reports real scene capabilities without launching a browser and closes idempotently', async () => {
+const HARNESS_TEST_TIMEOUT_MS = 30000;
+
+function runTest(name, body) {
+  return test(name, { timeout: HARNESS_TEST_TIMEOUT_MS }, body);
+}
+
+runTest('runtime reports real scene capabilities without launching a browser and closes idempotently', async () => {
   const runtime = createAgentRuntime({ backend: 'cpu', memory: 64 });
   const capabilities = await runtime.capabilities();
   assert.equal(capabilities.phase, 'idle');
@@ -58,9 +64,50 @@ test('runtime reports real scene capabilities without launching a browser and cl
   await assert.rejects(runtime.create({ recipe: {} }), /closed/);
 });
 
+const openHarnesses = [];
+
+// Every test must end in seconds: a runtime that throws inside the sandbox leaves page promises and
+// deadline timers pending, which kept the CI shard alive for 15 minutes (#1212).
+afterEach(async () => {
+  const harnesses = openHarnesses.splice(0);
+  for (const { runtime, sandboxTimers, releasePages } of harnesses) {
+    releasePages();
+    let closeTimer;
+    await Promise.race([runtime.close().catch(() => {}),
+      new Promise(resolve => { closeTimer = setTimeout(resolve, 2000); })]);
+    clearTimeout(closeTimer);
+    for (const timer of sandboxTimers) clearTimeout(timer);
+  }
+});
+
+// Race a "started" signal against the call that should start it, so a throw inside the runtime
+// fails the test with that error instead of waiting for a signal that never comes.
+function startedOrFailed(started, pending) {
+  return Promise.race([started, pending.then(() => undefined)]);
+}
+
+// Names the runtime module imports, resolved from the module's own import lines so a new
+// constant cannot be missing from the sandbox.
+async function importedBindings(source) {
+  const bindings = {};
+  const importPattern = /^import\s+(?:(\w+)|\{([^}]*)\})\s+from\s+'([^']+)'/gm;
+  for (const [, defaultName, namedList, specifier] of source.matchAll(importPattern)) {
+    if (specifier.endsWith('.json')) continue;
+    const moduleUrl = specifier.startsWith('.') ? new URL(`../scripts/${specifier}`, import.meta.url).href : specifier;
+    const namespace = await import(moduleUrl);
+    if (defaultName) bindings[defaultName] = namespace.default;
+    for (const entry of (namedList ?? '').split(',').map(item => item.trim()).filter(Boolean)) {
+      const [exported, local = exported] = entry.split(/\s+as\s+/);
+      bindings[local] = namespace[exported];
+    }
+  }
+  return bindings;
+}
+
 async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = false, deadlineMs,
   failDispose = false, heapSize = 1024, stallPrivatePage = false, resumeDelayMs = 0, sceneBake, exportedRecipe, runtimeOptions = {}, contextOverrides = {}, lookBytesPerPixel = 0 } = {}) {
   const events = [];
+  const sandboxTimers = new Set();
   const viewports = [];
   const deadlines = [];
   let privatePage;
@@ -126,27 +173,30 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     },
     close: async () => { await privatePage?.close(); await sourcePage.close(); events.push('browser:close'); },
   };
-  let source = (await readFile(new URL('../scripts/agent-runtime.mjs', import.meta.url), 'utf8'))
+  const originalSource = await readFile(new URL('../scripts/agent-runtime.mjs', import.meta.url), 'utf8');
+  let source = originalSource
     .replace(/^import .+;\r?$/gm, '')
     .replace('export function createAgentRuntime', 'function createAgentRuntime')
     .replaceAll('import.meta.url', JSON.stringify(import.meta.url))
     .replace("import('playwright-core')", 'Promise.resolve({ chromium: globalThis.chromium })');
   if (deadlineMs) source = source.replace('const EVALUATION_TIMEOUT_MS = 30000;', `const EVALUATION_TIMEOUT_MS = ${deadlineMs};`);
-  const context = createContext({ createServer, randomUUID, createHash, addonCapabilities, addonFileFor, addonImportMap, existsSync: () => true,
-    readFile: async () => '', packageMetadata: { version: 'test' },
+  const context = createContext({ ...(await importedBindings(originalSource)),
+    packageMetadata: { version: 'test' }, existsSync: () => true, readFile: async () => '',
     createRequire: () => ({ resolve: () => { throw new Error('no peer in tests'); } }),
-    VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, SETTLE_CAPABILITY_NOTE, GAME_CAPABILITIES, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_FPS, MAXIMUM_JOB_FRAMES, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
-    recipeAssetNeeds, gameAssetIds, sequenceFrameIds, catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, TEXTURE_SEQUENCE_CAPABILITIES, AGENT_ASSET_LIMITS, assertCombinedAssetBytes,
-    audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName, sessionProblem, SCENE_STORE_LIMITS,
-    runAnnotateSession: async () => ({ outcome: 'timeout' }), openInDefaultBrowser: async () => {}, ANNOTATE_LIMITS,
-    ...packLimits, createPackRegistry,
-    sampleBrowserHeap, exceedsMemoryGuard, createNativeTracerLocator: () => ({ find: async () => ({ reason: 'no native tracer in tests' }) }), RENDER_QUALITY_NOTE, applyQuality, tierReport, RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget, RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom, RENDER_HISTORY_FILE, normalizeJobSettings,
-    chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
-    runtimeOptions, resolveJobRoot: path => path, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
-    setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },
+    runAnnotateSession: async () => ({ outcome: 'timeout' }), openInDefaultBrowser: async () => {},
+    createNativeTracerLocator: () => ({ find: async () => ({ reason: 'no native tracer in tests' }) }),
+    createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), resolveJobRoot: path => path,
+    chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout, runtimeOptions, ...contextOverrides,
+    setTimeout: (callback, delay) => {
+      deadlines.push(delay);
+      const timer = setTimeout(callback, delay);
+      sandboxTimers.add(timer);
+      return timer;
+    },
   });
   new Script(`${source}\nglobalThis.runtime = createAgentRuntime({ backend: 'cpu', ...runtimeOptions });`).runInContext(context);
   const runtime = context.runtime;
+  openHarnesses.push({ runtime, sandboxTimers, releasePages: () => { resolvePrivatePage(); privatePage?.rejectShot?.(new Error('Harness cleanup')); } });
   const created = await runtime.create({ recipe });
   return { runtime, sessionId: created.sessionId, deadlines, events, viewports, shotStarted, acquisitionStarted, resolvePrivatePage };
 }
@@ -158,7 +208,7 @@ function boundedResult(promise) {
   ]).finally(() => clearTimeout(timer));
 }
 
-test('scene_look steps a busy PNG down by 0.75 until it fits the 1 MiB budget and says which size came back (#1197)', async () => {
+runTest('scene_look steps a busy PNG down by 0.75 until it fits the 1 MiB budget and says which size came back (#1197)', async () => {
   const busy = await reviewRuntimeHarness({ lookBytesPerPixel: 2 });
   const stepped = await busy.runtime.look({ sessionId: busy.sessionId, width: 1024, height: 640 });
   assert.deepEqual(busy.viewports.slice(-2).map(size => `${size.width}x${size.height}`), ['1024x640', '768x480']);
@@ -174,14 +224,14 @@ test('scene_look steps a busy PNG down by 0.75 until it fits the 1 MiB budget an
   await calm.runtime.close();
 });
 
-test('scene_look fails only when the fourth step down still does not fit, naming that size (#1197)', async () => {
+runTest('scene_look fails only when the fourth step down still does not fit, naming that size (#1197)', async () => {
   const hopeless = await reviewRuntimeHarness({ lookBytesPerPixel: 50 });
   await assert.rejects(hopeless.runtime.look({ sessionId: hopeless.sessionId, width: 1024, height: 640 }), /even at 324x202/);
   assert.equal(hopeless.viewports.length, 5);
   await hopeless.runtime.close();
 });
 
-test('an edit of a scene with a bake, or one that adds a bake, gets the bake deadline; a plain edit keeps 30 s', async () => {
+runTest('an edit of a scene with a bake, or one that adds a bake, gets the bake deadline; a plain edit keeps 30 s', async () => {
   const plain = await reviewRuntimeHarness();
   await plain.runtime.apply({ sessionId: plain.sessionId, operations: [{ type: 'set-camera', camera: {} }] });
   await plain.runtime.apply({ sessionId: plain.sessionId, operations: [{ type: 'set-bake', bake: { preset: 'draft' } }] });
@@ -198,13 +248,13 @@ test('an edit of a scene with a bake, or one that adds a bake, gets the bake dea
   await baked.runtime.close();
 });
 
-test('review deadline rejects stalled page acquisition and disposes a late page', async () => {
+runTest('review deadline rejects stalled page acquisition and disposes a late page', async () => {
   const { runtime, sessionId, events, acquisitionStarted, resolvePrivatePage } = await reviewRuntimeHarness({
     stallPrivatePage: true, deadlineMs: 40,
   });
   const pending = runtime.review({ sessionId, expectedRevision: 0, shots: [{}] });
   try {
-    await acquisitionStarted;
+    await startedOrFailed(acquisitionStarted, pending);
     assert.equal(await boundedResult(pending), 'settled', 'deadline must reject without waiting for newPage');
     await assert.rejects(pending, /deadline/);
     assert.equal((await runtime.capabilities()).phase, 'ready');
@@ -220,11 +270,11 @@ test('review deadline rejects stalled page acquisition and disposes a late page'
   }
 });
 
-test('close interrupts stalled page acquisition and late resolution cannot resurrect the runtime', async () => {
+runTest('close interrupts stalled page acquisition and late resolution cannot resurrect the runtime', async () => {
   const { runtime, sessionId, events, acquisitionStarted, resolvePrivatePage } = await reviewRuntimeHarness({ stallPrivatePage: true });
   const pending = runtime.review({ sessionId, expectedRevision: 0, shots: [{}] });
   pending.catch(() => {});
-  await acquisitionStarted;
+  await startedOrFailed(acquisitionStarted, pending);
   const closing = runtime.close();
   try {
     assert.equal(await boundedResult(closing), 'settled', 'close must not wait for newPage');
@@ -244,7 +294,7 @@ test('close interrupts stalled page acquisition and late resolution cannot resur
   }
 });
 
-test('review queue releases private renderer before source resume, including partial and size failures', async () => {
+runTest('review queue releases private renderer before source resume, including partial and size failures', async () => {
   for (const options of [{}, { failShot: 1 }, { oversize: true }, { heapSize: 256 * 1024 ** 2 + 1 }]) {
     const { runtime, sessionId, events } = await reviewRuntimeHarness(options);
     try {
@@ -264,7 +314,7 @@ test('review queue releases private renderer before source resume, including par
   }
 });
 
-test('queued review detaches its request before a caller can mutate shot clocks', async () => {
+runTest('queued review detaches its request before a caller can mutate shot clocks', async () => {
   const { runtime, sessionId } = await reviewRuntimeHarness();
   try {
     const input = { sessionId, expectedRevision: 0, shots: [{ motionTime: 1 }] };
@@ -277,7 +327,7 @@ test('queued review detaches its request before a caller can mutate shot clocks'
   } finally { await runtime.close(); }
 });
 
-test('successful review elapsed time includes source renderer recovery', async () => {
+runTest('successful review elapsed time includes source renderer recovery', async () => {
   const { runtime, sessionId } = await reviewRuntimeHarness({ resumeDelayMs: 30 });
   try {
     const result = await runtime.review({ sessionId, expectedRevision: 0, shots: [{}] });
@@ -286,7 +336,7 @@ test('successful review elapsed time includes source renderer recovery', async (
   } finally { await runtime.close(); }
 });
 
-test('total review deadline closes private page and restores the usable source', async () => {
+runTest('total review deadline closes private page and restores the usable source', async () => {
   const { runtime, sessionId, events } = await reviewRuntimeHarness({ blockShot: true, deadlineMs: 40 });
   try {
     await assert.rejects(runtime.review({ sessionId, expectedRevision: 0, shots: [{}] }), /total 30 second deadline/);
@@ -297,7 +347,7 @@ test('total review deadline closes private page and restores the usable source',
   } finally { await runtime.close(); }
 });
 
-test('private disposal failure still closes its page before restoring source', async () => {
+runTest('private disposal failure still closes its page before restoring source', async () => {
   const { runtime, sessionId, events } = await reviewRuntimeHarness({ failDispose: true });
   try {
     await assert.rejects(runtime.review({ sessionId, expectedRevision: 0, shots: [{}] }), /disposal failure/);
@@ -306,7 +356,7 @@ test('private disposal failure still closes its page before restoring source', a
   } finally { await runtime.close(); }
 });
 
-test('review stale revisions and strict runtime fields reject before leasing source', async () => {
+runTest('review stale revisions and strict runtime fields reject before leasing source', async () => {
   const { runtime, sessionId, events } = await reviewRuntimeHarness();
   try {
     await assert.rejects(runtime.review({ sessionId, expectedRevision: 1, shots: [{}] }), /Stale/);
@@ -316,11 +366,11 @@ test('review stale revisions and strict runtime fields reject before leasing sou
   } finally { await runtime.close(); }
 });
 
-test('runtime close promptly aborts a pending private review and skips source resume', async () => {
+runTest('runtime close promptly aborts a pending private review and skips source resume', async () => {
   const { runtime, sessionId, events, shotStarted } = await reviewRuntimeHarness({ blockShot: true });
   const pending = runtime.review({ sessionId, expectedRevision: 0, shots: [{}] });
   const rejected = assert.rejects(pending, /closed/);
-  await shotStarted;
+  await startedOrFailed(shotStarted, pending);
   assert.equal((await runtime.capabilities()).phase, 'reviewing');
   await runtime.close();
   await rejected;
@@ -330,7 +380,7 @@ test('runtime close promptly aborts a pending private review and skips source re
   assert.equal((await runtime.capabilities()).phase, 'closed');
 });
 
-test('invalid preview configuration rejects before any browser or renderer allocation', () => {
+runTest('invalid preview configuration rejects before any browser or renderer allocation', () => {
   assert.throws(() => createAgentRuntime({ backend: 'fake' }), /backend/);
   for (const memory of [0, 31, 385, 1024, 64.5, NaN]) {
     assert.throws(() => createAgentRuntime({ memory }), /memory/);
@@ -339,7 +389,7 @@ test('invalid preview configuration rejects before any browser or renderer alloc
   assert.throws(() => createAgentRuntime({ assets: 'relative-path' }), /absolute/);
 });
 
-test('requests cannot address an absent session or enter a closing runtime', async () => {
+runTest('requests cannot address an absent session or enter a closing runtime', async () => {
   const runtime = createAgentRuntime();
   await assert.rejects(runtime.inspect({ sessionId: 'missing' }), /Unknown|No scene is active/);
   await assert.rejects(runtime.look({ sessionId: 'missing' }), /Unknown|No scene is active/);
@@ -348,7 +398,7 @@ test('requests cannot address an absent session or enter a closing runtime', asy
   await closing;
 });
 
-test('the preview server accepts only its own loopback host', () => {
+runTest('the preview server accepts only its own loopback host', () => {
   assert.equal(isPreviewHost('127.0.0.1:4100', 4100), true);
   assert.equal(isPreviewHost('evil.example:4100', 4100), false);
   assert.equal(isPreviewHost('localhost:4100', 4100), false);
@@ -382,7 +432,7 @@ async function webExportHarness({ exportedRecipe, failCopy = () => false } = {})
 
 const PLAYABLE_RECIPE = { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], game: { player: { node: 'creature' }, physics: false } };
 
-test('exportWeb keeps only the newest four builds and returns a real entry page', async () => {
+runTest('exportWeb keeps only the newest four builds and returns a real entry page', async () => {
   const { runtime, sessionId, keptBuilds } = await webExportHarness({ exportedRecipe: PLAYABLE_RECIPE });
   const entries = [];
   for (let index = 0; index < 5; index++) entries.push((await runtime.exportWeb({ sessionId })).entry);
@@ -391,7 +441,7 @@ test('exportWeb keeps only the newest four builds and returns a real entry page'
   for (const entry of entries.slice(1)) assert.ok((await stat(entry)).isFile());
 });
 
-test('a half-written web export is removed and never evicts or uses up a kept build', async () => {
+runTest('a half-written web export is removed and never evicts or uses up a kept build', async () => {
   let breakCopy = false;
   const { runtime, sessionId, keptBuilds } = await webExportHarness({ exportedRecipe: PLAYABLE_RECIPE, failCopy: () => breakCopy });
   const goodEntries = [];
@@ -402,7 +452,7 @@ test('a half-written web export is removed and never evicts or uses up a kept bu
   for (const entry of goodEntries) assert.ok((await stat(entry)).isFile());
 });
 
-test('exportWeb refuses a scene without a game or with physics, and earlier builds stay', async () => {
+runTest('exportWeb refuses a scene without a game or with physics, and earlier builds stay', async () => {
   const { runtime, sessionId, keptBuilds } = await webExportHarness({ exportedRecipe: PLAYABLE_RECIPE });
   await runtime.exportWeb({ sessionId });
   const refused = [
@@ -417,7 +467,7 @@ test('exportWeb refuses a scene without a game or with physics, and earlier buil
   assert.equal((await keptBuilds()).length, 1);
 });
 
-test('exportWeb needs a jobs folder', async () => {
+runTest('exportWeb needs a jobs folder', async () => {
   const harness = await reviewRuntimeHarness({ exportedRecipe: PLAYABLE_RECIPE });
   after(() => harness.runtime.close());
   await assert.rejects(harness.runtime.exportWeb({ sessionId: harness.sessionId }), /--jobs/);

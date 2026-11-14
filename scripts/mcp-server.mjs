@@ -871,6 +871,15 @@ export function readableErrorMessage(error) {
 const ENGINE_FAULT = /Cannot (?:read|set) propert(?:y|ies) of (?:undefined|null)|Cannot destructure|is not a function|is not iterable|is not defined|Cannot convert undefined or null/;
 const ENGINE_FAULT_ADVICE = 'Internal error in the Crucible server, not caused by your input. Call scene_inspect to check the scene, retry once, and if it repeats, leave out the optional field you just added (for example labels) or report the tool name.';
 
+// A guide on the site follows main and can name a field the installed release does not have yet. A refusal of an unknown
+// field says which version refused it, so the agent can tell a typo from a field that arrives later.
+const UNKNOWN_FIELD_REFUSAL = /is not a field|is not a known field|has unknown fields|has an unknown field|unknown fields? /;
+
+export function withVersionHint(message, version) {
+  if (!UNKNOWN_FIELD_REFUSAL.test(message)) return message;
+  return `${message} This server is Crucible ${version}; a field in a newer guide may only arrive in a later release, so check the {since X.Y.Z} tag in the guide.`;
+}
+
 function isEngineFault(message) {
   return ENGINE_FAULT.test(message);
 }
@@ -922,7 +931,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
       try {
         return await run(withActiveSession(argumentsValue, inputSchema));
       } catch (error) {
-        const message = readableErrorMessage(error);
+        const message = withVersionHint(readableErrorMessage(error), version);
         const sceneMissing = CREATE_TOOLS.has(name);
         return { isError: true, content: [{ type: 'text', text: `${name} failed: ${message}${sceneMissing ? ` ${SCENE_NOT_CREATED_ADVICE}` : ''}` }] };
       }

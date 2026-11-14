@@ -8,7 +8,8 @@ import { clipFlushOverlaps, FLUSH_CUT_MINIMUM_AREA, FLUSH_CUT_STRIDE, sameNumber
 import { findFlushPairs, float32Step, worldBounds } from './flush-search.js';
 import { invertAffine } from './path-tracer-reprojection.js';
 
-const COLLAPSED_AXIS_SHARE = 1e-3;
+// A 2 cm slab 400 m wide is a ground, not a collapse (issue #1216): only an axis a millionth of the longest one is scaled to nothing.
+const COLLAPSED_AXIS_SHARE = 1e-6;
 const CACHED_ORDERS_PER_GEOMETRY = 8;
 // A face this close in front of another, facing the same way, is cut like a flush one. Seen at a grazing angle, the cut
 // can open a strip no wider than the gap at the front face's edge: a thousandth of the shared face, never less than a
@@ -239,7 +240,7 @@ export function resolveFlush(parts, options) {
     if (order) ranked++;
   }
   for (const part of found.unchecked) note('unchecked', part, part.geometry.indices.length / 3);
-  if (found.truncated) note('unchecked', { name: 'scene' }, 0);
+  if (found.truncated) note('unchecked', { name: found.truncatedAt ?? 'scene' }, 0);
   for (const part of parts) {
     if (part.matrix && part.geometry?.indices?.length && hasCollapsedAxis(part.matrix)) note('collapsed-node', part, part.geometry.indices.length / 3);
   }
