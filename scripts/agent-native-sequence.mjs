@@ -14,7 +14,8 @@ const REQUIRED_TRACER_FUNCTIONS = ['createNativeSession', 'planNativeSessionUpda
  * @returns {{ trace(input: object, traceOptions: object): { traced: object, route: object }, close(): void }}
  *   `trace` takes a v1 table set or a FORMAT-v2 input and the `traceNative` options of the frame, and returns the traced
  *   planes with the route the frame took: `path` is "new-session", "reused", "updated" or "one-shot", `reason` says why a
- *   session was created or skipped, and the session's own reuse flags and update report ride along.
+ *   session was created or skipped, and the session's own reuse flags and update report ride along. A frame that went
+ *   through a session also returns `kernelParams`, the block it was traced with.
  */
 export function createNativeSequence({ tracer }) {
   if (tracer === null || typeof tracer !== 'object') {
@@ -95,7 +96,7 @@ export function createNativeSequence({ tracer }) {
       try {
         const traced = session.render({ ...traceOptions, kernelParams: nextInput.kernelParams });
         Object.assign(route, { pipelineReused: traced.pipelineReused, accelerationReused: traced.accelerationReused, frameIndex: traced.frameIndex });
-        return { traced, route };
+        return { traced, route, kernelParams: nextInput.kernelParams };
       } catch (error) {
         closeSession();
         if (isNativeTimeLimitError(error)) throw error;
