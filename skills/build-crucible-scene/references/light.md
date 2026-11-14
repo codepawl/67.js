@@ -1,5 +1,11 @@
 # Light: sun, lamps, caps, bounce, flush faces
 
+<!-- skill-navigation:start -->
+This is the [Light: sun, lamps, caps, bounce, flush faces](#light-sun-lamps-caps-bounce-flush-faces) reference. Read [Caps](#caps) and [Units](#units) before adding lamps.
+Then read the task's section: [A lamp, a spot and a panel](#a-lamp-a-spot-and-a-panel), [Move the sun](#move-the-sun),
+[Bounce light in a closed room](#bounce-light-in-a-closed-room) or [Flush faces flicker (z-fighting)](#flush-faces-flicker-z-fighting).
+<!-- skill-navigation:end -->
+
 Calls follow the conventions in `look.md`. `tests/skill-examples.test.js` applies every block, so they stay valid.
 
 ## Caps

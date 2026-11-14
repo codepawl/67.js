@@ -3,6 +3,8 @@
 // opacity, scale_0 to scale_2 and rot_0 to rot_3. Higher-order spherical harmonics (f_rest_*) and normals are skipped,
 // so a splat shows one colour from every direction. Other splat formats (.spz, .ksplat, .splat) are not read here.
 
+import { runInChunks } from './gaussian-splat-chunks.js';
+
 export const GAUSSIAN_SPLAT_LIMITS = Object.freeze({
   // A file this large cannot be read into memory safely in a browser tab.
   maximumBytes: 512 * 1024 * 1024,
@@ -90,7 +92,7 @@ function propertyLayout(properties) {
   return { layout, stride: offset };
 }
 
-function resolveLimits(options) {
+export function resolveLimits(options) {
   const maximumBytes = options.maximumBytes ?? GAUSSIAN_SPLAT_LIMITS.maximumBytes;
   const maximumCount = options.maximumCount ?? GAUSSIAN_SPLAT_LIMITS.maximumCount;
   if (!(maximumBytes > 0) || !(maximumCount > 0)) {
@@ -111,9 +113,29 @@ function toByte(unit) {
  * axis lengths in metres and rotations are unit quaternions in w, x, y, z order.
  */
 export function parseGaussianSplatPly(buffer, options = {}) {
+  const source = openSplatPly(buffer, options, 'parseGaussianSplatPly');
+  const reader = createSplatReader(source);
+  reader.readRange(0, source.vertexCount);
+  return reader.result();
+}
+
+/**
+ * The same result as `parseGaussianSplatPly`, byte for byte, read in slices of `chunkSize` splats (default 32,768) with a
+ * wait of one macrotask between slices, so the page keeps drawing and answering input. `onProgress(fraction)` is called
+ * after each slice with a rising fraction that ends at exactly 1. An aborted `signal` stops the read and rejects with an
+ * error named `AbortError`. The header checks and size limits run first and reject before any splat is read.
+ */
+export async function parseGaussianSplatPlyAsync(buffer, options = {}) {
+  const source = openSplatPly(buffer, options, 'parseGaussianSplatPlyAsync');
+  const reader = createSplatReader(source);
+  await runInChunks(source.vertexCount, options, 'parseGaussianSplatPlyAsync', reader.readRange);
+  return reader.result();
+}
+
+function openSplatPly(buffer, options, caller) {
   const { maximumBytes, maximumCount } = resolveLimits(options);
   if (!(buffer instanceof ArrayBuffer) && !ArrayBuffer.isView(buffer)) {
-    throw new TypeError('parseGaussianSplatPly expects an ArrayBuffer or a typed array');
+    throw new TypeError(`${caller} expects an ArrayBuffer or a typed array`);
   }
   if (buffer.byteLength > maximumBytes) {
     throw new RangeError(`Gaussian splat file is ${buffer.byteLength} bytes, over the limit of ${maximumBytes}`);
@@ -129,10 +151,10 @@ export function parseGaussianSplatPly(buffer, options = {}) {
     throw new Error(`Gaussian splat PLY is truncated: ${vertexCount} splats need ${vertexCount * stride} bytes, ${bytes.length - bodyStart} are present`);
   }
   const body = new DataView(bytes.buffer, bytes.byteOffset + bodyStart, vertexCount * stride);
-  return readSplats(body, vertexCount, layout, stride);
+  return { view: body, vertexCount, layout, stride };
 }
 
-function readSplats(view, count, layout, stride) {
+function createSplatReader({ view, vertexCount: count, layout, stride }) {
   const positions = new Float32Array(count * 3);
   const colors = new Uint8Array(count * 4);
   const scales = new Float32Array(count * 3);
@@ -144,7 +166,10 @@ function readSplats(view, count, layout, stride) {
   const opacityField = layout.get('opacity');
   const scaleFields = ['scale_0', 'scale_1', 'scale_2'].map(name => layout.get(name));
   const rotationFields = ['rot_0', 'rot_1', 'rot_2', 'rot_3'].map(name => layout.get(name));
-  for (let index = 0; index < count; index++) {
+  function readRange(start, end) {
+    for (let index = start; index < end; index++) readSplat(index);
+  }
+  function readSplat(index) {
     const row = index * stride;
     for (let axis = 0; axis < 3; axis++) {
       const field = positionFields[axis];
@@ -163,7 +188,10 @@ function readSplats(view, count, layout, stride) {
     colors[index * 4 + 3] = toByte(1 / (1 + Math.exp(-opacityField.read(view, row + opacityField.offset))));
     writeUnitQuaternion(rotations, index, view, row, rotationFields);
   }
-  return { count, positions, colors, scales, rotations, bounds: { minimum, maximum } };
+  function result() {
+    return { count, positions, colors, scales, rotations, bounds: { minimum, maximum } };
+  }
+  return { readRange, result };
 }
 
 function writeUnitQuaternion(rotations, index, view, row, fields) {

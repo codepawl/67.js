@@ -1,9 +1,11 @@
 import { mat4 } from 'gl-matrix';
 import { compileProgram } from './gl-program.js';
 import { createSplatSorter } from './gaussian-splat-sort.js';
-import { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly } from './gaussian-splat-ply.js';
+import { runInChunks } from './gaussian-splat-chunks.js';
+import { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly, parseGaussianSplatPlyAsync } from './gaussian-splat-ply.js';
+import { parseGaussianSplatSpz, parseGaussianSplatSpzAsync } from './gaussian-splat-spz.js';
 
-export { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly };
+export { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly, parseGaussianSplatPlyAsync, parseGaussianSplatSpz, parseGaussianSplatSpzAsync };
 
 // Gaussian splats as an optional addon (crucible/addons/gaussian-splats). A splat is an ellipsoid with a colour and an opacity;
 // each is drawn as a screen-space quad whose shape comes from projecting its 3D covariance. The splats are drawn after
@@ -111,19 +113,34 @@ function covarianceOf(scales, rotations, index) {
   return [product(0, 0), product(0, 1), product(0, 2), product(1, 1), product(1, 2), product(2, 2)];
 }
 
-function packSplats(data) {
+function createSplatPacker(data) {
   const texelCount = data.count * TEXELS_PER_SPLAT;
   const rows = Math.ceil(texelCount / DATA_TEXTURE_WIDTH);
   const words = new Uint32Array(rows * DATA_TEXTURE_WIDTH * WORDS_PER_TEXEL);
   const floats = new Float32Array(words.buffer);
   const colorWords = new Uint32Array(data.colors.buffer, data.colors.byteOffset, data.count);
-  for (let index = 0; index < data.count; index++) {
-    const base = index * TEXELS_PER_SPLAT * WORDS_PER_TEXEL;
-    floats.set(data.positions.subarray(index * 3, index * 3 + 3), base);
-    words[base + 3] = colorWords[index];
-    floats.set(covarianceOf(data.scales, data.rotations, index), base + 4);
+  function packRange(start, end) {
+    for (let index = start; index < end; index++) {
+      const base = index * TEXELS_PER_SPLAT * WORDS_PER_TEXEL;
+      floats.set(data.positions.subarray(index * 3, index * 3 + 3), base);
+      words[base + 3] = colorWords[index];
+      floats.set(covarianceOf(data.scales, data.rotations, index), base + 4);
+    }
   }
-  return { words, rows };
+  return { packRange, packed: { words, rows } };
+}
+
+function checkSplatInput(data, matrix, maximumCount, caller) {
+  const limit = Math.min(maximumCount, MAXIMUM_SPLAT_COUNT);
+  if (!(data?.count > 0)) throw new Error(`${caller} needs parsed splat data with at least one splat`);
+  if (data.count > limit) throw new RangeError(`Gaussian splat scene holds ${data.count} splats, over the limit of ${limit}`);
+  if (matrix.length !== 16 || !Array.from(matrix).every(Number.isFinite)) throw new TypeError('matrix must be 16 finite numbers');
+}
+
+function buildSplats(data, matrix, packed) {
+  const sorter = createSplatSorter(data.positions, data.count, data.bounds);
+  const statistics = { count: data.count, visibleCount: 0, sortMilliseconds: 0, gpuBytes: 0, cpuBytes: data.positions.byteLength + data.count * 8 };
+  return { count: data.count, matrix: mat4.clone(matrix), bounds: data.bounds, statistics, packed, sorter };
 }
 
 /**
@@ -134,14 +151,23 @@ function packSplats(data) {
  * `gpuBytes`, `cpuBytes`).
  */
 export function createGaussianSplats(data, { matrix = mat4.create(), maximumCount = GAUSSIAN_SPLAT_LIMITS.maximumCount } = {}) {
-  const limit = Math.min(maximumCount, MAXIMUM_SPLAT_COUNT);
-  if (!(data?.count > 0)) throw new Error('createGaussianSplats needs parsed splat data with at least one splat');
-  if (data.count > limit) throw new RangeError(`Gaussian splat scene holds ${data.count} splats, over the limit of ${limit}`);
-  if (matrix.length !== 16 || !Array.from(matrix).every(Number.isFinite)) throw new TypeError('matrix must be 16 finite numbers');
-  const packed = packSplats(data);
-  const sorter = createSplatSorter(data.positions, data.count, data.bounds);
-  const statistics = { count: data.count, visibleCount: 0, sortMilliseconds: 0, gpuBytes: 0, cpuBytes: data.positions.byteLength + data.count * 8 };
-  return { count: data.count, matrix: mat4.clone(matrix), bounds: data.bounds, statistics, packed, sorter };
+  checkSplatInput(data, matrix, maximumCount, 'createGaussianSplats');
+  const { packRange, packed } = createSplatPacker(data);
+  packRange(0, data.count);
+  return buildSplats(data, matrix, packed);
+}
+
+/**
+ * The same result as `createGaussianSplats`, packed in slices of `chunkSize` splats (default 32,768) with a wait of one
+ * macrotask between slices. `onProgress(fraction)` rises to exactly 1 and an aborted `signal` rejects with an error named
+ * `AbortError`. Input checks run first and reject before any splat is packed.
+ */
+export async function createGaussianSplatsAsync(data, options = {}) {
+  const { matrix = mat4.create(), maximumCount = GAUSSIAN_SPLAT_LIMITS.maximumCount } = options;
+  checkSplatInput(data, matrix, maximumCount, 'createGaussianSplatsAsync');
+  const { packRange, packed } = createSplatPacker(data);
+  await runInChunks(data.count, options, 'createGaussianSplatsAsync', packRange);
+  return buildSplats(data, matrix, packed);
 }
 
 function createGpuResources(context, splats) {

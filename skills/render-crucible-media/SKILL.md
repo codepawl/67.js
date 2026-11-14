@@ -46,7 +46,8 @@ submit call fails: tell the user which launch option is missing.
   job plays the bake on the scene clock, so do not `bake-motion` first. Video `duration` defaults to the bake length.
 - Imported clips use `settings.animation`; the two clocks are independent.
 - For compositing, `settings.transparent`, `settings.format` (`png16`, `exr`) and `settings.region` are off by default; video runs up to 60 fps (`references/jobs.md`, Compositing output).
-- Path tracing (`settings.renderer`) is offline and slow, for stills; video and passes use the rasterizer.
+- Path tracing (`settings.renderer`) is offline and slow: judge a still first. A video job takes it too, one trace per
+  frame; passes, `transparent`, `format` and `region` need the rasterizer.
 - Do not stop another session's process. Heavy local exports run at below-normal priority, one job at a time.
 - A GLB for Blender is `scene_export_glb`, not a render job.
 

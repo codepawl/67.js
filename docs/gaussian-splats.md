@@ -19,9 +19,34 @@ detach();               // or renderer.dispose()
 
 ## What it reads
 
-One format: the standard 3DGS PLY that the original training code and most tools write: binary little endian with `x y z f_dc_0..2 opacity scale_0..2 rot_0..3` per vertex. Other properties (normals, `f_rest_*`) are skipped, so a splat has one colour from every direction (spherical harmonics of degree 0). `.spz`, `.ksplat` and `.splat` files are not read; `bench/gaussian-splats/fetch-sample.mjs` shows a short `.splat` to PLY conversion.
+Two formats. The first is the standard 3DGS PLY that the original training code and most tools write: binary little endian with `x y z f_dc_0..2 opacity scale_0..2 rot_0..3` per vertex. Other properties (normals, `f_rest_*`) are skipped, so a splat has one colour from every direction (spherical harmonics of degree 0). `.ksplat` and `.splat` files are not read; `bench/gaussian-splats/fetch-sample.mjs` shows a short `.splat` to PLY conversion.
 
-A file over `maximumBytes` (default 512 MiB), or one whose header names more than `maximumCount` splats (default 2,000,000, never above 4,000,000), throws a `RangeError` before any splat is read. A file that is not a PLY, is ASCII, lacks a property or is truncated throws an `Error` that names the problem. `createGaussianSplats` applies the count limit again.
+The second is SPZ, Niantic's format and the output of World Labs Atlas and Marble, about 10 times smaller than the same PLY. `parseGaussianSplatSpz(bytes, options)` is async (it inflates the gzip stream with `DecompressionStream`, so there is no dependency) and returns the same `{ count, positions, colors, scales, rotations, bounds }` with the same options and limits as the PLY parser. It reads versions 2 and 3 and any spherical harmonic degree (the bands above degree 0 are skipped). Version 4 (zstd) is rejected with a message that names the fix. `parseGaussianSplatSpzAsync` also converts in slices and takes `chunkSize`, `onProgress` and `signal` like `parseGaussianSplatPlyAsync`. SPZ positions are in the SPZ axes (x right, y up, z back) while a trainer's PLY is x right, y down, z forward: to place a PLY and an SPZ of the same scene together, give one of them a `matrix` that scales by `[1, -1, -1]`.
+
+```js
+const data = await parseGaussianSplatSpz(await (await fetch('/world.spz')).arrayBuffer());
+```
+
+A file over `maximumBytes` (default 512 MiB, for SPZ also its inflated size), or one whose header names more than `maximumCount` splats (default 2,000,000, never above 4,000,000), throws a `RangeError` before any splat is read. A file that is not a PLY (or an SPZ: bad gzip, bad magic, unsupported version), is ASCII, lacks a property or is truncated throws an `Error` that names the problem. `createGaussianSplats` applies the count limit again.
+
+## Loading without freezing the page
+
+`parseGaussianSplatPly` and `createGaussianSplats` run to the end in one go: about 280 ms of blocked main thread for 1,000,000 splats, seconds for 2,000,000 on a slow machine. For a page that must keep drawing, use the async twins. They return exactly the same bytes, working in slices and waiting one macrotask (no worker needed) between slices.
+
+```js
+import { createGaussianSplatsAsync, parseGaussianSplatPlyAsync } from 'crucible/addons/gaussian-splats';
+
+const controller = new AbortController(); // controller.abort() from a cancel button
+const options = { chunkSize: 32768, signal: controller.signal, onProgress: fraction => { bar.value = fraction; } };
+const data = await parseGaussianSplatPlyAsync(bytes, { ...options, maximumCount: 1_000_000 });
+const splats = await createGaussianSplatsAsync(data, options);
+```
+
+- `onProgress(fraction)` is called after each slice with a rising fraction that ends at exactly 1. Each step reports its own 0 to 1, so map them to the parts of one bar yourself.
+- `chunkSize` is the number of splats per slice (default 32768, a few milliseconds). It must be a positive whole number.
+- An aborted `signal` stops at the next slice and rejects with an `Error` named `AbortError`. A signal that is already aborted rejects before any work.
+- The header checks, size limits and count limit run first and reject exactly as in the sync functions. `createGaussianSplatsAsync` takes `matrix` and `maximumCount` too.
+- Measured with `node bench/gaussian-splats/async-block.mjs` on 1,000,000 generated splats: the longest block drops from about 275 ms to about 22 ms, and the total time is the same (about 255 ms). The sort order buffers `createGaussianSplatsAsync` allocates at the end are not sliced.
 
 ## What it draws
 
