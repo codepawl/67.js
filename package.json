@@ -235,6 +235,7 @@
     "benchmark:streaming": "node bench/streaming-crossing/run.mjs",
     "benchmark:crowd": "node scripts/benchmark-crowd.mjs",
     "check:tool-schemas": "node scripts/check-tool-schemas.mjs",
+    "check:guide-fields": "node scripts/guide-fields.mjs check",
     "check:links": "node scripts/check-links.mjs",
     "changes": "node scripts/changelog-fragments.mjs",
     "changes:fold": "node scripts/changelog-fragments.mjs fold",

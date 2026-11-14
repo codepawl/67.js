@@ -34,6 +34,8 @@ A scene recipe can carry a `game` section. It names the node the player controls
 
 ## Fields
 
+A field newer than the last npm release carries a tag such as `{since 0.21.0}`; an older server refuses it with `is not a field`. Untagged fields work in the last release.
+
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `player.node` | required | A node of the scene. The rules part with the same id follows the player |
