@@ -1078,9 +1078,35 @@ function immutableMaterial(snapshot) {
 const NO_ASSETS = Object.freeze({ placements: [], animators: [], geometryParts: new Map(), materialOutputs: new Map(), partExtras: new Map() });
 
 // A placed asset's material is the decoded one, shared by every placement that uses the same overrides.
+// The fields a motion track drives on a placed asset's material; every other field keeps its decoded value, textures included.
+const ANIMATED_ASSET_FIELDS = ['color', 'emissiveColor', 'emission', 'metallic', 'roughness'];
+
+// A decoded material is frozen, so a handled override gets a view of it that reads the animated fields from the live snapshot.
+function liveAssetOutput(decoded, holder) {
+  const output = {};
+  for (const field of Object.keys(decoded)) {
+    Object.defineProperty(output, field, { enumerable: true, configurable: true, get: () => decoded[field] });
+  }
+  for (const field of ANIMATED_ASSET_FIELDS) {
+    Object.defineProperty(output, field, {
+      enumerable: true,
+      configurable: true,
+      get() {
+        const value = holder.snapshot[field];
+        // Same rule as materialOutput: emission with no emissive colour glows white.
+        if (field === 'emissiveColor' && holder.snapshot.emission > 0 && !value?.some(component => component > 0)) return Object.freeze([1, 1, 1]);
+        return value;
+      },
+    });
+  }
+  return Object.freeze(output);
+}
+
 function assetMaterialHandle(snapshot, output, ...candidates) {
-  const reusable = candidates.find(handle => handle?.output === output);
-  return reusable ?? { holder: { snapshot }, output };
+  const reusable = candidates.find(handle => handle?.source === output);
+  if (reusable) return reusable;
+  const holder = { snapshot };
+  return { holder, output: snapshot.animatable === true ? liveAssetOutput(output, holder) : output, source: output };
 }
 
 function retainedMatrices(parts) {
@@ -1172,7 +1198,8 @@ function stagePose(stagedState, time) {
           definition[field] = Array.from(definition[field]);
         }
       }
-      snapshot = immutableMaterial(materialFrom(definition));
+      // A placed asset's material carries decoded fields that materialFrom does not know; only the driven fields change.
+      snapshot = immutableMaterial(material.assetSource ? definition : materialFrom(definition));
     }
     materialUpdates.push({ holder: stagedState.materialHandles.get(material.id).holder, snapshot });
   }
