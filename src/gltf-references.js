@@ -31,9 +31,15 @@ function validateAccessorReferences(document) {
 
 function validateSceneReferences(document) {
   const sceneIndex = document.scene ?? 0;
-  (document.scenes?.[sceneIndex]?.nodes ?? []).forEach((nodeIndex, position) => {
+  const sceneNodes = document.scenes?.[sceneIndex]?.nodes;
+  if (sceneNodes !== undefined && !Array.isArray(sceneNodes)) throw new Error(`Invalid glTF scenes[${sceneIndex}].nodes: expected an array.`);
+  (sceneNodes ?? []).forEach((nodeIndex, position) => {
     requireIndex(nodeIndex, 'nodes', document.nodes, `scenes[${sceneIndex}].nodes[${position}]`);
   });
+}
+
+function validateNodeObjects(document) {
+  (document.nodes ?? []).forEach((node, nodeIndex) => requireObject(node, `nodes[${nodeIndex}]`));
 }
 
 /** Throws an error naming the field for each dangling reference the loader would otherwise trip over. */
@@ -41,5 +47,6 @@ export function validateDocumentReferences(document) {
   if (!document || typeof document !== 'object' || Array.isArray(document)) throw new Error('glTF JSON must be an object. Fix: pass a glTF 2.0 document.');
   validateMeshReferences(document);
   validateAccessorReferences(document);
+  validateNodeObjects(document);
   validateSceneReferences(document);
 }

@@ -493,9 +493,10 @@ function validateDocument(document, limits, allowedExtensions) {
     }
   }
   // A meshopt view is decoded into its full size before any accessor reads it, even a view that no accessor uses.
-  const meshoptViewBytes = (document.bufferViews ?? []).reduce((total, view) => total + (view?.extensions?.EXT_meshopt_compression ? Number(view.byteLength) || 0 : 0), 0);
+  const meshoptViewBytes = sumMeshoptViewBytes(document);
   overLimit(overruns, 'decoded meshopt view bytes', meshoptViewBytes, 'maxDecodedBytes', limits.maxDecodedBytes);
-  let decodedBytes = morphBytes;
+  // Meshopt views and accessors share one decoded budget, so a file cannot hold both at the full allowance.
+  let decodedBytes = morphBytes + meshoptViewBytes;
   const components = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
   for (const accessor of document.accessors ?? []) {
     if (!Number.isSafeInteger(accessor.count) || accessor.count < 0) throw new Error('Invalid glTF accessor count.');
@@ -507,6 +508,26 @@ function validateDocument(document, limits, allowedExtensions) {
   }
   overLimit(overruns, 'decoded accessor bytes', decodedBytes, 'maxDecodedBytes', limits.maxDecodedBytes);
   return { vertices, ignoredExtensions, overruns };
+}
+
+function requireNonNegativeSafeInteger(value, fieldPath) {
+  if (Number.isSafeInteger(value) && value >= 0) return value;
+  throw new Error(`Invalid glTF ${fieldPath} ${JSON.stringify(value)}: expected a non-negative safe integer.`);
+}
+
+/** Total decoded size of the meshopt views, after checking each size field so a negative length cannot cancel a large one. */
+function sumMeshoptViewBytes(document) {
+  let total = 0;
+  (document.bufferViews ?? []).forEach((view, viewIndex) => {
+    const extension = view?.extensions?.EXT_meshopt_compression;
+    if (!extension) return;
+    const path = `bufferViews[${viewIndex}]`;
+    total += requireNonNegativeSafeInteger(view.byteLength, `${path}.byteLength`);
+    requireNonNegativeSafeInteger(extension.byteLength, `${path}.extensions.EXT_meshopt_compression.byteLength`);
+    requireNonNegativeSafeInteger(extension.count, `${path}.extensions.EXT_meshopt_compression.count`);
+    requireNonNegativeSafeInteger(extension.byteStride, `${path}.extensions.EXT_meshopt_compression.byteStride`);
+  });
+  return total;
 }
 
 const LINE_MODE_NAMES = ['POINTS', 'LINES', 'LINE_LOOP', 'LINE_STRIP'];

@@ -49,6 +49,39 @@ test('a meshopt view that no accessor uses still counts against maxDecodedBytes'
   assert.deepEqual(requestedLengths, []);
 });
 
+test('a negative meshopt view length cannot cancel a large one and no decoder runs', async () => {
+  let decoderCalls = 0;
+  const stubDecoder = {
+    ready: Promise.resolve(),
+    decodeGltfBuffer() {
+      decoderCalls += 1;
+    },
+  };
+  const meshoptView = byteLength => ({
+    buffer: 0,
+    byteLength,
+    extensions: { EXT_meshopt_compression: { buffer: 0, byteLength: 16, byteStride: 12, count: byteLength / 12, mode: 'ATTRIBUTES' } },
+  });
+  const text = triangleJson(document => {
+    document.extensionsUsed = ['EXT_meshopt_compression'];
+    document.bufferViews.push(meshoptView(960000000), meshoptView(960000000), meshoptView(-1920000000));
+  });
+  await assert.rejects(() => parseGltf(text, { decoders: { meshopt: stubDecoder } }), /bufferViews\[3\]\.byteLength.*non-negative/);
+  assert.equal(decoderCalls, 0);
+});
+
+test('meshopt views and accessors share one decoded budget', async () => {
+  const text = triangleJson(document => {
+    document.extensionsUsed = ['EXT_meshopt_compression'];
+    document.bufferViews.push({
+      buffer: 0,
+      byteLength: 120,
+      extensions: { EXT_meshopt_compression: { buffer: 0, byteLength: 16, byteStride: 12, count: 10, mode: 'ATTRIBUTES' } },
+    });
+  });
+  await assert.rejects(() => parseGltf(text, { maxDecodedBytes: 150, decoders: { meshopt: { ready: Promise.resolve(), decodeGltfBuffer() {} } } }), /decoded accessor bytes.*maxDecodedBytes/);
+});
+
 const danglingCases = [
   ['primitive.material out of range', document => { document.meshes[0].primitives[0].material = 5; }, /primitive\.material.*5.*0 to 0/s],
   ['primitive.material without materials', document => { document.meshes[0].primitives[0].material = 0; delete document.materials; }, /primitive\.material.*no materials/s],
@@ -56,6 +89,8 @@ const danglingCases = [
   ['scene node out of range', document => { document.scenes[0].nodes = [7]; }, /scenes\[0\]\.nodes\[0\].*7/s],
   ['mesh without primitives', document => { delete document.meshes[0].primitives; }, /meshes\[0\]\.primitives/],
   ['accessor bufferView out of range', document => { document.accessors[0].bufferView = 9; }, /accessors\[0\]\.bufferView.*9/s],
+  ['scene nodes not an array', document => { document.scenes[0].nodes = 5; }, /scenes\[0\]\.nodes.*array/],
+  ['node null', document => { document.nodes = [null]; }, /nodes\[0\].*object/],
   ['accessor bufferView null', document => { document.accessors[0].bufferView = null; }, /accessors\[0\]\.bufferView/],
 ];
 for (const [name, change, expected] of danglingCases) {

@@ -238,7 +238,8 @@ function requireUvsForTextures(part) {
 
 function usesSecondUvSet(material) {
   const descriptors = [...TEXTURE_CHANNELS.map(channel => material[channel]), ...Object.values(material.layerMaps ?? {})];
-  return Boolean(material.lightMap) || descriptors.some(descriptor => descriptor?.uvChannel === 1);
+  const lightMapWritten = Boolean(material.lightMap) && !material.emissiveMap && (material.emission ?? 0) === 0;
+  return lightMapWritten || descriptors.some(descriptor => descriptor?.uvChannel === 1);
 }
 
 /**
