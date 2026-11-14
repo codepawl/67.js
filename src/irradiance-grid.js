@@ -405,21 +405,26 @@ registerShaderFeatureCode('irradianceGrid', Object.freeze({
 
 const rendererStates = new WeakMap();
 
+// Adding a feature (a render pass asks for its own) links a new program, whose uniforms sit at new locations and start at their
+// defaults, so the locations are looked up again for each program. A location of another program makes the next uniform call fail.
 function stateOf(renderer) {
   if (!rendererStates.has(renderer)) {
+    rendererStates.set(renderer, { textures: new Map(), program: null, enabled: null, origin: null, size: null, bound: undefined });
+  }
+  const state = rendererStates.get(renderer);
+  if (state.program !== renderer.program) {
     const { context, program } = renderer;
     const locate = name => context.getUniformLocation(program, name);
-    rendererStates.set(renderer, {
-      textures: new Map(),
-      enabled: locate('irradianceGridEnabled'),
-      origin: locate('irradianceGridOrigin'),
-      size: locate('irradianceGridSize'),
-      bound: undefined,
-    });
+    state.program = program;
+    state.enabled = locate('irradianceGridEnabled');
+    state.origin = locate('irradianceGridOrigin');
+    state.size = locate('irradianceGridSize');
+    // The new program starts with the grid off and its uniforms unset, so the next bind writes them again.
+    state.bound = undefined;
     // The sampler must never share a unit with a sampler of another type, so it points at its own unit from the first draw.
     context.uniform1i(locate('irradianceGridTexture'), TEXTURE_UNIT);
   }
-  return rendererStates.get(renderer);
+  return state;
 }
 
 function uploadGrid(renderer, grid) {

@@ -1,4 +1,5 @@
 import { encodePng } from './export-png.js';
+import { sourceEncodingOf } from './image-source-encoding.js';
 
 export const DEFAULT_MAX_TEXTURE_SIZE = 2048;
 const ABSOLUTE_MAX_TEXTURE_SIZE = 16384;
@@ -27,7 +28,19 @@ function pixelsOf(image, channel) {
   return { width, height, pixels: context.getImageData(0, 0, width, height).data };
 }
 
-/** Writes each distinct image once as an embedded PNG and shares samplers and textures between channels. */
+function imageSize(image, channel) {
+  const width = image?.naturalWidth ?? image?.width;
+  const height = image?.naturalHeight ?? image?.height;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new TypeError(`GLB ${channel} needs an image with a whole width and height.`);
+  }
+  return { width, height };
+}
+
+/**
+ * Writes each distinct image once and shares samplers and textures between channels.
+ * An image decoded from a JPEG, PNG or WebP file and left unchanged keeps those bytes; any other image is embedded as a PNG.
+ */
 export function createTextureWriter(writer, maxTextureSize = DEFAULT_MAX_TEXTURE_SIZE) {
   if (!Number.isInteger(maxTextureSize) || maxTextureSize < 1 || maxTextureSize > ABSOLUTE_MAX_TEXTURE_SIZE) {
     throw new RangeError(`maxTextureSize must be a whole number from 1 to ${ABSOLUTE_MAX_TEXTURE_SIZE}.`);
@@ -44,15 +57,25 @@ export function createTextureWriter(writer, maxTextureSize = DEFAULT_MAX_TEXTURE
     const flipRows = descriptor.flipY === true;
     const known = imageIndices.get(descriptor.image);
     if (known?.has(flipRows)) return known.get(flipRows);
-    const { width, height, pixels } = pixelsOf(descriptor.image, channel);
+    const sourceEncoding = flipRows ? undefined : sourceEncodingOf(descriptor.image);
+    const decoded = sourceEncoding ? undefined : pixelsOf(descriptor.image, channel);
+    const { width, height } = decoded ?? imageSize(descriptor.image, channel);
     if (width > maxTextureSize || height > maxTextureSize) {
       throw new RangeError(`GLB ${channel} image is ${width}x${height}, above maxTextureSize ${maxTextureSize}. Resize the image, or pass exportGlb(parts, { maxTextureSize }) up to ${ABSOLUTE_MAX_TEXTURE_SIZE} if the file size is acceptable.`);
     }
-    const bytes = encodePng(pixels, width, height, { flipRows });
-    document.images.push({ bufferView: writer.addBufferView(bytes), mimeType: 'image/png' });
+    const bytes = sourceEncoding?.bytes ?? encodePng(decoded.pixels, width, height, { flipRows });
+    const mimeType = sourceEncoding?.mimeType ?? 'image/png';
+    document.images.push({ bufferView: writer.addBufferView(bytes), mimeType });
     const index = document.images.length - 1;
     imageIndices.set(descriptor.image, (known ?? new Map()).set(flipRows, index));
     return index;
+  }
+
+  // glTF core reads PNG and JPEG; a WebP image goes through EXT_texture_webp, which readers must support to show it.
+  function textureDefinition(sampler, source) {
+    if (document.images[source].mimeType !== 'image/webp') return { sampler, source };
+    writer.addExtension('EXT_texture_webp', { required: true });
+    return { sampler, extensions: { EXT_texture_webp: { source } } };
   }
 
   function samplerIndex(descriptor) {
@@ -79,7 +102,7 @@ export function createTextureWriter(writer, maxTextureSize = DEFAULT_MAX_TEXTURE
       const key = `${source}:${sampler}`;
       if (!textureIndices.has(key)) {
         textureIndices.set(key, document.textures.length);
-        document.textures.push({ sampler, source });
+        document.textures.push(textureDefinition(sampler, source));
       }
       return textureIndices.get(key);
     },
