@@ -125,9 +125,49 @@ function dropTexturesWithoutUvs(document, warnings) {
   warnings.push(`Dropped ${[...dropped].sort().join(', ')} from primitives without ${[...missingAttributes].sort().join(' or ')}, which cannot sample a texture (material ${[...materialNames].sort().join(', ')}).`);
 }
 
+/** Paths to every texture reference whose texCoord is a negative number, which no UV set can satisfy. */
+function collectNegativeTexCoordKeys(value, path = [], found = []) {
+  if (!value || typeof value !== 'object') return found;
+  for (const [key, child] of Object.entries(value)) {
+    if (!child || typeof child !== 'object') continue;
+    if (Number.isInteger(child.index) && typeof child.texCoord === 'number' && child.texCoord < 0) found.push([...path, key]);
+    else collectNegativeTexCoordKeys(child, [...path, key], found);
+  }
+  return found;
+}
+
+/**
+ * Blender writes texCoord -1 for a map on a primitive that has no UVs, and some exporters write a roughness of 2. The
+ * spec forbids both, and three.js draws the file anyway: the map is skipped and the factor is clamped. This does the same
+ * and says so, so one bad value does not refuse the whole file.
+ */
+function repairOutOfSpecMaterialValues(document, warnings) {
+  const droppedNames = [];
+  const clampedNames = [];
+  document.materials?.forEach((material, index) => {
+    if (!material || typeof material !== 'object') return;
+    const name = material.name ?? `material ${index}`;
+    for (const path of collectNegativeTexCoordKeys(material)) {
+      delete referenceAt(material, path.slice(0, -1))[path.at(-1)];
+      droppedNames.push(`${path.at(-1)} of ${name}`);
+    }
+    const pbr = material.pbrMetallicRoughness;
+    if (!pbr || typeof pbr !== 'object') return;
+    for (const field of ['metallicFactor', 'roughnessFactor']) {
+      const value = pbr[field];
+      if (!Number.isFinite(value) || (value >= 0 && value <= 1)) continue;
+      pbr[field] = Math.min(1, Math.max(0, value));
+      clampedNames.push(`${field} ${value} of ${name}`);
+    }
+  });
+  if (droppedNames.length) warnings.push(`Dropped ${droppedNames.join(', ')}: a negative texCoord names no UV set.`);
+  if (clampedNames.length) warnings.push(`Clamped ${clampedNames.join(', ')} to 0..1.`);
+}
+
 /** Rewrites the document in place and returns the warnings that tell the caller what changed. */
 export function applyGltfFallbacks(document) {
   const warnings = [];
+  repairOutOfSpecMaterialValues(document, warnings);
   convertSpecularGlossiness(document, warnings);
   moveSecondSetTextures(document, warnings);
   dropTexturesWithoutUvs(document, warnings);

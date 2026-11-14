@@ -52,7 +52,9 @@ function needsFallbacks(document) {
   const materials = document.materials ?? [];
   if (materials.some(material => material?.extensions?.KHR_materials_pbrSpecularGlossiness)) return true;
   // Validation reads every material, used or not, so a second-set map on any of them needs the rewrite.
-  if (materials.some(material => /"texCoord":1/.test(JSON.stringify(material ?? {})))) return true;
+  if (materials.some(material => /"texCoord":(1|-)/.test(JSON.stringify(material ?? {})))) return true;
+  const outOfRange = value => Number.isFinite(value) && (value < 0 || value > 1);
+  if (materials.some(material => outOfRange(material?.pbrMetallicRoughness?.metallicFactor) || outOfRange(material?.pbrMetallicRoughness?.roughnessFactor))) return true;
   return (document.meshes ?? []).some(mesh => (mesh.primitives ?? []).some(primitive => {
     return primitive.attributes?.TEXCOORD_0 === undefined && JSON.stringify(materials[primitive.material] ?? {}).includes('"index"');
   }));
