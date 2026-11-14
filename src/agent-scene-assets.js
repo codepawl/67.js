@@ -1,3 +1,4 @@
+import { normalizeEmissionMask } from './emission-mask.js';
 import { invalidField } from './field-error.js';
 import { mat4 } from 'gl-matrix';
 import { normalizeDrive } from './agent-drive-schema.js';
@@ -30,7 +31,7 @@ const PLACEMENT_FIELDS = ['id', 'materials', 'clip', 'drive', 'crowd'];
 const CLIP_FIELDS = ['index', 'start', 'speed', 'loop'];
 const COLOR_FIELDS = ['color', 'emissiveColor'];
 const UNIT_FIELDS = ['metallic', 'roughness', 'opacity'];
-const OVERRIDE_FIELDS = ['name', 'id', 'tag', ...COLOR_FIELDS, ...UNIT_FIELDS, 'emission'];
+const OVERRIDE_FIELDS = ['name', 'id', 'tag', ...COLOR_FIELDS, ...UNIT_FIELDS, 'emission', 'emissionMask'];
 // A tag an override may set: foliage and grass make an imported tree sway in the wind and shade like a grown one.
 const OVERRIDE_TAGS = ['surface', 'foliage', 'grass'];
 
@@ -85,6 +86,9 @@ function normalizeMaterialOverride(override, index) {
       throw invalidField(`${path}.emission`, override.emission, 'a number of 0 or more, such as 1');
     }
     result.emission = override.emission;
+  }
+  if (override.emissionMask !== undefined) {
+    result.emissionMask = normalizeEmissionMask(override.emissionMask, `${path}.emissionMask`);
   }
   return result;
 }
@@ -197,6 +201,7 @@ function overrideFields(override) {
   for (const field of [...COLOR_FIELDS, ...UNIT_FIELDS, 'emission']) {
     if (override?.[field] !== undefined) fields[field] = override[field];
   }
+  if (override?.emissionMask !== undefined) fields.emissionMask = Object.freeze({ ...override.emissionMask });
   return fields;
 }
 

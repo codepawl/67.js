@@ -95,6 +95,18 @@ registerShaderFeatureCode('emissionFresnel', Object.freeze({
 `,
 }));
 
+// An emission mask (material-layers.js): a smoothstep ramp along one axis of the part's own space in metres, the boxPosition
+// varying that the vertex shader fills for this feature. Axis -1 means this part has no mask.
+registerShaderFeatureCode('emissionMask', Object.freeze({
+  declarations: 'uniform vec3 materialEmissionMask;\n',
+  emissionHook: `  if (materialEmissionMask.x > -0.5) {
+    float maskCoordinate = materialEmissionMask.x < 0.5 ? boxPosition.x : (materialEmissionMask.x < 1.5 ? boxPosition.y : boxPosition.z);
+    float maskRamp = clamp((maskCoordinate - materialEmissionMask.y) / (materialEmissionMask.z - materialEmissionMask.y), 0.0, 1.0);
+    emission *= maskRamp * maskRamp * (3.0 - 2.0 * maskRamp);
+  }
+`,
+}));
+
 registerShaderFeatureCode('anisotropy', Object.freeze({
   declarations: ANISOTROPY_DECLARATIONS,
   illuminateSpecular: ANISOTROPY_ILLUMINATE_SPECULAR,
@@ -340,6 +352,7 @@ layerTextureSupport.bind = (renderer, mapState, layerState, batch) => {
     const transform = mapState[MAP_STATE_NORMAL_MAP]?.uvTransform ?? IDENTITY_NORMAL_MAP_TRANSFORM;
     context.uniform4f(uniformOf(renderer, 'normalMapTransform'), ...transform);
   }
+  if (renderer.shaderFeatures.has('emissionMask')) context.uniform3f(uniformOf(renderer, 'materialEmissionMask'), layerState[25], layerState[26], layerState[27]);
   layerTextureNamesOf(renderer).forEach((name, index) => {
     const descriptor = layerMaps?.[name];
     context.activeTexture(context.TEXTURE0 + LAYER_TEXTURE_UNIT + index);

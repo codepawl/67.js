@@ -111,7 +111,7 @@ void main() {
   vec3 deformedNormal = (USES_SKIN || USES_CROWD) ? transpose(inverse(mat3(deformation))) * localNormal : localNormal;
   worldNormal = normalize(instanceNormal * deformedNormal);
   // Metres along the object's own axes: a pattern follows its node and ignores scale.
-  if (${new Set(features).has('boxMapScale')}) {
+  if (${new Set(features).has('boxMapScale') || new Set(features).has('emissionMask')}) {
   boxPosition = (USES_MORPH ? morphedPosition(position) : position) * vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
   boxNormal = deformedNormal;
 #ifdef INSTANCED

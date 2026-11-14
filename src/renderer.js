@@ -129,6 +129,7 @@ function shaderFeaturesOfParts(parts) {
     for (const name of POSITIVE_SHADER_FEATURES) {
       if (material[name] > 0) features.add(name);
     }
+    if (material.emissionMask) features.add('emissionMask');
     if (material.lightMask !== undefined) features.add('lightLinking');
     if ((material.alphaMode ?? 'opaque') !== 'opaque') features.add('alphaMode');
     if (material.subsurface?.weight > 0) features.add('subsurface');
