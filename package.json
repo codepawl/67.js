@@ -165,6 +165,7 @@
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-exclude=\"scripts/**\" --test-coverage-exclude=\"build/**\"",
     "coverage:gate": "node scripts/coverage-gate.mjs",
     "preflight": "node scripts/preflight.mjs",
+    "render:file-cook": "node scripts/render-file-native.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:scenes": "node scripts/smoke-scenes.mjs",
     "smoke:vegetation-impostors": "node scripts/smoke-vegetation-impostors.mjs",
