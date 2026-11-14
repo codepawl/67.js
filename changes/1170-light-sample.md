@@ -1,0 +1,1 @@
+- Cook no longer pays for an emission map read on every light sample in a scene whose emitters have no emission map: a 349k triangle interior sampled about three times faster on an RTX 3090 (#1170)
