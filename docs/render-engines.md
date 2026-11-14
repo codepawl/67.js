@@ -66,3 +66,7 @@ A time limit failure carries `error.code === "COOK_TIME_LIMIT"`.
 - A native job runs on `gpu` or `cpu` and the report note says what is missing and how to install it.
 - A preview page built without Cook has no scene packer. The packer calls throw "this build has no Cook scene packer; install @codepawlhq/cook and rebuild", and the job turns that into the same fallback note.
 - Path traced stills and videos on the `cpu` and `gpu` backends (`renderPathTracedImage`) never use an engine, so they do not change.
+
+## Updating the pinned Cook commit
+
+67js installs Cook from one commit of its repository, named in `package.json` (`devDependencies["@codepawlhq/cook"]`). To move to a newer Cook, replace the commit after `#` with the full hash of the new one, run `npm install --package-lock-only --ignore-scripts` so `package-lock.json` follows, and open a pull request with both files. `.npmrc` sets `allow-git=root`, which npm 12 needs before it fetches a git dependency.
