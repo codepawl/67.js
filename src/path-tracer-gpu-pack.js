@@ -8,6 +8,31 @@ import { SUBSURFACE_TEXELS } from './path-tracer-gpu-subsurface.js';
 export const ATLAS_WIDTH = 4096;
 const MAXIMUM_TEXTURE_SIZE = 16384;
 
+const TRIANGLE_BYTES = TRIANGLE_TEXELS * 16;
+
+/**
+ * How many triangles a device can hold in the tables above. The triangle table is the largest: TRIANGLE_TEXELS RGBA32F
+ * texels each, DATA_TEXTURE_WIDTH to a row, so a WebGL2 texture of `maximumTextureSize` rows holds
+ * maximumTextureSize * DATA_TEXTURE_WIDTH / TRIANGLE_TEXELS triangles (3,728,270 at the usual 16384). The BVH table needs
+ * four texels a triangle at most and the other tables stay small, so the triangle table decides. A WebGPU storage buffer of
+ * `maximumBufferBytes` (and `maximumBufferSize`, when given) holds that many whole table rows of triangles. Pass what the device reports; the result is also capped
+ * at `ceiling`, the most the tracers hold on any device (MAX_GPU_TRACE_TRIANGLES).
+ */
+export function gpuTriangleCapacity({ maximumTextureSize, maximumBufferBytes, maximumBufferSize }, ceiling) {
+  const capacities = [ceiling];
+  if (maximumTextureSize !== undefined) {
+    const rows = Math.min(maximumTextureSize, MAXIMUM_TEXTURE_SIZE);
+    capacities.push(Math.floor((rows * DATA_TEXTURE_WIDTH) / TRIANGLE_TEXELS));
+  }
+  if (maximumBufferBytes !== undefined) {
+    // The upload pads the table to whole rows, so the buffer is counted in rows and one more row never tips it over the limit.
+    const rowBytes = DATA_TEXTURE_WIDTH * 16;
+    const usableBytes = Math.min(maximumBufferBytes, maximumBufferSize ?? Infinity);
+    capacities.push(Math.floor((Math.floor(usableBytes / rowBytes) * DATA_TEXTURE_WIDTH) / TRIANGLE_TEXELS));
+  }
+  return Math.max(1, Math.min(...capacities));
+}
+
 /** A table of `texelCount` RGBA texels, padded to whole rows. */
 function createTable(texelCount, channels = 4) {
   const rows = Math.max(1, Math.ceil(texelCount / DATA_TEXTURE_WIDTH));

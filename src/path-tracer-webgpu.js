@@ -1,6 +1,7 @@
 import { buildMegakernelSource, PATH_STATE_VECTORS, WAVEFRONT_SOURCE, WAVEFRONT_WORKGROUP_SIZE, WORKGROUP_SIZE } from './path-tracer-webgpu-kernel.js';
 import { resolveLightSelection } from './path-tracer-light-tree.js';
-import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { gpuTriangleCapacity, packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { MAX_GPU_TRACE_TRIANGLES, MAX_TRACE_TRIANGLES } from './path-tracer-scene.js';
 
 // The WebGPU backend of the path tracer (issue #625): the same scene tables, camera, options and random numbers as the
 // WebGL2 backend (path-tracer-gpu.js) go in, the same buffers come out. The tracer is WGSL compute, so a page needs
@@ -139,6 +140,9 @@ function uploadScene(device, scene, requestedLightSelection = 'uniform') {
   const materialsWithSubsurface = new Float32Array(materialData.length + subsurfaceData.length);
   materialsWithSubsurface.set(materialData);
   materialsWithSubsurface.set(subsurfaceData, materialData.length);
+  const triangleCount = scene.indices.length / 3;
+  const largeScene = triangleCount > MAX_TRACE_TRIANGLES;
+  if (largeScene) device.pushErrorScope('out-of-memory');
   const buffers = [
     createStorageBuffer(device, packNodes(scene.bvh).data, 'bvh nodes'),
     createStorageBuffer(device, packTriangles(scene).data, 'triangles'),
@@ -148,7 +152,11 @@ function uploadScene(device, scene, requestedLightSelection = 'uniform') {
     createStorageBuffer(device, environment?.colors ?? new Float32Array(4), 'environment colors'),
     createStorageBuffer(device, environmentTables, 'environment tables'),
   ];
-  return { buffers, lightCount: lights.count, lightTreeBase, atlasWidth: atlas.width, subsurfaceOffset };
+  // Awaited by the caller before the kernel runs, so a device that could not allocate the tables fails with the count, not a black image.
+  const allocationCheck = largeScene ? device.popErrorScope().then((error) => {
+    if (error) throw new Error(`The GPU ran out of memory while allocating the scene buffers for ${triangleCount} triangles. Simplify or drop meshes to stay near ${MAX_TRACE_TRIANGLES} triangles, or render the frame with the native Cook backend.`);
+  }) : Promise.resolve();
+  return { allocationCheck, buffers, lightCount: lights.count, lightTreeBase, atlasWidth: atlas.width, subsurfaceOffset };
 }
 
 /** The words of one uniform block: the 12 vectors of the megakernel parameters, then the tile and shadow slot words. */
@@ -281,6 +289,7 @@ export async function traceOnWebGpu(scene, camera, options, shouldStop) {
     throw new RangeError(`A ${width} by ${height} image is too large for this WebGPU adapter. Lower the size or use backend "gpu".`);
   }
   const uploaded = uploadScene(device, scene, options.lightSelection);
+  await uploaded.allocationCheck;
   const emitterCount = (scene.lights.sun ? 1 : 0) + uploaded.lightCount + (scene.environment ? 1 : 0);
   const shadowSlots = Math.max(emitterCount, 1);
   const materialCount = scene.materials.length;
@@ -340,6 +349,7 @@ export async function prepareRealtimeKernel(scene, options, realtimePieces) {
   const { device } = current;
   const { pipelines, compileSeconds } = await getKernel(current, { kernel: 'megakernel', ...sceneFeatures(scene), realtime: realtimePieces });
   const uploaded = uploadScene(device, scene);
+  await uploaded.allocationCheck;
   const emitterCount = (scene.lights.sun ? 1 : 0) + uploaded.lightCount + (scene.environment ? 1 : 0);
   return {
     device, gpu: current.gpu, compileSeconds, uploaded,
@@ -377,6 +387,7 @@ export async function traceTexelsOnWebGpu(scene, texels, options, shouldStop) {
     throw new RangeError(`${count} lightmap texels are too many for this WebGPU adapter. Lower the lightmap resolution or use backend "gpu".`);
   }
   const uploaded = uploadScene(device, scene);
+  await uploaded.allocationCheck;
   const emitterCount = (scene.lights.sun ? 1 : 0) + uploaded.lightCount + (scene.environment ? 1 : 0);
   const camera = { eye: [0, 0, 0], forward: [0, 0, 1], right: [1, 0, 0], above: [0, 1, 0], halfWidth: 1, halfHeight: 1 };
   const template = createParameterTemplate(scene, camera, { width: count, height: 1, seed, bounces: options.bounces - 1, fireflyClamp: options.fireflyClamp }, uploaded, emitterCount);
@@ -426,4 +437,10 @@ export async function traceTexelsOnWebGpu(scene, texels, options, shouldStop) {
 }
 
 // The names path-tracer.js looks for in a backend module, the same as path-tracer-gpu.js.
-export { traceOnWebGpu as traceOnGpu, webGpuKernelCompileCount as gpuKernelCompileCount };
+export { traceOnWebGpu as traceOnGpu, webGpuKernelCompileCount as gpuKernelCompileCount, webGpuTriangleLimit as gpuTriangleLimit };
+
+/** The triangles one storage buffer of this device holds, up to MAX_GPU_TRACE_TRIANGLES. Asks for the adapter when the page has none open yet. */
+export async function webGpuTriangleLimit() {
+  const { device } = await getSession();
+  return gpuTriangleCapacity({ maximumBufferBytes: device.limits.maxStorageBufferBindingSize, maximumBufferSize: device.limits.maxBufferSize }, MAX_GPU_TRACE_TRIANGLES);
+}
