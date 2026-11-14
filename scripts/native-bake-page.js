@@ -29,18 +29,28 @@ export function encodeNativeTables(input) {
   return tables;
 }
 
+/** Each typed array of a packed native input as its bytes (a view of the same memory, not a copy), keyed by table name. */
+export function nativeTableBytes(input) {
+  const tables = {};
+  for (const [name, values] of Object.entries(input)) {
+    if (ArrayBuffer.isView(values)) tables[name] = new Uint8Array(values.buffer, values.byteOffset, values.byteLength);
+  }
+  return tables;
+}
+
 /**
- * A FORMAT-v2 input (an instanced scene) as the job export: the tables as base64, the array type of each table and the record
- * counts, which is all the job runner needs to rebuild the input for the "cycles" kernel.
+ * A FORMAT-v2 input (an instanced scene) as the job export: the tables (base64 unless `tables` passes them in another form),
+ * the array type of each table and the record counts, which is all the job runner needs to rebuild the input for the
+ * "cycles" kernel.
  */
-export function encodeNativeInputV2(input) {
+export function encodeNativeInputV2(input, tables = encodeNativeTables(input)) {
   const counts = {};
   const types = {};
   for (const [name, value] of Object.entries(input)) {
     if (ArrayBuffer.isView(value)) types[name] = value.constructor.name;
     else if (typeof value === 'number') counts[name] = value;
   }
-  return { schemaVersion: input.schemaVersion, tables: encodeNativeTables(input), types, counts };
+  return { schemaVersion: input.schemaVersion, tables, types, counts };
 }
 
 // The triangle bound of a scene exported to the "cycles" kernel (see buildTraceScene's maximumTriangles); the legacy kernel and every
@@ -48,6 +58,13 @@ export function encodeNativeInputV2(input) {
 export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
 // The instance bound of the same export (see buildTraceScene's maximumInstances).
 export const NATIVE_JOB_MAXIMUM_INSTANCES = 1_000_000;
+// The point, spot and area lights of the same export together (see buildTraceScene's maximumLights).
+export const NATIVE_JOB_MAXIMUM_LIGHTS = 256;
+// The triangle bound of an export that travels in chunks (`transport: 'chunks'`): no single message bounds it, so it is the
+// bound buildTraceScene accepts for the native tracer. The tracer then refuses what its adapter cannot hold.
+export const NATIVE_CHUNKED_MAXIMUM_TRIANGLES = 4_000_000;
+// The bytes of a table that one chunk carries. A multiple of 3, so every chunk but the last is base64 without padding.
+export const NATIVE_EXPORT_CHUNK_BYTES = 48 * 1024 * 1024;
 
 // Every table of the export travels as base64 inside one evaluate result, one JSON string, and V8 refuses a string above
 // 536,870,888 characters. The bounds above are independent (about 299 characters per unique triangle, 214 per instance whose material record is shared
@@ -78,6 +95,44 @@ export function requireExportFits(input) {
   requireTableSizesFit(Object.entries(input).filter(([, values]) => ArrayBuffer.isView(values)).map(([name, values]) => [name, values.byteLength]));
 }
 
+const EXPORT_TRANSPORTS = ['message', 'chunks'];
+
+// The tables of an export in the form its transport carries: base64 that fits one message, or the bytes for the chunk reader.
+function tablesForTransport(input, transport) {
+  if (transport === 'chunks') return nativeTableBytes(input);
+  requireExportFits(input);
+  return encodeNativeTables(input);
+}
+
+/**
+ * Takes the byte tables out of an export made with `transport: 'chunks'`. `manifest` is the export with `chunks` in place of
+ * `tables`: the byte length of every table and the chunk size, small enough for one message. `tables` are the bytes the
+ * holder serves with `readExportChunk` until the reader has them all.
+ */
+export function splitExportForChunks(exported) {
+  const { tables, ...rest } = exported;
+  const byteLengths = {};
+  for (const [name, bytes] of Object.entries(tables)) {
+    if (!(bytes instanceof Uint8Array)) {
+      throw new TypeError(`splitExportForChunks: table "${name}" is not bytes. Export with transport "chunks" to get byte tables.`);
+    }
+    byteLengths[name] = bytes.byteLength;
+  }
+  return { manifest: { ...rest, chunks: { tables: byteLengths, chunkBytes: NATIVE_EXPORT_CHUNK_BYTES } }, tables };
+}
+
+/** One chunk of a byte table as base64: the NATIVE_EXPORT_CHUNK_BYTES from `offset`, or what is left of the table. */
+export function readExportChunk(tables, name, offset) {
+  const bytes = tables?.[name];
+  if (!(bytes instanceof Uint8Array)) {
+    throw new RangeError(`readExportChunk: there is no table "${name}" in the held export (tables: ${Object.keys(tables ?? {}).join(', ') || 'none'}).`);
+  }
+  if (!Number.isInteger(offset) || offset < 0 || offset >= bytes.byteLength || offset % NATIVE_EXPORT_CHUNK_BYTES !== 0) {
+    throw new RangeError(`readExportChunk: offset ${offset} of table "${name}" must be a multiple of ${NATIVE_EXPORT_CHUNK_BYTES} below its ${bytes.byteLength} bytes.`);
+  }
+  return bytesToBase64(bytes.subarray(offset, Math.min(bytes.byteLength, offset + NATIVE_EXPORT_CHUNK_BYTES)));
+}
+
 /**
  * The scene of a native render job as the tables the job runner traces. With the "cycles" kernel (`kernel`) every scene is
  * exported as FORMAT-v2, so its materials reach the kernel whole; parts that share a geometry stay instances when
@@ -86,19 +141,24 @@ export function requireExportFits(input) {
  * reads; each says why in `instancing` and `instancingReason`, or `materialsReason`. `wholeMaterials` tells whether the
  * kernel gets whole materials. `modules` holds buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput,
  * buildJobNativeInput, buildFlattenedJobNativeInput and `pack` (src/path-tracer-gpu-pack.js), which the page loads on demand.
+ * `transport` is "message" (the default: every table as base64, all of them within one message) or "chunks": the tables stay
+ * bytes for `splitExportForChunks`, no message bounds them, and the triangle bound is NATIVE_CHUNKED_MAXIMUM_TRIANGLES.
  */
-export function exportNativeSceneTables({ parts, environment, camera, options, kernel, instancing, modules }) {
+export function exportNativeSceneTables({ parts, environment, camera, options, kernel, instancing, modules, transport = 'message' }) {
+  if (!EXPORT_TRANSPORTS.includes(transport)) {
+    throw new RangeError(`exportNativeSceneTables: transport must be "message" or "chunks", got ${JSON.stringify(transport)}.`);
+  }
   const { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } = modules;
   const wholeMaterials = kernel === 'cycles';
-  const nativeLimits = wholeMaterials ? { maximumTriangles: NATIVE_JOB_MAXIMUM_TRIANGLES, maximumInstances: NATIVE_JOB_MAXIMUM_INSTANCES } : {};
+  const maximumTriangles = transport === 'chunks' ? NATIVE_CHUNKED_MAXIMUM_TRIANGLES : NATIVE_JOB_MAXIMUM_TRIANGLES;
+  const nativeLimits = wholeMaterials ? { maximumTriangles, maximumInstances: NATIVE_JOB_MAXIMUM_INSTANCES, maximumLights: NATIVE_JOB_MAXIMUM_LIGHTS } : {};
   let traceScene = buildTraceScene(parts, environment, { instancing: wholeMaterials && instancing === true, ...nativeLimits });
   refuseLocalVolumes(traceScene, 'the native path tracer');
   let flattenedBecause;
   if (traceScene.instances) {
     try {
       const input = buildJobNativeInput(traceScene, camera, options, pack, resolveTexture);
-      requireExportFits(input);
-      return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, wholeMaterials };
+      return { ...encodeNativeInputV2(input, tablesForTransport(input, transport)), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, wholeMaterials };
     } catch (error) {
       // A scene over the texture pool stays over it flattened: the caller gets that refusal, not a v1 atlas one.
       if (!(error instanceof RangeError) || error.texturePoolFull || error.exportTooLarge) throw error;
@@ -111,8 +171,7 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
   if (wholeMaterials) {
     try {
       const input = buildFlattenedJobNativeInput(traceScene, camera, options, pack, resolveTexture);
-      requireExportFits(input);
-      return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials, ...instancingNote };
+      return { ...encodeNativeInputV2(input, tablesForTransport(input, transport)), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials, ...instancingNote };
     } catch (error) {
       if (error.texturePoolFull || error.exportTooLarge) throw error;
       // The scene stays traceable: the v1 tables carry what the kernel read before, and the report says why they were used.
@@ -125,8 +184,7 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
   // The v1 tables of the "cycles" job fallback cannot carry visibility: the scene is drawn without it, and the report says so.
   const visibilityNote = traceScene.partRayVisibility ? { rayVisibility: 'ignored', rayVisibilityReason: materialsReason } : {};
   const input = buildNativeInputOrExplain(buildNativeInput, { ...traceScene, partRayVisibility: null }, camera, options, pack, materialsReason);
-  requireExportFits(input);
-  return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
+  return { tables: tablesForTransport(input, transport), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
     ...(materialsReason === undefined ? {} : { materialsReason }), ...visibilityNote, ...instancingNote };
 }
 

@@ -19,7 +19,7 @@ import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
 import { createNativeSequence } from './agent-native-sequence.mjs';
 import { chooseNativeTemporal, createTemporalAccumulator, temporalFrameSeed } from './agent-native-temporal.mjs';
-import { chooseNativeInstancing, chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
+import { chooseNativeInstancing, chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, fetchNativeExport, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
 import { addonCapabilities, addonFileFor, addonImportMap } from './mcp-addons.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
 import { createPackRegistry } from './agent-packs.mjs';
@@ -680,7 +680,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             const blendsOverTime = usesSession && settings.kind === 'video' && chooseNativeKernel() === 'cycles' && chooseNativeTemporal();
             const frameSeed = blendsOverTime ? temporalFrameSeed(tracerOptions.seed, frame) : tracerOptions.seed;
             try {
-              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: frameSeed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold, samples: tracerOptions.samples, instancing: chooseNativeInstancing(), kernel: chooseNativeKernel() } });
+              const exported = await fetchNativeExport(jobPage, { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: frameSeed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold, samples: tracerOptions.samples, instancing: chooseNativeInstancing(), kernel: chooseNativeKernel() } });
               exportedScene = true;
               if (usesSession) nativeSequence ??= createNativeSequence({ tracer: trace.tracer });
               if (blendsOverTime) {

@@ -1,6 +1,7 @@
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
 import { SUN_BIT, POINT_FIRST_BIT, SPOT_FIRST_BIT, AREA_FIRST_BIT } from './light-link-bits.js';
+import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from './light-limits.js';
 import { boxProjectedGeometry, columnLengths } from './export-box-uv.js';
 import { resolveTraceVolume, prepareMeshVolume } from './path-tracer-volume.js';
 import { resolveLocalVolumes } from './local-volumes.js';
@@ -26,6 +27,9 @@ export const MAX_TRACE_INSTANCES = 65_536;
 // never pass it and keep MAX_TRACE_INSTANCES.
 export const MAX_NATIVE_TRACE_INSTANCES = 1_000_000;
 export const MAX_TRACE_LIGHTS = 32;
+// The bound a scene built for the native "cycles" tracer may ask for with `options.maximumLights`. That kernel picks lights
+// through a light tree and has no list per kind, so the per kind limits of a drawn frame (light-limits.js) do not apply.
+export const MAX_NATIVE_TRACE_LIGHTS = 256;
 // A Blender sun of 1 degree, which is what the reference harness gives Cycles.
 export const SUN_ANGULAR_RADIUS = Math.PI / 360;
 
@@ -357,11 +361,39 @@ function resolvePortal(light, lightIndex) {
   return { position: light.position, width: light.width, height: light.height, normal, across, along };
 }
 
-function resolveLights(environment) {
+/** The light bound of one build: the CPU and WebGL default, or the native bound asked for with `maximumLights`. */
+function resolveLightLimit(options) {
+  const requested = options?.maximumLights;
+  if (requested === undefined) return { native: false, count: MAX_TRACE_LIGHTS };
+  if (!Number.isInteger(requested) || requested < 1 || requested > MAX_NATIVE_TRACE_LIGHTS) {
+    throw new RangeError(`buildTraceScene option maximumLights is an integer from 1 to ${MAX_NATIVE_TRACE_LIGHTS} for the native path tracer, got ${requested}. Leave it out for the CPU and WebGL path tracers, which take at most ${MAX_TRACE_LIGHTS} lights.`);
+  }
+  return { native: true, count: requested };
+}
+
+// Light linking keeps one mask bit per light, laid out by the per kind limits of a drawn frame. A scene with more lights of
+// one kind than that has lights without a bit of their own, so a part that names its lights cannot be honoured.
+function refuseLinkingBeyondMaskBits(environment, parts) {
+  const overKinds = [['pointLights', MAX_POINT_LIGHTS], ['spotLights', MAX_SPOT_LIGHTS], ['areaLights', MAX_AREA_LIGHTS]]
+    .filter(([field, maximum]) => (environment[field]?.length ?? 0) > maximum);
+  if (overKinds.length === 0) return;
+  const linkedPart = parts.find(part => part.material?.lightMask !== undefined && part.material.lightMask !== ALL_LIGHTS);
+  if (linkedPart === undefined) return;
+  const [field, maximum] = overKinds[0];
+  throw new RangeError(`Light linking (a light with \`affects\`, or a part with \`material.lightMask\`, here "${linkedPart.name}") needs at most ${maximum} ${field}, got ${environment[field].length}: each linked light keeps one mask bit. Remove the links, or keep ${field} to ${maximum}.`);
+}
+
+function resolveLights(environment, limit = resolveLightLimit(), parts = []) {
   const areaLights = environment.areaLights ?? [];
   const sunPower = Math.max(...(environment.keyColor ?? [0, 0, 0]));
   const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.filter(light => light.portal !== true).length ?? 0);
-  if (lightCount > MAX_TRACE_LIGHTS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_LIGHTS} point, spot and area lights.`);
+  if (!limit.native && lightCount > MAX_TRACE_LIGHTS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_LIGHTS} point, spot and area lights.`);
+  if (limit.native) {
+    if (lightCount > limit.count) {
+      throw new RangeError(`A native path trace takes at most ${limit.count} point, spot and area lights, got ${lightCount} (${lightCount - limit.count} too many). Drop lights, or give the extra emitters as meshes with an emissive material, which have no count limit.`);
+    }
+    refuseLinkingBeyondMaskBits(environment, parts);
+  }
   return {
     sun: sunPower > 0 ? { bit: SUN_BIT, direction: normalized(environment.lightDirection ?? [0, 1, 0]), color: environment.keyColor, angularRadius: environment.sunAngularRadius ?? SUN_ANGULAR_RADIUS } : null,
     points: (environment.pointLights ?? []).map((light, index) => ({ bit: POINT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0, ...softFalloffOf(light, `environment.pointLights[${index}]`) })),
@@ -638,7 +670,7 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes, 
     instances,
     materials,
     traceMaterials,
-    lights: resolveLights(environment),
+    lights: resolveLights(environment, limits.lights, parts),
     environment: resolveEnvironment(environment.map, environment.cameraIntensity),
     volume: resolveTraceVolume(environment.volumeFog),
     localVolumes,
@@ -653,10 +685,12 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes, 
  * option, it is the flattened scene, unchanged. `options.maximumTriangles` (an integer up to MAX_NATIVE_TRACE_TRIANGLES) is for
  * a scene exported to the native "cycles" tracer only: it replaces the 400,000 triangle bound of the CPU and WebGL tracers.
  * `options.maximumInstances` (an integer up to MAX_NATIVE_TRACE_INSTANCES) does the same for the 65,536 instances of an
- * instanced scene; a flattened scene has no instances and keeps its part bound.
+ * instanced scene; a flattened scene has no instances and keeps its part bound. `options.maximumLights` (an integer up to
+ * MAX_NATIVE_TRACE_LIGHTS) replaces the 32 lights of the CPU and WebGL tracers in the same way; light linking then still
+ * needs every kind of light within the limits of a drawn frame.
  */
 export function buildTraceScene(allParts, environment = {}, options = {}) {
-  const limits = { ...resolveTriangleLimits(options), instances: resolveInstanceLimit(options) };
+  const limits = { ...resolveTriangleLimits(options), instances: resolveInstanceLimit(options), lights: resolveLightLimit(options) };
   const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts, environment.volumeTime ?? 0);
   const parts = boundsOnlyParts.length ? allParts.filter(part => !boundsOnlyParts.includes(part)) : allParts;
   const tryInstancing = options.instancing === true && Array.isArray(parts) && parts.length > 0;
@@ -676,7 +710,7 @@ export function buildTraceScene(allParts, environment = {}, options = {}) {
     shadowOnlyParts: parts.some(part => part.shadowOnly === true) ? Uint8Array.from(parts, part => (part.shadowOnly === true ? 1 : 0)) : null,
     // Per part FORMAT-v2 visibility bits for the native "cycles" kernel; the "legacy" kernel and the other tracers do not read them.
     partRayVisibility: flattenedRayVisibility(parts),
-    lights: resolveLights(environment),
+    lights: resolveLights(environment, limits.lights, parts),
     environment: resolveEnvironment(environment.map, environment.cameraIntensity),
     volume: resolveTraceVolume(environment.volumeFog),
     localVolumes,

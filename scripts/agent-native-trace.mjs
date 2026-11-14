@@ -99,16 +99,63 @@ export async function chooseTraceBackend({ requested, runtimeBackend, locator })
 
 const V2_TABLE_TYPES = { Uint8Array, Uint32Array, Int32Array, Float32Array };
 
+// A table as bytes that start their own buffer, so any typed array can view them: base64 from a one-message export is
+// decoded into a fresh buffer, and the bytes a chunked export collected are already one.
+function tableBytesFrom(table) {
+  if (table instanceof Uint8Array && !Buffer.isBuffer(table) && table.byteOffset === 0) return table;
+  const bytes = typeof table === 'string' ? Buffer.from(table, 'base64') : table;
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  return copy;
+}
+
+/**
+ * Reads every table of a chunked export (the `manifest` of splitExportForChunks) and returns the export with its `tables` as
+ * bytes, which traceFrameNative takes like the base64 of a one-message export. `readChunk(name, offset)` resolves with the
+ * base64 of one chunk. No single string holds a whole table, so the scene is bounded by memory, not by a message.
+ */
+export async function collectExportChunks(manifest, readChunk) {
+  const { chunks, ...exported } = manifest;
+  if (!chunks || !(chunks.chunkBytes > 0)) {
+    throw new TypeError('collectExportChunks: the export carries no `chunks` manifest. Export the scene with transport "chunks".');
+  }
+  const tables = {};
+  for (const [name, byteLength] of Object.entries(chunks.tables)) {
+    const bytes = new Uint8Array(byteLength);
+    for (let offset = 0; offset < byteLength; offset += chunks.chunkBytes) {
+      const chunk = Buffer.from(await readChunk(name, offset), 'base64');
+      const expectedLength = Math.min(chunks.chunkBytes, byteLength - offset);
+      if (chunk.length !== expectedLength) {
+        throw new RangeError(`The native scene export sent ${chunk.length} bytes of table "${name}" at offset ${offset}, expected ${expectedLength}. The page changed the export while it was read.`);
+      }
+      bytes.set(chunk, offset);
+    }
+    tables[name] = bytes;
+  }
+  return { ...exported, tables };
+}
+
+/**
+ * Exports the scene of a render job from its page in chunks and returns it with byte tables. `input` is what the page's
+ * `exportNativeScene` takes. The page lets go of its copy when the read ends, whether it succeeded or not.
+ */
+export async function fetchNativeExport(page, input) {
+  const manifest = await page.evaluate(request => window.__agentPreview.exportNativeScene(request), { ...input, chunked: true });
+  try {
+    return await collectExportChunks(manifest, (name, offset) => page.evaluate(request => window.__agentPreview.readNativeExportChunk(request), { name, offset }));
+  } finally {
+    await page.evaluate(() => window.__agentPreview.releaseNativeExport()).catch(() => {});
+  }
+}
+
 // The FORMAT-v2 input of an instanced scene: the page names each table's array type and sends the record counts.
 function decodeTablesV2(exported) {
   const input = { schemaVersion: exported.schemaVersion, ...exported.counts };
   for (const [name, base64] of Object.entries(exported.tables)) {
     const View = V2_TABLE_TYPES[exported.types?.[name]];
     if (!View) throw new TypeError(`The exported native scene table "${name}" has an unknown array type ${JSON.stringify(exported.types?.[name])}.`);
-    const bytes = Buffer.from(base64, 'base64');
-    const copy = new Uint8Array(bytes.length);
-    copy.set(bytes);
-    input[name] = new View(copy.buffer, 0, copy.length / View.BYTES_PER_ELEMENT);
+    const bytes = tableBytesFrom(base64);
+    input[name] = new View(bytes.buffer, 0, bytes.length / View.BYTES_PER_ELEMENT);
   }
   return input;
 }
@@ -122,11 +169,9 @@ function decodeTables(exported) {
   if (exported.schemaVersion !== undefined) return decodeTablesV2(exported);
   const input = { triangleCount: exported.triangleCount };
   for (const name of TABLE_NAMES) {
-    const bytes = Buffer.from(exported.tables[name], 'base64');
+    const bytes = tableBytesFrom(exported.tables[name]);
     const View = TABLE_TYPES[name];
-    const copy = new Uint8Array(bytes.length);
-    copy.set(bytes);
-    input[name] = new View(copy.buffer, 0, copy.length / View.BYTES_PER_ELEMENT);
+    input[name] = new View(bytes.buffer, 0, bytes.length / View.BYTES_PER_ELEMENT);
   }
   return input;
 }
