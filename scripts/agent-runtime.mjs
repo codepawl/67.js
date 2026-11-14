@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { sampleBrowserHeap, exceedsMemoryGuard } from './agent-memory-guard.mjs';
+import { sampleBrowserHeap, exceedsMemoryGuard, memoryGuardMessage, createNativeMemoryAllowance } from './agent-memory-guard.mjs';
 import { lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -104,6 +104,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     throw new RangeError('backend must be gpu or cpu.');
   }
   let nativeTracerLocator;
+  // Raised by the first native frame and kept for the life of the process: the in-process OIDN device stays loaded.
+  const nativeMemoryAllowance = createNativeMemoryAllowance();
   if (!Number.isInteger(memory) || memory < 32 || memory > MAXIMUM_MEMORY_MIB) {
     throw new RangeError(`memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
@@ -585,8 +587,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     async function recordPeakMemory() {
       metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
       metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, await sampleBrowserHeap(session));
-      if (exceedsMemoryGuard({ nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap })) {
-        throw new Error('Render job exceeded its Node RSS or sampled browser heap guard.');
+      const sample = { nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap, nativeAllowanceBytes: nativeMemoryAllowance.bytes };
+      if (exceedsMemoryGuard(sample)) {
+        throw new Error(memoryGuardMessage({ subject: 'Render job', ...sample }));
       }
     }
     const abort = () => { jobPage?.close().catch(() => {}); };
@@ -686,6 +689,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           let backendNote = trace.note;
           if (trace.backend === 'native') {
             let exportedScene = false;
+            nativeMemoryAllowance.grantForFrame({ width, height });
             const usesSession = settings.frameCount > 1 && process.env.JS67_NATIVE_SESSIONS !== 'off';
             // Only a video blends over time: the stills of one job are separate pictures, and each must stand alone.
             const blendsOverTime = usesSession && settings.kind === 'video' && chooseNativeKernel() === 'cycles' && chooseNativeTemporal();
@@ -1199,8 +1203,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
               if (backend === 'cpu' && !/swiftshader/i.test(rendered.graphics)) throw new Error('CPU review did not select SwiftShader.');
               peakNodeBytes = Math.max(peakNodeBytes, process.memoryUsage().rss);
               peakBrowserHeap = Math.max(peakBrowserHeap, await sampleBrowserHeap(session));
-              if (exceedsMemoryGuard({ nodeBytes: peakNodeBytes, browserHeapBytes: peakBrowserHeap })) {
-                throw new Error('Review exceeded its Node RSS or sampled browser heap guard.');
+              const sample = { nodeBytes: peakNodeBytes, browserHeapBytes: peakBrowserHeap, nativeAllowanceBytes: nativeMemoryAllowance.bytes };
+              if (exceedsMemoryGuard(sample)) {
+                throw new Error(memoryGuardMessage({ subject: 'Review', ...sample }));
               }
               shots[index] = { ...rendered, ...(group.branch === undefined ? {} : { branch: group.branch, branchStale: branchRecipe.stale }) };
             }
