@@ -192,6 +192,14 @@ test('a normal map on texCoord 2 is dropped with a warning and the rest of the f
   assert.ok(warnings.some(warning => warning.includes('normalTexture of third_set') && warning.includes('TEXCOORD_1')));
 });
 
+test('a normal map on texCoord 12 is dropped with a warning and the file loads', async () => {
+  const material = { name: 'twelfth_set', normalTexture: { index: 0, texCoord: 12 }, emissiveTexture: { index: 0 } };
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(triangleDocument(material, { withUvs: true })));
+  assert.equal(parts[0].material.normalMap, undefined);
+  assert.ok(parts[0].material.emissiveMap);
+  assert.ok(warnings.some(warning => warning.includes('normalTexture of twelfth_set')));
+});
+
 test('a normal map on texCoord 1 beside a primitive without TEXCOORD_1 is dropped with a warning', async () => {
   const material = { name: 'no_second_set', normalTexture: { index: 0, texCoord: 1 }, emissiveTexture: { index: 0 } };
   const { parts, warnings } = await withImageDecoder(() => parseGltf(triangleDocument(material, { withUvs: true })));
