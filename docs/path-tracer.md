@@ -170,7 +170,7 @@ OIDN's output is the same bytes run to run on one machine (the CPU device, two r
 
 ## Path trace a GLB file with Cook
 
-One command turns a GLB, an HDRI and a camera, written as a `scene.json` file scene, into a path traced picture on the GPU, with the PNG, the raw linear light and a report of what the run cost. It needs the built native addon (`node build.mjs` in `packages/render-native`) and a Vulkan ray query card; without the addon it stops with exit code 2 and says so.
+One command turns a GLB, an HDRI and a camera, written as a `scene.json` file scene, into a path traced picture on the GPU, with the PNG, the raw linear light and a report of what the run cost. It needs the built native addon (`npm run cook:build`) and a Vulkan ray query card; without the addon it stops with exit code 2 and says so.
 
 ```sh
 npm run render:file-cook -- --config scene.json --out out/frame --width 1280 --height 720 --samples 256 --camera camera.json
@@ -204,7 +204,7 @@ The report holds everything `traceFrameNative` reports (adapter, kernel, samples
 - `peakGpuMemoryMiB`: the highest `memory.used` that `nvidia-smi` showed, sampled every 250 ms during the trace. It is the whole card, so other programs count; it is `null` with `peakGpuMemoryNote` when `nvidia-smi` is missing.
 - `ignoredFrameEffects`: frame effects of the scene description that the traced picture does not get, such as `exposure`, `saturation`, `contrast`, `temperature`, `vignette`, `grain`, `bloom`, `monochrome`, `fade` and `cinematic`. The traced picture is only tone mapped.
 
-Exit code 2 means the render-native package or its addon is missing (the message gives the build command); any other failure exits 1 with its message.
+Exit code 2 means the Cook package or its addon is missing (the message gives the build command); any other failure exits 1 with its message.
 
 Limits known today:
 

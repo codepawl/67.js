@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { findNativeAddon } from '../packages/render-native/index.mjs';
+import { cookInstalled, cookModule } from './support/cook.js';
+
+const { findNativeAddon } = (await cookModule()) ?? {};
+const addonIsBuilt = cookInstalled && findNativeAddon() !== null;
 import { MissingAddonError, USAGE, listIgnoredFrameEffects, missingAddonMessage, parseArguments, readCameraFile } from '../scripts/render-file-native-options.mjs';
 
 const REQUIRED = ['--config', 'scene.json', '--out', 'out/frame'];
@@ -104,8 +107,8 @@ test('--camera names the field that is missing or wrong', () => {
 
 test('the missing-addon message names what is missing and the build command', () => {
   const message = missingAddonMessage();
-  assert.match(message, /render-native addon/);
-  assert.match(message, /node build\.mjs" in packages\/render-native/);
+  assert.match(message, /native addon/);
+  assert.match(message, /npm run cook:build/);
   assert.equal(new MissingAddonError().message, message);
 });
 
@@ -122,7 +125,7 @@ test('--help on the command prints the usage and exits 0', () => {
   assert.match(result.stdout, /Usage: node scripts\/render-file-native\.mjs/);
 });
 
-test('without the built addon the command exits 2 with one message and no stack trace', { skip: findNativeAddon() ? 'the render-native addon is built here' : false }, () => {
+test('without the built addon the command exits 2 with one message and no stack trace', { skip: addonIsBuilt ? 'the Cook addon is built here' : false }, () => {
   const result = spawnSync(process.execPath, [COMMAND, '--config', 'scene.json', '--out', join(tmpdir(), 'render-file-native-unused')], { encoding: 'utf8' });
   assert.equal(result.status, 2);
   assert.equal(result.stderr.trim(), missingAddonMessage());
