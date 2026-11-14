@@ -168,6 +168,8 @@ Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs`
 
 `mesh_inspect` lint adds warnings for `intersecting-parts`, `self-intersection`, `thin-wall`, `floating-part` and `asymmetric`. They never set `ok` to false, run within face budgets, and list any check they skipped in `skippedChecks`. `scene_inspect` returns a `diagnostics` list only when there is something to say: ignored material fields, blended transmission, unused materials or geometries, and for imported assets the decoder's not-drawn features, rigs with no joints or no skin, and assets with no clips. Each item has `kind`, `severity`, `target`, `message` and `fix`.
 
+`scene_look` keeps the PNG under the 1 MiB response budget by itself: when a busy picture (planks, bricks, emissive text) encodes over it, the preview renders again at 0.75 of the size, up to four times with the aspect kept, and the metadata names the size that came back (`returnedWidth`, `returnedHeight`, `note`). It fails only when the smallest step still does not fit.
+
 `scene_look` returns the same kind of `diagnostics` list next to the picture, so an agent can check a frame without reading it. The findings carry the part names and the numbers in fields, and each list is capped (8 parts per finding, 8 findings per kind, with `nodeCount` or `droppedCount` saying how many were left out):
 
 | kind | fields | meaning |

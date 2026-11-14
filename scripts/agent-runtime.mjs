@@ -53,6 +53,9 @@ import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 
 const SCENE_LIMITS = AGENT_SCENE_DEFAULT_LIMITS;
 const MAXIMUM_IMAGE_BYTES = 1024 * 1024;
+const LOOK_STEP_SCALE = 0.75;
+const LOOK_MAXIMUM_STEP_DOWNS = 4;
+const LOOK_MINIMUM_SIDE = 64;
 const MAXIMUM_MOTION_SOURCES = 4;
 // A job writes files, not MCP image responses, so a 1920x1080 PNG may be larger than an inline image.
 const MAXIMUM_JOB_FRAME_BYTES = 12 * 1024 * 1024;
@@ -1039,16 +1042,31 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         if (![width, height].every(value => Number.isInteger(value) && value >= 64 && value <= 1024)) {
           throw new RangeError('Preview dimensions must be integers from 64 to 1024.');
         }
-        await page.setViewportSize({ width, height });
-        const result = await invoke('look', { sessionId: input.sessionId,
+        const lookRequest = { sessionId: input.sessionId,
           ...(input.motionTime !== undefined ? { motionTime: input.motionTime } : {}),
-          ...(input.labels ? { labels: true } : {}) });
-        if (Buffer.byteLength(result.data, 'base64') > MAXIMUM_IMAGE_BYTES) {
-          throw new Error('The PNG exceeds the 1 MiB image response budget. Request a smaller preview.');
+          ...(input.labels ? { labels: true } : {}) };
+        // A busy picture can encode past the response budget. Render again a step smaller (same aspect, PNG kept) until it fits.
+        let result;
+        let stepWidth = width;
+        let stepHeight = height;
+        for (let step = 0; ; step++) {
+          await page.setViewportSize({ width: stepWidth, height: stepHeight });
+          result = await invoke('look', lookRequest);
+          if (Buffer.byteLength(result.data, 'base64') <= MAXIMUM_IMAGE_BYTES) break;
+          if (step === LOOK_MAXIMUM_STEP_DOWNS) {
+            throw new Error(`The PNG exceeds the 1 MiB image response budget even at ${stepWidth}x${stepHeight}. Simplify the scene's high-frequency textures or request a smaller preview.`);
+          }
+          stepWidth = Math.max(LOOK_MINIMUM_SIDE, Math.floor(stepWidth * LOOK_STEP_SCALE));
+          stepHeight = Math.max(LOOK_MINIMUM_SIDE, Math.floor(stepHeight * LOOK_STEP_SCALE));
         }
         result.metadata.requestedWidth = width;
         result.metadata.requestedHeight = height;
         result.metadata.backend = backend;
+        if (stepWidth !== width || stepHeight !== height) {
+          result.metadata.returnedWidth = stepWidth;
+          result.metadata.returnedHeight = stepHeight;
+          result.metadata.note = `The ${width}x${height} PNG was over the 1 MiB image response budget, so this is the ${stepWidth}x${stepHeight} render. Request that size or smaller to skip the retry.`;
+        }
         return result;
       });
     },
