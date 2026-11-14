@@ -166,7 +166,7 @@ Every error an agent can reach names what failed and what to do next. `tests/too
 
 ### Tool cost and diagnostics
 
-Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs` reports the bytes and estimated tokens of each schema and of each typical result, and `npm run tool-cost` fails a pull request when one grows past its allowance against the base branch (`bench/tool-cost/README.md`). The schemas total 189,144 bytes (about 54,000 tokens, measured 2026-11-07). To save space, a mesh geometry's `edits` and `stack` in a recipe, and `motion` in `scene_apply` and asset recipes, are advertised as plain objects: the full field list is in `mesh_edit`, `mesh_stack` and `scene_create`, and the backend still validates every field and names the valid choices when one is wrong. A small mesh change is far cheaper as `mesh_edit` (187 bytes in the measured case) than as a whole recipe rewrite (1,254 bytes with the dispose).
+Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs` reports the bytes and estimated tokens of each schema and of each typical result, and `npm run tool-cost` fails a pull request when one grows past its allowance against the base branch (`bench/tool-cost/README.md`). The current total is the last line of that script's output, and `bench/tool-cost-ceilings.json` holds the ceiling it may not pass. To save space, a mesh geometry's `edits` and `stack` in a recipe, and `motion` in `scene_apply` and asset recipes, are advertised as plain objects: the full field list is in `mesh_edit`, `mesh_stack` and `scene_create`, and the backend still validates every field and names the valid choices when one is wrong. A small mesh change is far cheaper as `mesh_edit` (187 bytes in the measured case) than as a whole recipe rewrite (1,254 bytes with the dispose).
 
 `mesh_inspect` lint adds warnings for `intersecting-parts`, `self-intersection`, `thin-wall`, `floating-part` and `asymmetric`. They never set `ok` to false, run within face budgets, and list any check they skipped in `skippedChecks`. `scene_inspect` returns a `diagnostics` list only when there is something to say: ignored material fields, blended transmission, unused materials or geometries, and for imported assets the decoder's not-drawn features, rigs with no joints or no skin, and assets with no clips. Each item has `kind`, `severity`, `target`, `message` and `fix`.
 
@@ -327,7 +327,7 @@ The script prints calls, errors, error rate and median duration per tool, most c
 | Nodes | 4096 |
 | Geometries and materials | 256 each |
 | Operations per batch | 256 |
-| Checkpoints per session | 8 |
+| Checkpoints per session | 16 |
 | Earlier revisions kept per session for `scene_restore` with `revision` | 4 |
 | Geometry input points | 4096 per input, including all extrusion contours |
 | Extrusion holes | 128 |
