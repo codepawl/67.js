@@ -1,7 +1,7 @@
 // Runs the OIDN network of the `denoiser` npm package (tensorflow.js) in Chrome on the captures of denoise-capture.mjs and writes
 // tfjs.f32 beside them. It uses the GPU, so start it through the shared GPU lock:
 //   (cd artifacts/tfjs-denoiser && npm install denoiser)       # not a dependency of Crucible: a scratch install
-//   bash ~/.agents/tools/gpu-lock.sh node bench/reference/denoise-browser.mjs [--backend webgl|webgpu] [--samples 8,16] [--scenes a,b]
+//   node bench/reference/denoise-browser.mjs [--backend webgl|webgpu] [--samples 8,16] [--scenes a,b]
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';

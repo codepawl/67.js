@@ -4,7 +4,7 @@ Frame time and memory of `crucible/addons/gaussian-splats` (issue #288), and the
 
 ```
 node bench/gaussian-splats/fetch-sample.mjs                                  # once: downloads the CC BY sample into data/ (git ignores it)
-bash ~/.agents/tools/gpu-lock.sh node bench/gaussian-splats/run.mjs gpu all   # RTX 3060; pictures go to artifacts/gaussian-splats/
+node bench/gaussian-splats/run.mjs gpu all   # RTX 3060; pictures go to artifacts/gaussian-splats/
 node bench/gaussian-splats/run.mjs cpu all                                   # SwiftShader (software GL)
 node bench/gaussian-splats/sort-time.mjs                                     # the CPU sort alone, in Node
 ```

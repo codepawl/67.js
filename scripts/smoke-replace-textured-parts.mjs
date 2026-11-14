@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 
 // Builds a renderer with one plain grey quad, adds a quad whose texture is solid green with replaceParts, renders and
 // counts green pixels, then removes it and counts again. The texture must be drawn after the add, gone after the remove,
-// and deleted from the GPU. Runs on SwiftShader unless "gpu" is given; start a GPU run through `bash ~/.agents/tools/gpu-lock.sh`.
+// and deleted from the GPU. Runs on SwiftShader unless "gpu" is given; start a GPU run through a GPU lock when the card is shared.
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const backend = process.argv[2] ?? 'cpu';
 assert.ok(['cpu', 'gpu'].includes(backend));

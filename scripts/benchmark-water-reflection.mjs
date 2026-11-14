@@ -1,6 +1,6 @@
 // Times a lit frame of a large sea with dense terrain and many small parts, with the water reflection off and on, and counts
 // what the mirror pass draws. GPU time comes from a native timer query, so run it through the GPU lock:
-//   bash ~/.agents/tools/gpu-lock.sh node scripts/benchmark-water-reflection.mjs [--width 1920] [--height 1080] [--parts 20000] [--mirror-levels N] [--rounds 3] [--stills folder]
+//   node scripts/benchmark-water-reflection.mjs [--width 1920] [--height 1080] [--parts 20000] [--mirror-levels N] [--rounds 3] [--stills folder]
 // --counts-only skips the timer and runs on SwiftShader, so it needs no GPU lock and prints draw counts only.
 // --stills writes a PNG of the lit frame for the off, on and half-scale variants, for a side-by-side check.
 // The draw counts (calls, instances, triangles in the mirror pass) do not need the GPU and stay valid when the lock is busy.

@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 
 // Renders a quad textured with four coloured quadrants, pushes new pixels into one quadrant, renders again and reads the pixels back.
 // The region update must match uploading the finished picture whole. Runs on SwiftShader unless "gpu" is given;
-// start a GPU run through `bash ~/.agents/tools/gpu-lock.sh`.
+// start a GPU run through a GPU lock when the card is shared.
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const backend = process.argv[2] ?? 'cpu';
 assert.ok(['cpu', 'gpu'].includes(backend));
