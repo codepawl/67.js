@@ -292,10 +292,8 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
     return new Promise((resolve, reject) => loader.decodeDracoFile(compressed, resolve, attributeIds, attributeTypes, LINEAR_SRGB, reject));
   }
 
-  async function loadPrimitiveSource(meshIndex, primitiveIndex) {
-    const key = `${meshIndex}:${primitiveIndex}`;
-    if (sources.has(key)) return sources.get(key);
-    const primitive = document.meshes[meshIndex].primitives[primitiveIndex];
+  /** Decode one primitive's accessors into `source`. Draco decodes the whole primitive at once; every other attribute reads its accessor. */
+  async function decodePrimitiveInto(source, primitive) {
     const dracoExtension = primitive.extensions?.KHR_draco_mesh_compression;
     const dracoGeometry = dracoExtension ? await decodeDracoGeometry(primitive, dracoExtension) : null;
     const attributes = {};
@@ -313,12 +311,32 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
     let index = null;
     if (primitive.indices !== undefined) index = dracoGeometry ? decodedAttribute(dracoGeometry.getIndex()) : await reader.readAccessorInSlices(primitive.indices, checkpoint);
     const targets = primitive.targets ?? [];
+    source.attributes = attributes;
+    source.index = index;
+    source.morphPositions = targets.map(target => target.POSITION === undefined ? undefined : reader.readAccessor(target.POSITION));
+    source.morphNormals = targets.map(target => target.NORMAL === undefined ? undefined : reader.readAccessor(target.NORMAL));
+    if (source.skinJointCount !== undefined) prepareSkinnedSource(source, source.skinJointCount);
+  }
+
+  /**
+   * The geometry source of one primitive. Nothing is decoded here: the conversion calls `load()` right before it reads the
+   * attributes and drops them after the last node that uses the source, so only a few primitives are decoded at any time.
+   */
+  function loadPrimitiveSource(meshIndex, primitiveIndex) {
+    const key = `${meshIndex}:${primitiveIndex}`;
+    if (sources.has(key)) return sources.get(key);
+    const primitive = document.meshes[meshIndex].primitives[primitiveIndex];
+    let pending = null;
     const source = {
       uuid: key,
-      attributes,
-      index,
-      morphPositions: targets.map(target => target.POSITION === undefined ? undefined : reader.readAccessor(target.POSITION)),
-      morphNormals: targets.map(target => target.NORMAL === undefined ? undefined : reader.readAccessor(target.NORMAL)),
+      attributes: null,
+      index: null,
+      morphPositions: null,
+      morphNormals: null,
+      load() {
+        pending ??= decodePrimitiveInto(source, primitive);
+        return pending;
+      },
     };
     sources.set(key, source);
     return source;
@@ -369,13 +387,13 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
     const primitive = mesh.primitives[primitiveIndex];
     const object = new SceneNode();
     object.isMesh = true;
-    object.geometry = await loadPrimitiveSource(meshIndex, primitiveIndex);
+    object.geometry = loadPrimitiveSource(meshIndex, primitiveIndex);
     object.material = await loadMaterial(primitive.material);
     object.name = reserveMeshNames(meshIndex)[primitiveIndex];
     object.association = { meshes: meshIndex, primitives: primitiveIndex };
     if (definition.skin !== undefined) {
       object.isSkinnedMesh = true;
-      prepareSkinnedSource(object.geometry, document.skins[definition.skin].joints.length);
+      object.geometry.skinJointCount ??= document.skins[definition.skin].joints.length;
     }
     const targetCount = primitive.targets?.length ?? 0;
     if (targetCount) {

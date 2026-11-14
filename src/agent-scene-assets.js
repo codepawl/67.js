@@ -30,7 +30,7 @@ const PLACEMENT_FIELDS = ['id', 'materials', 'clip', 'drive', 'crowd'];
 const CLIP_FIELDS = ['index', 'start', 'speed', 'loop'];
 const COLOR_FIELDS = ['color', 'emissiveColor'];
 const UNIT_FIELDS = ['metallic', 'roughness', 'opacity'];
-const OVERRIDE_FIELDS = ['name', 'tag', ...COLOR_FIELDS, ...UNIT_FIELDS, 'emission'];
+const OVERRIDE_FIELDS = ['name', 'id', 'tag', ...COLOR_FIELDS, ...UNIT_FIELDS, 'emission'];
 // A tag an override may set: foliage and grass make an imported tree sway in the wind and shade like a grown one.
 const OVERRIDE_TAGS = ['surface', 'foliage', 'grass'];
 
@@ -59,6 +59,12 @@ function normalizeMaterialOverride(override, index) {
     throw invalidField(`${path}.name`, override.name, 'the name of a source material, such as "paint"; scene_inspect lists the names under assets', TypeError);
   }
   const result = { name: override.name };
+  if (override.id !== undefined) {
+    if (typeof override.id !== 'string' || !override.id.trim() || override.id.length > 128) {
+      throw invalidField(`${path}.id`, override.id, 'a handle of 1 to 128 characters that a material motion track can name, such as "stool-heat"', TypeError);
+    }
+    result.id = override.id;
+  }
   if (override.tag !== undefined) {
     if (!OVERRIDE_TAGS.includes(override.tag)) throw invalidField(`${path}.tag`, override.tag, `one of ${OVERRIDE_TAGS.join(', ')}`);
     result.tag = override.tag;
@@ -95,6 +101,10 @@ export function normalizeAssetPlacement(value) {
       throw invalidField('asset.materials', Array.isArray(value.materials) ? `${value.materials.length} overrides` : value.materials, `a list of at most ${ASSET_PLACEMENT_LIMITS.maxOverrides} overrides, such as [{ "name": "paint", "color": [1, 0, 0] }]`);
     }
     const overrides = value.materials.map((override, index) => normalizeMaterialOverride(override, index));
+    const handles = overrides.filter(override => override.id !== undefined).map(override => override.id);
+    if (new Set(handles).size !== handles.length) {
+      throw invalidField('asset.materials', `${handles.length} ids`, 'overrides that each have a different id, such as "stool-heat" and "bucket-heat"');
+    }
     if (new Set(overrides.map(override => override.name)).size !== overrides.length) {
       throw invalidField('asset.materials', `${overrides.length} overrides`, 'overrides that each name a different source material, such as one override per name');
     }
@@ -223,6 +233,7 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
   const copyCounter = new Map();
   const geometryIds = new Set();
   const materialIds = new Map();
+  const handleOwners = new Map();
   const generatedNodes = [];
   for (const node of placed) {
     const { id: assetId, materials: overrides = [], clip, drive, crowd } = node.asset;
@@ -264,13 +275,19 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
       }
       if (!materialIndexes.has(part.material)) materialIndexes.set(part.material, materialIndexes.size);
       const fields = overrideFields(overrideByName.get(part.material.name));
-      const materialKey = `asset:${assetId.slice(0, 12)}:${copy}:${materialIndexes.get(part.material)}:${JSON.stringify(fields)}`;
+      const override = overrideByName.get(part.material.name);
+      const materialKey = override?.id === undefined
+        ? `asset:${assetId.slice(0, 12)}:${copy}:${materialIndexes.get(part.material)}:${JSON.stringify(fields)}`
+        : handledMaterialKey(override.id, materialIndexes.get(part.material), handleOwners, recipe, node);
       if (!materialIds.has(materialKey)) {
         materialIds.set(materialKey, materialKey);
-        recipe.materials.push({ id: materialKey, ...jsonMaterial(part.material), ...fields, assetSource: true });
+        recipe.materials.push({ id: materialKey, ...jsonMaterial(part.material), ...fields, assetSource: true, ...(override?.id === undefined ? {} : { animatable: true }) });
         // The same output object across stages keeps the renderer's batches and the parts' identity stable.
-        if (outputCache.get(materialKey)?.source !== part.material) {
-          outputCache.set(materialKey, { source: part.material, output: materialOutput(part.material, fields) });
+        // A handled material keeps its id when the override changes, so the cache also compares the override fields.
+        const fieldsKey = JSON.stringify(fields);
+        const cached = outputCache.get(materialKey);
+        if (cached?.source !== part.material || cached.fieldsKey !== fieldsKey) {
+          outputCache.set(materialKey, { source: part.material, fieldsKey, output: materialOutput(part.material, fields) });
         }
         runtime.materialOutputs.set(materialKey, outputCache.get(materialKey).output);
       }
@@ -295,6 +312,18 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
   }
   recipe.nodes.push(...generatedNodes);
   return runtime;
+}
+
+// An override with an id gets a material of its own named by that id, so a motion track can drive it. A second source
+// material of the same name in one placement takes the id plus its index.
+function handledMaterialKey(handle, materialIndex, handleOwners, recipe, node) {
+  const key = materialIndex === 0 ? handle : `${handle}~${materialIndex}`;
+  const authored = recipe.materials.some(material => material.id === key && !material.assetSource);
+  if (authored || (handleOwners.has(key) && handleOwners.get(key) !== node.id)) {
+    throw invalidField(`nodes[${recipe.nodes.indexOf(node)}].asset.materials`, handle, 'an id that no other material or placed asset override uses, such as one id per placement');
+  }
+  handleOwners.set(key, node.id);
+  return key;
 }
 
 function createDrive(nodeId, fieldPath, createAssetDrive, asset, drive) {

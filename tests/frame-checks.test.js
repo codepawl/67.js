@@ -221,6 +221,25 @@ test('a blown-out frame reports how much is clipped', () => {
   assert.equal(black.blackPercent, 100);
 });
 
+test('a clipped frame names the strongest lights and the field to lower', () => {
+  const environment = { keyIntensity: 40, pointLights: [{ intensity: 3 }, { intensity: 12 }], spotLights: [{ intensity: 5 }] };
+  const [finding] = exposureProblems({ shares: lumaShares(frameOf(255)), exposure: 1, environment });
+  assert.deepEqual(finding.lights, [
+    { field: 'environment.keyIntensity', intensity: 40 },
+    { field: 'environment.pointLights[1].intensity', intensity: 12 },
+    { field: 'environment.spotLights[0].intensity', intensity: 5 },
+  ]);
+  assert.match(finding.fix, /effects\.exposure from 1 to 0\.5, or lower the strongest light, environment\.keyIntensity \(now 40\)/);
+  const lampFirst = exposureProblems({ shares: lumaShares(frameOf(255)), exposure: 1, environment: { keyIntensity: 1, areaLights: [{ intensity: 90 }] } })[0];
+  assert.match(lampFirst.fix, /environment\.areaLights\[0\]\.intensity \(now 90\)/);
+});
+
+test('a clipped frame without an environment keeps the plain fix and no lights field', () => {
+  const [finding] = exposureProblems({ shares: lumaShares(frameOf(255)), exposure: 1 });
+  assert.equal(finding.lights, undefined);
+  assert.match(finding.fix, /or lower environment\.keyIntensity\./);
+});
+
 function partWith(name, material) {
   return { name, material };
 }

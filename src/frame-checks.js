@@ -151,17 +151,45 @@ function percents(shares) {
   return { blackPercent: Math.round(shares.black * 100), whitePercent: Math.round(shares.white * 100) };
 }
 
-/** Warnings for a frame that is nearly all black or has a large clipped area; `exposure` is the current effects.exposure. */
-export function exposureProblems({ shares, exposure }) {
+const MAXIMUM_NAMED_LIGHTS = 3;
+
+/**
+ * The lights of an environment, strongest first, as `{ field, intensity }`: the key light and each point, spot and area
+ * light by its place in its list. Intensity is the number the recipe states, so a finding can point at the field to change.
+ */
+export function strongestLights(environment) {
+  if (!environment) return [];
+  const lights = [{ field: 'environment.keyIntensity', intensity: environment.keyIntensity ?? 1 }];
+  for (const listName of ['pointLights', 'spotLights', 'areaLights']) {
+    (environment[listName] ?? []).forEach((light, index) => {
+      lights.push({ field: `environment.${listName}[${index}].intensity`, intensity: light.intensity ?? 1 });
+    });
+  }
+  return lights.sort((first, second) => second.intensity - first.intensity).slice(0, MAXIMUM_NAMED_LIGHTS);
+}
+
+function clippedFix(exposure, lights) {
+  const exposureFix = `Lower effects.exposure from ${exposure} to ${round(exposure / 2)}`;
+  if (lights.length === 0) return `${exposureFix}, or lower environment.keyIntensity.`;
+  return `${exposureFix}, or lower the strongest light, ${lights[0].field} (now ${round(lights[0].intensity)}).`;
+}
+
+/**
+ * Warnings for a frame that is nearly all black or has a large clipped area; `exposure` is the current effects.exposure.
+ * With `environment`, a clipped finding lists the strongest lights in `lights` and names the field of the first in its fix,
+ * so an agent can fix an over-exposed light without opening the image.
+ */
+export function exposureProblems({ shares, exposure, environment }) {
   if (shares.black >= BLACK_FRAME_SHARE) {
     return [warning('exposure-black', 'effects.exposure',
       `${Math.round(shares.black * 100)} percent of the frame is black after tone mapping.`,
       `Raise effects.exposure from ${exposure} to ${round(Math.max(exposure, 0.25) * 4)}, raise environment.keyIntensity, or aim a light at the subject.`, percents(shares))];
   }
   if (shares.white >= CLIPPED_FRAME_SHARE) {
+    const lights = strongestLights(environment);
     return [warning('exposure-clipped', 'effects.exposure',
       `${Math.round(shares.white * 100)} percent of the frame is clipped to white after tone mapping.`,
-      `Lower effects.exposure from ${exposure} to ${round(exposure / 2)}, or lower environment.keyIntensity.`, percents(shares))];
+      clippedFix(exposure, lights), { ...percents(shares), ...(lights.length ? { lights } : {}) })];
   }
   return [];
 }

@@ -67,6 +67,7 @@ const motion = {
 
 Node properties are `translation`, `rotation`, and `scale`.
 Material properties are `color`, `emissiveColor`, `emission`, `metallic`, and `roughness`.
+A material track names a recipe material, or the `id` of an `asset.materials[]` override on a placed asset (docs/agent-scene.md), which is how an imported part heats and cools.
 Camera properties are `eye`, `target`, `fov`, and `roll`.
 Untracked properties retain authored base values.
 Clipping planes retain authored values. Roll rotates the authored camera up direction.

@@ -3,7 +3,7 @@ import { denoiseRadiance } from './path-tracer-denoise.js';
 import { resolveLightSelection } from './path-tracer-light-tree.js';
 import { createCamera, normalizePathTracerOptions, toneMapToRgba8 } from './path-tracer.js';
 import {
-  averageBuffers, createBandState, createTargets, drawOneSample, getContext, getKernel, releaseResources, setSceneUniforms, uploadScene, withBlueNoiseTile,
+  averageBuffers, createBandState, createTargets, drawOneSample, getContext, gpuTriangleLimit, getKernel, releaseResources, setSceneUniforms, uploadScene, withBlueNoiseTile,
 } from './path-tracer-gpu.js';
 import { sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 
@@ -42,7 +42,7 @@ export async function createProgressiveTracer(scene, rawOptions = {}, { resoluti
 
   const loadScene = (parts, environment) => {
     releaseResources(gl);
-    traceScene = buildTraceScene(parts, environment);
+    traceScene = buildTraceScene(parts, environment, { gpuTriangleLimit: gpuTriangleLimit() });
     refuseLocalVolumes(traceScene, 'the progressive path tracer');
     sceneOptions = { ...options, lightSelection: resolveLightSelection(options.lightSelection, traceScene.lights) };
     const kernel = getKernel(sceneUsesSubsurface(traceScene.materials), false, sceneOptions);

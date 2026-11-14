@@ -28,6 +28,7 @@ import { rasterOptionsFor } from './agent-render-quality.mjs';
 import { hasPatternTextures } from './agent-preview-textures.js';
 import { TEXTURE_SEQUENCE_LIMITS } from '../src/texture-sequence-limits.js';
 import { registerCatalogEnvironment, registerCatalogLook } from '../src/look-catalog.js';
+import { registerVolumeGrid } from '../src/volume-grid.js';
 import { parseRadianceHdr } from '../src/hdri.js';
 import { parseCube } from '../src/view-transform.js';
 import { weightTracksFromGltfAnimation } from '../src/export-skeleton.js';
@@ -201,7 +202,7 @@ function viewProblems(record, camera, exposure, { placement = false } = {}) {
   if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());
   problems.push(...textureProblems({ parts: record.scene.parts }));
   if (record.scene.flushLeftovers) problems.push(...record.scene.flushLeftovers());
-  if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure }));
+  if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure, environment: record.scene.environment }));
   return problems;
 }
 
@@ -251,6 +252,12 @@ function registerLookData(lookData) {
     if (entry.kind === 'environment') registerCatalogEnvironment(reference, parseRadianceHdr(bytesFromBase64(entry.base64)));
     else registerCatalogLook(reference, parseCube(entry.text));
   }
+}
+
+// Grid files (.67vg) a recipe's grid volumes name, base64 by file name. The page has no file access, so the server reads them and names them here;
+// registering decodes each one and refuses a file over the grid byte limit.
+function registerGridData(gridData) {
+  for (const [name, base64] of Object.entries(gridData ?? {})) registerVolumeGrid(name, bytesFromBase64(base64));
 }
 
 async function loadSequenceFrames(pool, sequenceData) {
@@ -1127,6 +1134,7 @@ window.__agentPreview = {
   },
   create(input) {
     registerLookData(input.lookData);
+    registerGridData(input.gridData);
     if (recipeAssetNeeds(input.recipe).length) return this.createWithAssets(input);
     // Only a recipe with image sequences waits for its frames to decode; any other create stays synchronous.
     const build = sequenceFrames => {
@@ -1182,6 +1190,7 @@ window.__agentPreview = {
   },
   apply(input) {
     registerLookData(input.lookData);
+    registerGridData(input.gridData);
     if (input.sequenceData) {
       const { sequenceFrames } = requireSession(input.sessionId);
       if (!sequenceFrames) throw new Error('This scene was created from an imported asset and has no image sequences.');

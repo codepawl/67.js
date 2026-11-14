@@ -142,10 +142,11 @@ function settingsFrom(input, clips, recipe) {
     objectKeys(input.motion, ['start'], 'motion');
     // Clips of placed assets play on scene time, so a scene that places one needs no authored motion.
     const placesClips = recipe?.format === 'crucible.scene' && recipeAssetNeeds(recipe).some(need => need.copies > 1);
-    // A map sequence reads the same clock.
-    const sequenced = JSON.stringify(recipe?.materials ?? []).includes('"sequence":{');
+    // A map sequence and a grid volume sequence read the same clock.
+    const sequenced = JSON.stringify(recipe?.materials ?? []).includes('"sequence":{')
+      || (Array.isArray(recipe?.environment?.localVolumes) && recipe.environment.localVolumes.some(volume => Array.isArray(volume?.frames)));
     if (!['crucible.scene', 'crucible.asset'].includes(recipe?.format) || (!recipe.motion && !placesClips && !sequenced && !(recipe.format === 'crucible.scene' && playsPhysics(recipe)))) {
-      throw new RangeError('Motion settings require a recipe with authored motion, physics (or cloth, particles), a placed clip or a map sequence.');
+      throw new RangeError('Motion settings require a recipe with authored motion, physics (or cloth, particles), a placed clip, a map sequence or a grid volume sequence.');
     }
     const motionDuration = recipe.motion ? boundedNumber(recipe.motion.duration, 0.1, 30, 'motion duration') : undefined;
     if (recipe.motion?.loop !== undefined && typeof recipe.motion.loop !== 'boolean') {

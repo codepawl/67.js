@@ -2,8 +2,23 @@ name: CodeQL
 
 # No push trigger: every change to main arrives through a pull request that CodeQL already scanned.
 # The weekly run refreshes the alert list of main.
+# CodeQL reads only the JavaScript and TypeScript sources, so a pull request that changes nothing but documents, change notes
+# or media skips the scan. The scan is not a required check (only `test` is), so a skipped run blocks no merge.
 on:
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'changes/**'
+      - 'assets/**'
+      - 'public/**'
+      - 'licenses/**'
+      - '**/*.webp'
+      - '**/*.jpg'
+      - '**/*.png'
+      - '**/*.svg'
+      - '**/*.hdr'
+      - '**/*.glb'
   schedule:
     - cron: '17 3 * * 1'
 
