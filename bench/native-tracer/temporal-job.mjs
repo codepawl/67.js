@@ -1,5 +1,5 @@
 // Measures frame-to-frame flicker of a native path traced video with and without the temporal blend (issue 1120).
-//   node bench/native-tracer/temporal-job.mjs <output directory> [--browser <chrome path>] [--runtime-backend gpu|cpu] [--samples 32] [--width 960] [--height 540] [--ffmpeg ffmpeg]
+//   node bench/native-tracer/temporal-job.mjs <output directory> [--browser <chrome path>] [--runtime-backend gpu|cpu] [--samples 32] [--width 960] [--height 540] [--memory 1024] [--ffmpeg ffmpeg]
 // The scene is the demo room lit only by the area light in its window and the sky through the open front, with the particle
 // systems and every track but the camera removed, so the session reuses the scene and only the camera moves. The camera flies
 // through the room for 2 s, then cuts to another view for 1 s. The job runs twice through the MCP server, with the blend and
@@ -26,6 +26,8 @@ const samples = Number(flag('--samples', 32));
 const browserPath = flag('--browser', '');
 const runtimeBackend = flag('--runtime-backend', 'gpu');
 const ffmpegPath = flag('--ffmpeg', 'ffmpeg');
+// The memory guard of the MCP server in MiB: a 960 x 540 native frame with OIDN in process needs more than the 384 of the sequence bench.
+const memoryMebibytes = flag('--memory', '1024');
 const FPS = 24;
 const FLY_SECONDS = 2;
 const TOTAL_SECONDS = 3;
@@ -58,7 +60,7 @@ function windowLitRoom(recipe) {
 async function renderVideo(recipe, blend) {
   const workDirectory = await mkdtemp(join(tmpdir(), '67js-temporal-job-'));
   const transport = new StdioClientTransport({ command: process.execPath,
-    args: [resolve('bin/67js-mcp.mjs'), '--backend', runtimeBackend, '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
+    args: [resolve('bin/67js-mcp.mjs'), '--backend', runtimeBackend, '--memory', memoryMebibytes, '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
     cwd: workDirectory, stderr: 'pipe', env: { ...process.env, JS67_NATIVE_TEMPORAL: blend ? 'on' : 'off' } });
   let diagnostics = '';
   transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });

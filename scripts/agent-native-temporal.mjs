@@ -146,6 +146,7 @@ export function createTemporalAccumulator(options = {}) {
    *   `color` and `normal` hold three floats per pixel (the normal is unit length, or zero where no surface was hit),
    *   `depth` one: the distance along the camera ray to the first surface, 0 for a miss. `kernelParams` is the block the
    *   frame was traced with. `sceneChanged` says a table other than the kernel parameters differs from the frame before.
+   *   The accumulator keeps `depth` and `normal` (and the colour it returns) until the next frame: do not write to them.
    * @returns {{ color: Float32Array, historyShare: number, restarted: string | null }} `color` is a new buffer;
    *   `historyShare` is the share of pixels that found their surface in the frame before; `restarted` says why the whole
    *   image started again, or null.
@@ -165,7 +166,7 @@ export function createTemporalAccumulator(options = {}) {
     } else {
       pixelsWithHistory = blendWithHistory({ color, depth, normal, camera, blended, counts });
     }
-    history = { color: blended, depth: Float32Array.from(depth), normal: Float32Array.from(normal), counts, camera, kernelParams: Uint8Array.from(kernelParams) };
+    history = { color: blended, depth, normal, counts, camera, kernelParams: Uint8Array.from(kernelParams) };
     pendingRestartReason = null;
     return { color: blended, historyShare: pixelsWithHistory / pixelCount, restarted };
   }
