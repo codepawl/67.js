@@ -1,18 +1,19 @@
-:root { --window:#0b0b0b; --bg:#212121; --surface:#2f2f2f; --text:#ececec; --muted:#b4b4b4; --border:#404040; --focus:#a6c1ff; --radius:14px; --panel-radius:24px;
+@import "./brand-fonts.css";
+:root { --window:#111114; --bg:#201f24; --surface:#2a282d; --text:#f1f0ec; --muted:#a09ea6; --border:#393842; --focus:#fc9132; --radius:14px; --panel-radius:24px;
   --dither:none;
 }
 .icon { width:18px; height:18px; display:inline-block; flex-shrink:0; vertical-align:middle; }
 .brand { display:inline-flex; align-items:center; gap:0; flex-shrink:0; }
 .brand .brand-mark { flex-shrink:0; width:34px; height:34px; margin-right:10px; }
 button .icon, a .icon { margin-right:7px; }
-body { font-family:ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,Arial,sans-serif; }
+body { font-family:'Inter',system-ui,sans-serif; }
 body :focus-visible { outline:2px solid var(--focus); outline-offset:4px; }
 body button, body select { border-radius:var(--radius); }
-button[aria-pressed=true] { background:#ffffff20; color:#fff; }
-.controls button:not(.swatch)[aria-pressed=true], .layer-actions button[aria-pressed=true] { background:#ffffff20; color:#fff; }
-body .primary { background:#ececec; color:#171717; }
-body .primary:hover { background:#fff; }
-body input[type=range] { accent-color:#d7d7d7; }
+button[aria-pressed=true] { background:#fefefd20; color:#fefefd; }
+.controls button:not(.swatch)[aria-pressed=true], .layer-actions button[aria-pressed=true] { background:#fefefd20; color:#fefefd; }
+body .primary { background:#fc9132; color:#111114; }
+body .primary:hover { background:#ffb25e; }
+body input[type=range] { accent-color:#fc9132; }
 .studio-nav a[aria-current], nav a[aria-current] { color:var(--text); }
 .studio-nav a { padding:10px 14px; border-radius:var(--radius); }
 nav a:has(> .icon) { display:flex; align-items:center; gap:8px; }
@@ -24,9 +25,11 @@ button:has(> .icon) > .icon { margin-right:0; }
 .studio-nav a[aria-current] { background-color:var(--surface); background-image:var(--dither); }
 .controls button:not(.swatch)[aria-pressed=true], .demo-presets button[aria-pressed=true] { background-image:var(--dither); }
 .toolbar, .world-header { z-index:3; }
-body .controls, body .landscape-controls { background:#171717e8; border:1px solid #ffffff1c; border-radius:var(--panel-radius); backdrop-filter:blur(16px); }
+body .controls, body .landscape-controls { background:#17161ae8; border:1px solid #fefefd1c; border-radius:var(--panel-radius); backdrop-filter:blur(16px); }
 .demo-links { display:flex; gap:12px; font-size:12px; }
-.demo-links a { color:#ddd; text-decoration:none; }
+.demo-links a { color:#c8c7ce; text-decoration:none; }
 .demo-presets { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
 .demo-presets button { padding:7px 10px; font-size:12px; }
 @media (max-width:700px) { .studio-nav, .world-header nav { flex-wrap:wrap; } .brand .brand-mark { width:28px; height:28px; margin-right:8px; } }
+/* The Crucible wordmark: lowercase Fredoka SemiBold beside the pot mark, on every page (brand kit rule 8). */
+body a.brand { font-family:"Fredoka",system-ui,sans-serif; font-weight:600; letter-spacing:-0.01em; text-transform:lowercase; }

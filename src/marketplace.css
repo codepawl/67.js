@@ -11,7 +11,7 @@ body.marketplace > main { gap: 40px; }
 .market-version { color: var(--muted); font-family: var(--mono); font-size: 13px; font-weight: 400; }
 .market-description { color: var(--muted); font-size: 15px; }
 .market-facts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.market-facts li { padding: 3px 10px; border-radius: 999px; background: #ffffff12; color: var(--muted); font-size: 13px; }
+.market-facts li { padding: 3px 10px; border-radius: 999px; background: var(--tint); color: var(--muted); font-size: 13px; }
 
 .pack-card { grid-template-columns: 168px minmax(0, 1fr); align-items: start; }
 .pack-preview { width: 168px; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius); background: var(--window); }
@@ -26,8 +26,8 @@ body.marketplace > main { gap: 40px; }
 .marketplace .market-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--control-height); padding: 8px 18px; border-radius: 999px; background: var(--primary); color: var(--primary-text); font-size: 15px; font-weight: 500; user-select: none; }
 .marketplace .market-button:hover { opacity: .88; }
 .market-button-icon { width: 17px; height: 17px; }
-.marketplace .market-button-quiet { background: #ffffff12; color: var(--text); }
-.marketplace .market-button-quiet:hover { opacity: 1; background: #ffffff1f; }
+.marketplace .market-button-quiet { background: var(--tint); color: var(--text); }
+.marketplace .market-button-quiet:hover { opacity: 1; background: var(--tint-strong); }
 .market-copy { min-height: 30px; padding: 4px 12px; font-size: 13px; }
 
 .addon-card { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
