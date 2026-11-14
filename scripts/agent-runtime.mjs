@@ -28,6 +28,7 @@ import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
+import { readVolumeGridFiles } from '../src/mcp-volume-grids.js';
 import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { writeWebBuild } from './web-export.mjs';
@@ -226,7 +227,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   async function placedAssetData(value) {
     const needs = recipeAssetNeeds(value);
     const entries = await Promise.all(needs.map(async ({ id }) => [id, (await (await catalog()).read(id)).toString('base64')]));
-    return { ...(needs.length ? { assetData: Object.fromEntries(entries) } : {}), ...(await sequenceFrameData(value)), ...(await lookFileData(value)) };
+    return { ...(needs.length ? { assetData: Object.fromEntries(entries) } : {}), ...(await sequenceFrameData(value)), ...(await lookFileData(value)), ...volumeGridData(value) };
   }
 
   /**
@@ -266,6 +267,13 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     if (!ids.length) return {};
     const entries = await Promise.all(ids.map(async id => [id, (await (await catalog()).read(id)).toString('base64')]));
     return { sequenceData: Object.fromEntries(entries) };
+  }
+
+  /** Bytes of the grid files (.67vg) the grid volumes of a recipe or edit list name, base64 by file name, never a path. The page registers them. */
+  function volumeGridData(value) {
+    const files = readVolumeGridFiles(value);
+    if (!files.size) return {};
+    return { gridData: Object.fromEntries([...files].map(([name, bytes]) => [name, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')])) };
   }
 
   // Motion layers can play a clip of another catalog asset (`from.asset`). The page gets those assets' bytes by catalog ID,
