@@ -1,6 +1,6 @@
 import { buildTraceScene, refuseLocalVolumes } from './path-tracer-scene.js';
 import { createCamera } from './path-tracer.js';
-import { getContext, getKernel, releaseResources, setSceneUniforms, uploadScene } from './path-tracer-gpu.js';
+import { getContext, gpuTriangleLimit, getKernel, releaseResources, setSceneUniforms, uploadScene } from './path-tracer-gpu.js';
 import { sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 import { createRadianceCache } from './path-tracer-radiance-cache.js';
 import { createTemporalDenoiser } from './path-tracer-temporal-denoise.js';
@@ -65,7 +65,7 @@ export async function createRealtimeTracer(scene, rawOptions = {}) {
 
   const loadScene = (parts, environment) => {
     releaseResources(gl);
-    traceScene = buildTraceScene(parts, environment);
+    traceScene = buildTraceScene(parts, environment, { gpuTriangleLimit: gpuTriangleLimit() });
     refuseLocalVolumes(traceScene, 'the WebGL realtime path tracer');
     const kernel = getKernel(sceneUsesSubsurface(traceScene.materials), false, options);
     program = kernel.program;

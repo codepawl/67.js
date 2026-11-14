@@ -1184,7 +1184,10 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   };
   const { width, height } = options;
   const view = createCamera(camera, width, height);
-  const scene = buildTraceScene(parts, environment);
+  const gpuModule = options.backend === 'gpu' || options.backend === 'webgpu'
+    ? await (options.backend === 'webgpu' ? import('./path-tracer-webgpu.js') : import('./path-tracer-gpu.js'))
+    : null;
+  const scene = buildTraceScene(parts, environment, gpuModule ? { gpuTriangleLimit: await gpuModule.gpuTriangleLimit() } : {});
   if (options.backend !== 'cpu') refuseLocalVolumes(scene, `backend "${options.backend}"`);
   const pixelCount = width * height;
   const buffers = {
@@ -1195,8 +1198,8 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   let gpuName = null;
   let gpuCompileSeconds = 0;
   let gpuKernelCompiles = 0;
-  if (options.backend === 'gpu' || options.backend === 'webgpu') {
-    const { traceOnGpu, gpuKernelCompileCount } = await (options.backend === 'webgpu' ? import('./path-tracer-webgpu.js') : import('./path-tracer-gpu.js'));
+  if (gpuModule) {
+    const { traceOnGpu, gpuKernelCompileCount } = gpuModule;
     const traced = await traceOnGpu(scene, view, options, shouldStop);
     gpuName = traced.gpu;
     gpuCompileSeconds = traced.compileSeconds;

@@ -1,6 +1,7 @@
 import { buildMegakernelSource, PATH_STATE_VECTORS, WAVEFRONT_SOURCE, WAVEFRONT_WORKGROUP_SIZE, WORKGROUP_SIZE } from './path-tracer-webgpu-kernel.js';
 import { resolveLightSelection } from './path-tracer-light-tree.js';
-import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { gpuTriangleCapacity, packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { MAX_GPU_TRACE_TRIANGLES } from './path-tracer-scene.js';
 
 // The WebGPU backend of the path tracer (issue #625): the same scene tables, camera, options and random numbers as the
 // WebGL2 backend (path-tracer-gpu.js) go in, the same buffers come out. The tracer is WGSL compute, so a page needs
@@ -426,4 +427,10 @@ export async function traceTexelsOnWebGpu(scene, texels, options, shouldStop) {
 }
 
 // The names path-tracer.js looks for in a backend module, the same as path-tracer-gpu.js.
-export { traceOnWebGpu as traceOnGpu, webGpuKernelCompileCount as gpuKernelCompileCount };
+export { traceOnWebGpu as traceOnGpu, webGpuKernelCompileCount as gpuKernelCompileCount, webGpuTriangleLimit as gpuTriangleLimit };
+
+/** The triangles one storage buffer of this device holds, up to MAX_GPU_TRACE_TRIANGLES. Asks for the adapter when the page has none open yet. */
+export async function webGpuTriangleLimit() {
+  const { device } = await getSession();
+  return gpuTriangleCapacity({ maximumBufferBytes: device.limits.maxStorageBufferBindingSize }, MAX_GPU_TRACE_TRIANGLES);
+}

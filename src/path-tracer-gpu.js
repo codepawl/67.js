@@ -1,6 +1,7 @@
 import { resolveLightSelection } from './path-tracer-light-tree.js';
 import { buildFragmentSource, VERTEX_SOURCE } from './path-tracer-gpu-shader.js';
-import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { gpuTriangleCapacity, packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { MAX_GPU_TRACE_TRIANGLES } from './path-tracer-scene.js';
 
 // The GPU backend of the path tracer: one WebGL2 fragment pass per sample draws every pixel of a band, and four float
 // targets add the samples up. It needs a page with WebGL2 (a canvas), EXT_color_buffer_float and EXT_float_blend. The
@@ -335,4 +336,10 @@ export async function traceTexelsOnGpu(scene, texels, options, shouldStop) {
     escaped[texel] = statistics[texel * 4 + 2] / samples;
   }
   return { radiance, escaped, gpu, compileSeconds };
+}
+
+/** The triangles this page's WebGL2 context can hold in its data textures (MAX_TEXTURE_SIZE rows of the triangle table), up to MAX_GPU_TRACE_TRIANGLES. */
+export function gpuTriangleLimit() {
+  const { gl } = getContext();
+  return gpuTriangleCapacity({ maximumTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) }, MAX_GPU_TRACE_TRIANGLES);
 }
