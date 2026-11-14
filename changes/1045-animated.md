@@ -1,1 +1,0 @@
-- A grid volume takes `frames` (a list of `.67vg` files) with `fps` and `loop` and plays at the scene time in the rasterizer and the CPU path tracer; `scripts/vdb-to-grid.py --sequence` converts a numbered VDB sequence in one run (#1045)

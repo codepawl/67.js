@@ -47,8 +47,8 @@ function readExamplePack() {
     }
   };
   visit('');
-  const manifest = JSON.parse(files.get('67js-pack.json').toString('utf8'));
-  files.delete('67js-pack.json');
+  const manifest = JSON.parse(files.get('crucible-pack.json').toString('utf8'));
+  files.delete('crucible-pack.json');
   return { manifest, files };
 }
 
@@ -78,12 +78,12 @@ function buildCase(folder, id, testCase) {
   for (const [path, content] of files) {
     if (content !== null) writeFileAt(folder, path, content);
   }
-  writeFileSync(join(folder, '67js-pack.json'), testCase.manifestText ?? JSON.stringify(manifest));
+  writeFileSync(join(folder, 'crucible-pack.json'), testCase.manifestText ?? JSON.stringify(manifest));
   testCase.after?.(folder);
 }
 
 function temporaryFolder(context) {
-  const folder = mkdtempSync(join(tmpdir(), '67js-pack-fuzz-'));
+  const folder = mkdtempSync(join(tmpdir(), 'crucible-pack-fuzz-'));
   context.after(() => rmSync(folder, { recursive: true, force: true }));
   return folder;
 }
@@ -370,7 +370,7 @@ test('JSON at and over its depth and size limits', async context => {
     makeCase('depth: 100000 arrays', 'refuse', { change: (_, files) => setMaterialJson(files, `{"a":${nestedArrays(100000, '1')}}`) }),
     makeCase('depth: 400000 arrays (near 1 MiB)', 'refuse', { change: (_, files) => setMaterialJson(files, `{"a":${nestedArrays(400000, '1')}}`) }),
     makeCase('depth: 100000 objects', 'refuse', { change: (_, files) => setMaterialJson(files, nestedObjects(100000, '1')) }),
-    makeCase('depth: recipe 100000 arrays', 'refuse', { change: (_, files) => files.set('recipes/crates.json', `{"format":"67js.scene","a":${nestedArrays(100000, '1')}}`) }),
+    makeCase('depth: recipe 100000 arrays', 'refuse', { change: (_, files) => files.set('recipes/crates.json', `{"format":"crucible.scene","a":${nestedArrays(100000, '1')}}`) }),
     makeCase('depth: keys with dots under the limit', 'accept', { change: (_, files) => setMaterialJson(files, { [`${'k.'.repeat(100)}k`]: { inner: { value: 1 } } }) }),
     makeCase('size: JSON of exactly 1 MiB', 'accept', { change: (_, files) => setMaterialJson(files, padTo('{"roughness":0.5}', MAXIMUM_PACK_JSON_BYTES)) }),
     makeCase('size: JSON of 1 MiB + 1', 'refuse', { change: (_, files) => setMaterialJson(files, padTo('{"roughness":0.5}', MAXIMUM_PACK_JSON_BYTES + 1)) }),
@@ -393,7 +393,7 @@ test('JSON at and over its depth and size limits', async context => {
     makeCase('recipe with the wrong format', 'refuse', { change: (_, files) => files.set('recipes/crates.json', '{"format":"other"}') }),
     makeCase('recipe format is an object', 'refuse', { change: (_, files) => files.set('recipes/crates.json', '{"format":{"toString":1}}') }),
     makeCase('prototype keys in a material are inert', 'either', { change: (_, files) => setMaterialJson(files, '{"__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":2}},"prototype":{"polluted":3}}') }),
-    makeCase('prototype keys in a recipe are inert', 'either', { change: (_, files) => files.set('recipes/crates.json', '{"format":"67js.scene","__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":2}}}') }),
+    makeCase('prototype keys in a recipe are inert', 'either', { change: (_, files) => files.set('recipes/crates.json', '{"format":"crucible.scene","__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":2}}}') }),
   ];
   await runCases(context, cases);
 });
@@ -433,23 +433,24 @@ function manifestCases() {
   accept('64 recipes with previews', manifest => { manifest.contents.recipes = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND }, (_, index) => ({ id: `r-${index}`, file: 'recipes/crates.json', preview: 'previews/crates.png' })); });
   refuse('65 recipes', manifest => { manifest.contents.recipes = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND + 1 }, (_, index) => ({ id: `r-${index}`, file: 'recipes/crates.json' })); });
   refuse('items is a huge sparse array', manifest => { manifest.contents.looks = { length: 4294967295 }; });
+  const majorMinor = packageVersion.split('.').slice(0, 2).join('.');
   const engines = [
-    ['', false], [' ', false], ['>=', false], ['>= 0.19.0', false], ['>=0.19.0.1', false], ['>=0.19.0||>=1', false], ['>=0.19.0 || >=1', false], ['^', false],
-    ['latest', false], ['*', false], ['x', false], ['1.x', false], ['v0.19.0', false], ['>=0.19.0-beta', false], ['>=-1', false], ['>=\u0660', false],
-    ['>=0.19.0,<1', false], ['>=99.0.0', false], ['<0.0.1', false], ['>0.19.0', false], ['='.repeat(64), false], ['9'.repeat(65), false], ['9'.repeat(10000), false],
-    ['>=1 '.repeat(9), false], ['>=0 '.repeat(100), false], [' '.repeat(65) + '>=0', false], ['\u0000', false], ['>=0.19.0\u0000', false],
+    ['', false], [' ', false], ['>=', false], [`>= ${packageVersion}`, false], [`>=${packageVersion}.1`, false], [`>=${packageVersion}||>=1`, false], [`>=${packageVersion} || >=1`, false], ['^', false],
+    ['latest', false], ['*', false], ['x', false], ['1.x', false], [`v${packageVersion}`, false], [`>=${packageVersion}-beta`, false], ['>=-1', false], ['>=\u0660', false],
+    [`>=${packageVersion},<1`, false], ['>=99.0.0', false], ['<0.0.1', false], [`>${packageVersion}`, false], ['='.repeat(64), false], ['9'.repeat(65), false], ['9'.repeat(10000), false],
+    ['>=1 '.repeat(9), false], ['>=0 '.repeat(100), false], [' '.repeat(65) + '>=0', false], ['\u0000', false], [`>=${packageVersion}\u0000`, false],
     [null, false], [5, false], [true, false], [[], false], [['>=0'], false], [{}, false], [{ toString: '>=0' }, false],
-    ['>=0.19.0', true], ['>=0', true], ['^0.19', true], ['~0.19.0', true], ['>=0.0.0 <99', true], ['0.19', true], ['=0.19.0', true], ['  >=0.19.0  ', true], ['>=0.19.0\n<1', true],
-    ['>=0 '.repeat(8).trim(), true], [`${'>=0.0.0 '.repeat(7)}>=0.19.0`, true], ['>=0 <99999999999999999999999999999', true], ['<=99999999999999999999999999999', true],
+    [`>=${packageVersion}`, true], ['>=0', true], [`^${majorMinor}`, true], [`~${packageVersion}`, true], ['>=0.0.0 <99', true], [majorMinor, true], [`=${packageVersion}`, true], [`  >=${packageVersion}  `, true], [`>=${packageVersion}\n<1`, true],
+    ['>=0 '.repeat(8).trim(), true], [`${'>=0.0.0 '.repeat(7)}>=${packageVersion}`, true], ['>=0 <99999999999999999999999999999', true], ['<=99999999999999999999999999999', true],
   ];
   for (const [range, accepted] of engines) {
-    (accepted ? accept : refuse)(`engines ${JSON.stringify(range)?.slice(0, 30)}`, manifest => { manifest.engines['67js'] = range; });
+    (accepted ? accept : refuse)(`engines ${JSON.stringify(range)?.slice(0, 30)}`, manifest => { manifest.engines['crucible'] = range; });
   }
-  for (const value of [undefined, null, 5, 'x', [], [{ '67js': '>=0' }], { '67js': '>=0', other: 1 }, {}]) {
+  for (const value of [undefined, null, 5, 'x', [], [{ 'crucible': '>=0' }], { 'crucible': '>=0', other: 1 }, {}]) {
     refuse(`engines value ${JSON.stringify(value)}`, manifest => { if (value === undefined) delete manifest.engines; else manifest.engines = value; });
   }
   const scalars = {
-    format: ['67js.pack ', '67JS.PACK', null, 1, [], ''], schemaVersion: ['1', 2, 0, 1.5, null, [1], true, -1, 1e21],
+    format: ['crucible.pack ', 'CRUCIBLE.PACK', null, 1, [], ''], schemaVersion: ['1', 2, 0, 1.5, null, [1], true, -1, 1e21],
     version: ['1.0', '1.0.0.0', 'v1.0.0', '1.0.0-beta', '1.0.0\n', '1.0.x', '', null, 5, ['1.0.0'], '-1.0.0', '1.0.0 '],
     license: ['', '   ', 'x'.repeat(65), null, 5, [], {}], author: ['', ' ', 'x'.repeat(121), null, 5, {}],
     description: ['', '  ', 'x'.repeat(201), null, 5, ['x']],
@@ -471,7 +472,7 @@ function manifestCases() {
   refuse('extra item key', manifest => { manifest.contents.materials[0].url = 'https://example.test/x'; });
   refuse('preview on a material', manifest => { manifest.contents.materials[0].preview = 'previews/crates.png'; });
   refuse('preview that is not an image', manifest => { manifest.contents.recipes[0].preview = 'recipes/crates.json'; });
-  refuse('manifest listed as a recipe', manifest => { manifest.contents.recipes[0].file = '67js-pack.json'; });
+  refuse('manifest listed as a recipe', manifest => { manifest.contents.recipes[0].file = 'crucible-pack.json'; });
   refuse('png listed as a look', manifest => { manifest.contents.looks[0].file = 'previews/crates.png'; });
   refuse('cube listed as an image', manifest => { manifest.contents.images = [{ id: 'x', file: 'looks/warm.cube' }]; });
   refuse('json listed as a glb', manifest => { manifest.contents.assets = [{ id: 'x', file: 'materials/rusty-metal.json' }]; });
@@ -485,14 +486,14 @@ test('manifest fields, ids, item counts and engines ranges', async context => {
     makeCase('manifest is an array', 'refuse', { manifestText: '[]' }),
     makeCase('manifest is null', 'refuse', { manifestText: 'null' }),
     makeCase('manifest is empty', 'refuse', { manifestText: '' }),
-    makeCase('manifest is truncated', 'refuse', { manifestText: '{"format":"67js.pack"' }),
+    makeCase('manifest is truncated', 'refuse', { manifestText: '{"format":"crucible.pack"' }),
     makeCase('manifest is binary', 'refuse', { manifestText: '\u0000\u0001\u0002' }),
     makeCase('manifest has a __proto__ key in JSON text', 'refuse', { manifestText: '{"__proto__":{"polluted":1}}' }),
     makeCase('manifest lists a nested prototype chain', 'refuse', { manifestText: `{"contents":${nestedObjects(50000, '1')}}` }),
     makeCase('manifest is 400000 nested arrays', 'refuse', { manifestText: nestedArrays(400000, '1') }),
-    makeCase('manifest is missing', 'refuse', { after: folder => rmSync(join(folder, '67js-pack.json')) }),
-    makeCase('manifest is a folder', 'refuse', { after: folder => { rmSync(join(folder, '67js-pack.json')); mkdirSync(join(folder, '67js-pack.json')); } }),
-    makeCase('manifest name in a different case', 'refuse', { after: folder => { rmSync(join(folder, '67js-pack.json')); writeFileSync(join(folder, '67JS-PACK.JSON'), '{}'); } }),
+    makeCase('manifest is missing', 'refuse', { after: folder => rmSync(join(folder, 'crucible-pack.json')) }),
+    makeCase('manifest is a folder', 'refuse', { after: folder => { rmSync(join(folder, 'crucible-pack.json')); mkdirSync(join(folder, 'crucible-pack.json')); } }),
+    makeCase('manifest name in a different case', 'refuse', { after: folder => { rmSync(join(folder, 'crucible-pack.json')); writeFileSync(join(folder, 'CRUCIBLE-PACK.JSON'), '{}'); } }),
   );
   await runCases(context, cases);
 });
@@ -737,7 +738,7 @@ test('an input that is never an object does not break the pack registry', async 
   const copy = registry.read('materials', 'fz-1', 'rusty-metal');
   copy.metallic = 99;
   assert.notEqual(registry.read('materials', 'fz-1', 'rusty-metal').metallic, 99, 'reads return copies');
-  assert.equal(existsSync(join(parent, 'one', '67js-pack.json')), true);
+  assert.equal(existsSync(join(parent, 'one', 'crucible-pack.json')), true);
 });
 
 // ---- 9. the allow list ---------------------------------------------------------------------------------------------------------------
@@ -767,7 +768,7 @@ test('only the manifest, listed files and plain text documents may be in a pack'
     makeCase('HDR #?RGBE', 'accept', withHdr('#?RGBE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n\u0080\u0080\u0080\u0081')),
     makeCase('look that is a script', 'refuse', { change: (_, files) => files.set('looks/warm.cube', script) }),
   ];
-  for (const listed of ['67js-pack.json', '67JS-PACK.JSON', '67js-Pack.json', 'sub/67js-pack.json', 'a/b/67JS-PACK.JSON']) {
+  for (const listed of ['crucible-pack.json', 'CRUCIBLE-PACK.JSON', 'crucible-Pack.json', 'sub/crucible-pack.json', 'a/b/CRUCIBLE-PACK.JSON']) {
     cases.push(
       makeCase(`manifest listed as a material: ${listed}`, 'refuse', { change: manifest => { manifest.contents.materials[0].file = listed; } }),
       makeCase(`manifest listed as a recipe: ${listed}`, 'refuse', { change: manifest => { manifest.contents.recipes[0].file = listed; } }),
@@ -781,9 +782,9 @@ test('a JSON file over 1 MiB is refused from its size, without being read', asyn
   const started = performance.now();
   const outcomes = await runCases(context, [
     makeCase('60 MiB material', 'refuse', { after: folder => { writeFileSync(join(folder, 'materials/rusty-metal.json'), ''); truncateSync(join(folder, 'materials/rusty-metal.json'), 60 * 1024 * 1024); } }),
-    makeCase('60 MiB manifest', 'refuse', { after: folder => { writeFileSync(join(folder, '67js-pack.json'), ''); truncateSync(join(folder, '67js-pack.json'), 60 * 1024 * 1024); } }),
+    makeCase('60 MiB manifest', 'refuse', { after: folder => { writeFileSync(join(folder, 'crucible-pack.json'), ''); truncateSync(join(folder, 'crucible-pack.json'), 60 * 1024 * 1024); } }),
   ], { chunkSize: 1 });
   assert.match(outcomes[0].error.message, /materials\[0\]\.file: got .*JSON file of at most 1 MiB/);
-  assert.match(outcomes[1].error.message, /67js-pack\.json: got .*JSON file of at most 1 MiB/);
+  assert.match(outcomes[1].error.message, /crucible-pack\.json: got .*JSON file of at most 1 MiB/);
   assert.ok(performance.now() - started < 3000, 'a size check must not read 60 MiB');
 });

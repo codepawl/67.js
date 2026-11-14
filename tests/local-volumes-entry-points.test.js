@@ -45,7 +45,7 @@ async function startServer(port) {
 
 async function probeInPage(page) {
   const { box } = await import('/src/geometry.js');
-  const { Renderer67 } = await import('/src/renderer.js');
+  const { CrucibleRenderer } = await import('/src/renderer.js');
   const { createProgressiveTracer } = await import('/src/path-tracer-progressive.js');
   const { createRealtimeTracer } = await import('/src/path-tracer-realtime.js');
   await import('/src/fog-shader.js');
@@ -56,7 +56,7 @@ async function probeInPage(page) {
     const canvas = document.createElement('canvas');
     canvas.width = 32;
     canvas.height = 32;
-    const renderer = new Renderer67(canvas, [wall], { samples: 1, pixelRatio: 1, ground: false, ...rendererOptions });
+    const renderer = new CrucibleRenderer(canvas, [wall], { samples: 1, pixelRatio: 1, ground: false, ...rendererOptions });
     let choseProgram = false;
     const originalSelect = renderer.selectPostProgram.bind(renderer);
     renderer.selectPostProgram = (steps) => {

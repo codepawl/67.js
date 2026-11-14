@@ -1,4 +1,4 @@
-// Renderer67.replaceParts with retainedUnchanged builds the same batches as a full replaceParts (issue 779).
+// CrucibleRenderer.replaceParts with retainedUnchanged builds the same batches as a full replaceParts (issue 779).
 // It runs in headless Chrome from the Vite dev server; it skips locally when Chrome cannot start and fails on CI.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import { withDevServerPage } from './helpers/dev-server-browser.js';
 async function compareSlicedAndFullBatches(page) {
   const task = async () => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const identity = () => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
     const materials = [0, 1].map(index => ({ tag: 'surface', color: [index, 0.5, 0.5], metallic: 0, roughness: 0.5, emission: 0 }));
     const geometries = [1, 2, 3, 4].map(size => box(0, size));
@@ -18,7 +18,7 @@ async function compareSlicedAndFullBatches(page) {
       canvas.width = 32;
       canvas.height = 32;
       document.body.append(canvas);
-      return new Renderer67(canvas, world.slice(0, 6), { ground, samples: 1, pixelRatio: 1 });
+      return new CrucibleRenderer(canvas, world.slice(0, 6), { ground, samples: 1, pixelRatio: 1 });
     };
     const results = {};
     const floorOwnGeometry = { name: 'floor', geometry: box(0, 9), matrix: identity(), material: materials[0] };

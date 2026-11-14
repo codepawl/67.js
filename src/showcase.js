@@ -2,7 +2,7 @@ import './site.css';
 import './brand.js';
 import './showcase.css';
 import './pointer-light.js';
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import { createSharedTextures, loadGltf } from './gltf.js';
 import { loadHdri } from './hdri.js';
 import { createCascadedShadows } from './cascaded-shadows.js';
@@ -320,7 +320,7 @@ async function selectScene(id) {
     const shadowCascades = rendererOptions.shadowCascades ? createCascadedShadows(rendererOptions.shadowCascades) : undefined;
     // A scene that sets waterReflection mirrors itself in its largest flat, smooth surface (water or a polished floor).
     const reflection = description.waterReflection ? applyWaterReflection(asset.parts) : { parts: asset.parts, surface: null };
-    renderer = new Renderer67(canvas, reflection.parts, {
+    renderer = new CrucibleRenderer(canvas, reflection.parts, {
       ground: false, hdr: true, samples: 4, memoryBudgetMiB: 384,
       ...rendererOptions,
       shadowCascades,

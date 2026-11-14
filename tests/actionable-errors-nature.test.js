@@ -10,7 +10,7 @@ const GROUND = { id: 'ground', type: 'terrain', size: 60, resolution: 32, seed: 
 
 function natureRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [GROUND, { id: 'speck', type: 'box', bevel: 0 }, { id: 'sheet', type: 'grid', segments: 4 }],
     materials: [{ id: 'grass', tag: 'grass', color: [0.2, 0.4, 0.1] }, { id: 'glow', color: [1, 0.5, 0.1], emission: 4 }, { id: 'fabric', color: [0.7, 0.2, 0.2], doubleSided: true }],
     nodes: [

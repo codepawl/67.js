@@ -16,7 +16,7 @@ function seaRecipe({ tag, smoothAngle, inStack = false }) {
   ];
   const ocean = { op: 'ocean', windSpeed: 16, choppiness: 1.5, size: 50, seed: 3, resolution: 3 };
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: inStack ? edits : [...edits, ocean], stack: inStack ? [ocean] : [], ...(smoothAngle === undefined ? {} : { smoothAngle }) }],
     materials: [{ id: 'surface', color: [0.1, 0.2, 0.3], ...(tag ? { tag } : {}) }],
     nodes: [{ id: 'sea', geometry: 'sea', material: 'surface' }],

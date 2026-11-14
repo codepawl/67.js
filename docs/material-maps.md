@@ -1,6 +1,6 @@
 # Material maps
 
-`Renderer67` supports five texture channels on standard metallic/roughness materials.
+`CrucibleRenderer` supports five texture channels on standard metallic/roughness materials.
 Each channel uses an image descriptor. All channels sample `geometry.uvs`, which contains two finite values per vertex.
 
 ```js
@@ -67,10 +67,10 @@ The current API uses named descriptors. Arbitrary channel routing and texture tr
 
 ## Updating pixels
 
-`renderer.updateTexture(descriptor, update)` replaces the pixels of a texture the renderer has already uploaded. It needs `import '@codepawlhq/67js/addons/texture-update'`, so scenes that never update a texture do not carry the code.
+`renderer.updateTexture(descriptor, update)` replaces the pixels of a texture the renderer has already uploaded. It needs `import '@codepawlhq/crucible/addons/texture-update'`, so scenes that never update a texture do not carry the code.
 
 ```js
-import '@codepawlhq/67js/addons/texture-update';
+import '@codepawlhq/crucible/addons/texture-update';
 
 renderer.updateTexture(descriptor);
 renderer.updateTexture(descriptor, { image: video });
@@ -131,7 +131,7 @@ Moss is shaded as its own material, not as a tint. Where it grows, roughness bec
 
 ## Splat layers
 
-A standard-tag material can carry `layers` (up to four `{ color, normal, roughness, height, scale, tint, triplanar }` entries built from `loadTextureSet`) and a `splat` rule object instead of these single maps. The layers are blended by slope, height and a weight mask, sampled in world space and packed into texture arrays on units 11 to 14. They replace `map`, `normalMap`, `metallicRoughnessMap` and `occlusionMap`, which must be absent, and parts batch only when `layers` and `splat` are the same objects. See [Terrain](https://github.com/codepawl/67.js/blob/main/docs/terrain.md).
+A standard-tag material can carry `layers` (up to four `{ color, normal, roughness, height, scale, tint, triplanar }` entries built from `loadTextureSet`) and a `splat` rule object instead of these single maps. The layers are blended by slope, height and a weight mask, sampled in world space and packed into texture arrays on units 11 to 14. They replace `map`, `normalMap`, `metallicRoughnessMap` and `occlusionMap`, which must be absent, and parts batch only when `layers` and `splat` are the same objects. See [Terrain](https://github.com/codepawl/crucible/blob/main/docs/terrain.md).
 
 ## Material layers
 
@@ -148,9 +148,9 @@ A material on a standard tag (`surface` in recipes, `gltf` and `armor` in code) 
 | `specular`, `specularColor` | 0 to 4, colour 0 to 1000 | Strength and tint of the non-metal reflection. |
 | `anisotropy`, `anisotropyRotation` | 0 to 1, -2π to 2π | Stretches highlights along a grain (brushed metal, hair): the surface is rougher along the tangent than across it, as in `KHR_materials_anisotropy`. The grain follows the UV direction, or rings the world up axis on a mesh without UVs. The rotation turns it around the normal, in radians. |
 | `iridescence`, `iridescenceIor`, `iridescenceThickness` | 0 to 1, 1 to 3, 0 to 1200 nm | A thin film over the surface (soap, oil, beetle shell, anodised metal) that shifts the reflection colour with the view angle, as in `KHR_materials_iridescence`. The film is as thick as `iridescenceThickness` everywhere; the glTF thickness minimum and texture are not kept. |
-| `subsurface` (`weight`, `radius`, `scale`, `color`) | 0 to 1, each channel 0 to 100 (units of `scale`), 0 to 10 m, 0 to 1 | Light scattered under the surface (skin, wax, leaves), named as Blender's Principled BSDF Subsurface Weight, Radius and Scale. `radius` is the mean free path of red, green and blue in units of `scale` (metres); defaults `[1, 0.2, 0.1]` and `0.05`; `weight` 0 is off. The rasterizer widens the sun's diffuse past the shadow edge per channel and lets light through thin parts by the thickness the sun shadow map gives; the code loads only for a recipe that has a `subsurface` block (`@codepawlhq/67js/addons/subsurface-shader` otherwise). Sun only, surface tag, no anisotropy; `color` is read by 67js but Blender takes the base colour. The path tracer ignores it. |
+| `subsurface` (`weight`, `radius`, `scale`, `color`) | 0 to 1, each channel 0 to 100 (units of `scale`), 0 to 10 m, 0 to 1 | Light scattered under the surface (skin, wax, leaves), named as Blender's Principled BSDF Subsurface Weight, Radius and Scale. `radius` is the mean free path of red, green and blue in units of `scale` (metres); defaults `[1, 0.2, 0.1]` and `0.05`; `weight` 0 is off. The rasterizer widens the sun's diffuse past the shadow edge per channel and lets light through thin parts by the thickness the sun shadow map gives; the code loads only for a recipe that has a `subsurface` block (`@codepawlhq/crucible/addons/subsurface-shader` otherwise). Sun only, surface tag, no anisotropy; `color` is read by Crucible but Blender takes the base colour. The path tracer ignores it. |
 
-A material that uses none of them costs nothing extra: the shader branches on uniforms that are zero, and transmission only exists in the pass that was already there for `liquid`. Anisotropy and iridescence go further: their shader code is not in the core bundle at all. It lives in `@codepawlhq/67js/addons/material-layer-shaders`, and the renderer asks for it only when a part uses a layer, so a scene without them downloads and draws with the same shader as before. In code, add `import "@codepawlhq/67js/addons/material-layer-shaders"` before rendering such a part; without it the renderer throws a message that names the import. A recipe loads it through `await loadAgentSceneModules(recipe)`, the MCP server does so itself, and the glTF loader brings it in for a file that uses `KHR_materials_anisotropy` or `KHR_materials_iridescence`.
+A material that uses none of them costs nothing extra: the shader branches on uniforms that are zero, and transmission only exists in the pass that was already there for `liquid`. Anisotropy and iridescence go further: their shader code is not in the core bundle at all. It lives in `@codepawlhq/crucible/addons/material-layer-shaders`, and the renderer asks for it only when a part uses a layer, so a scene without them downloads and draws with the same shader as before. In code, add `import "@codepawlhq/crucible/addons/material-layer-shaders"` before rendering such a part; without it the renderer throws a message that names the import. A recipe loads it through `await loadAgentSceneModules(recipe)`, the MCP server does so itself, and the glTF loader brings it in for a file that uses `KHR_materials_anisotropy` or `KHR_materials_iridescence`.
 
 Limits, stated plainly:
 

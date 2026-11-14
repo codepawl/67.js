@@ -95,7 +95,7 @@ test('the shader carries the grid code only for a renderer that asks for the fea
 test('a recipe with bake.irradianceGrid skips lightmaps, reports the grid and gives every part the grid', () => {
   const boxNode = (id, translation, scale, material) => ({ id, geometry: 'box', material, translation, scale });
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'floor', color: [0.8, 0.4, 0.1] }, { id: 'white', color: [0.8, 0.8, 0.8] }],
     nodes: [

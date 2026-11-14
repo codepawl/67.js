@@ -1,9 +1,9 @@
-// three.js-shaped names that build 67js parts, materials, cameras and lights.
-// It imports neither three.js nor 67js: pass the 67js exports you have to createThreeCompat(core).
-//   import * as core from '@codepawlhq/67js';
-//   import { loadGltf } from '@codepawlhq/67js/addons/gltf';
+// three.js-shaped names that build Crucible parts, materials, cameras and lights.
+// It imports neither three.js nor Crucible: pass the Crucible exports you have to createThreeCompat(core).
+//   import * as core from '@codepawlhq/crucible';
+//   import { loadGltf } from '@codepawlhq/crucible/addons/gltf';
 //   const THREE = createThreeCompat({ ...core, loadGltf });
-// Names it does not support throw an error that names the 67js call to use instead.
+// Names it does not support throw an error that names the Crucible call to use instead.
 
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const WHITE_HEX = 0xffffff;
@@ -15,49 +15,49 @@ const PLANE_THICKNESS = 0.002;
 const GUIDE = 'docs/learn/if-you-know-three-js.md';
 
 const UNSUPPORTED = {
-  MeshBasicMaterial: 'Use MeshStandardMaterial with emissive and emissiveIntensity (67js: material { color, emission }).',
-  MeshLambertMaterial: 'Use MeshStandardMaterial (67js: material { color, metallic: 0, roughness }).',
-  MeshPhongMaterial: 'Use MeshStandardMaterial (67js: material { color, metallic, roughness }).',
-  MeshNormalMaterial: 'Use MeshStandardMaterial (67js: material { color, metallic, roughness }).',
-  ShaderMaterial: '67js has no custom shaders. Use the material fields of materials-and-color (67js: part.material).',
-  RawShaderMaterial: '67js has no custom shaders. Use the material fields of materials-and-color (67js: part.material).',
-  ConeGeometry: 'Model a cone with createModel() from 67js/addons/model, or use CylinderGeometry with equal radii.',
-  CapsuleGeometry: 'Model it with createModel() from 67js/addons/model, or combine CylinderGeometry and SphereGeometry.',
-  CircleGeometry: 'Use CylinderGeometry with a small height (67js: cylinder()).',
-  IcosahedronGeometry: 'Use SphereGeometry (67js: sphere()).',
-  BufferGeometry: 'A part takes a geometry object { positions, normals, indices } (67js: geometry in a part). Build one with box(), sphere(), cylinder(), torus() or createModel().',
-  InstancedMesh: 'Give parts the same geometry object: the renderer batches them (67js: Renderer67 with batching: true).',
+  MeshBasicMaterial: 'Use MeshStandardMaterial with emissive and emissiveIntensity (Crucible: material { color, emission }).',
+  MeshLambertMaterial: 'Use MeshStandardMaterial (Crucible: material { color, metallic: 0, roughness }).',
+  MeshPhongMaterial: 'Use MeshStandardMaterial (Crucible: material { color, metallic, roughness }).',
+  MeshNormalMaterial: 'Use MeshStandardMaterial (Crucible: material { color, metallic, roughness }).',
+  ShaderMaterial: 'Crucible has no custom shaders. Use the material fields of materials-and-color (Crucible: part.material).',
+  RawShaderMaterial: 'Crucible has no custom shaders. Use the material fields of materials-and-color (Crucible: part.material).',
+  ConeGeometry: 'Model a cone with createModel() from crucible/addons/model, or use CylinderGeometry with equal radii.',
+  CapsuleGeometry: 'Model it with createModel() from crucible/addons/model, or combine CylinderGeometry and SphereGeometry.',
+  CircleGeometry: 'Use CylinderGeometry with a small height (Crucible: cylinder()).',
+  IcosahedronGeometry: 'Use SphereGeometry (Crucible: sphere()).',
+  BufferGeometry: 'A part takes a geometry object { positions, normals, indices } (Crucible: geometry in a part). Build one with box(), sphere(), cylinder(), torus() or createModel().',
+  InstancedMesh: 'Give parts the same geometry object: the renderer batches them (Crucible: CrucibleRenderer with batching: true).',
   SkinnedMesh: 'Load a rigged GLB with GLTFLoader, then drive it with createSkinPose() and updateSkinPose().',
-  AnimationMixer: 'Use createAnimationMixer(parts) from 67js.',
-  Points: '67js draws triangle parts only. Use small SphereGeometry parts, or the spume addon for particles.',
-  Line: '67js draws triangle parts only. Use thin CylinderGeometry parts.',
-  LineSegments: '67js draws triangle parts only. Use thin CylinderGeometry parts.',
-  Sprite: '67js draws triangle parts only. Use PlaneGeometry with a map.',
-  WebGLRenderTarget: 'Renderer67 draws to its canvas. Read it with canvas.toBlob(), or render a PNG with the scene_render_submit tool.',
+  AnimationMixer: 'Use createAnimationMixer(parts) from Crucible.',
+  Points: 'Crucible draws triangle parts only. Use small SphereGeometry parts, or the spume addon for particles.',
+  Line: 'Crucible draws triangle parts only. Use thin CylinderGeometry parts.',
+  LineSegments: 'Crucible draws triangle parts only. Use thin CylinderGeometry parts.',
+  Sprite: 'Crucible draws triangle parts only. Use PlaneGeometry with a map.',
+  WebGLRenderTarget: 'CrucibleRenderer draws to its canvas. Read it with canvas.toBlob(), or render a PNG with the scene_render_submit tool.',
   EffectComposer: 'Post effects are frame fields: frame.effects with EFFECT_PRESETS and resolveEffects().',
-  Fog: 'Set environment { fogColor, fogDensity } on Renderer67.',
-  FogExp2: 'Set environment { fogColor, fogDensity } on Renderer67.',
-  TextureLoader: 'Load the image yourself and pass new Texture(image) as the map (67js: material.map = { image, colorSpace: "srgb" }).',
-  CubeTextureLoader: 'Use createEnvironmentMap() from 67js for image based light.',
-  RGBELoader: 'Use createEnvironmentMap() from 67js for image based light.',
-  DRACOLoader: 'loadGltf() from 67js/addons/gltf takes decoders in its options.',
-  FBXLoader: 'Convert the file to GLB and use loadGltf() from 67js/addons/gltf.',
-  OBJLoader: 'Convert the file to GLB and use loadGltf() from 67js/addons/gltf.',
-  TransformControls: '67js has no mouse editor. Change part.matrix and call updateParts().',
-  DragControls: '67js has no mouse editor. Change part.matrix and call updateParts().',
+  Fog: 'Set environment { fogColor, fogDensity } on CrucibleRenderer.',
+  FogExp2: 'Set environment { fogColor, fogDensity } on CrucibleRenderer.',
+  TextureLoader: 'Load the image yourself and pass new Texture(image) as the map (Crucible: material.map = { image, colorSpace: "srgb" }).',
+  CubeTextureLoader: 'Use createEnvironmentMap() from Crucible for image based light.',
+  RGBELoader: 'Use createEnvironmentMap() from Crucible for image based light.',
+  DRACOLoader: 'loadGltf() from crucible/addons/gltf takes decoders in its options.',
+  FBXLoader: 'Convert the file to GLB and use loadGltf() from crucible/addons/gltf.',
+  OBJLoader: 'Convert the file to GLB and use loadGltf() from crucible/addons/gltf.',
+  TransformControls: 'Crucible has no mouse editor. Change part.matrix and call updateParts().',
+  DragControls: 'Crucible has no mouse editor. Change part.matrix and call updateParts().',
   TrackballControls: 'Use OrbitControls from this addon, or move frame.eye yourself.',
   FlyControls: 'Use OrbitControls from this addon, or move frame.eye yourself.',
 };
 
 const UNSUPPORTED_OPTIONS = {
   MeshStandardMaterial: {
-    aoMap: 'Use the occlusionMap field of a 67js material (materials-and-color).',
-    envMap: 'Use createEnvironmentMap() and the Renderer67 environment.map option.',
+    aoMap: 'Use the occlusionMap field of a Crucible material (materials-and-color).',
+    envMap: 'Use createEnvironmentMap() and the CrucibleRenderer environment.map option.',
     roughnessMap: 'Use the roughness field, or a glTF with a metallicRoughness map.',
     metalnessMap: 'Use the metalness field, or a glTF with a metallicRoughness map.',
     bumpMap: 'Use normalMap.',
     displacementMap: 'Model the relief in the geometry.',
-    wireframe: '67js has no wireframe view.',
+    wireframe: 'Crucible has no wireframe view.',
     flatShading: 'Use a box() or a geometry with split vertices.',
     vertexColors: 'Give each part its own color.',
   },
@@ -71,7 +71,7 @@ class CompatError extends Error {
 }
 
 function unsupported(name, replacement) {
-  return new CompatError(`THREE.${name} is not supported by 67js three-compat. ${replacement}`);
+  return new CompatError(`THREE.${name} is not supported by Crucible three-compat. ${replacement}`);
 }
 
 function srgbToLinear(channel) {
@@ -97,7 +97,7 @@ class Color {
       const digits = first.replace('#', '');
       const expanded = digits.length === 3 ? [...digits].map(digit => digit + digit).join('') : digits;
       if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
-        throw new CompatError(`Color "${first}" is not a hex string. Pass 0xRRGGBB, "#rrggbb", or linear red, green and blue numbers (67js: material.color = [r, g, b]).`);
+        throw new CompatError(`Color "${first}" is not a hex string. Pass 0xRRGGBB, "#rrggbb", or linear red, green and blue numbers (Crucible: material.color = [r, g, b]).`);
       }
       [this.r, this.g, this.b] = hexToLinear(parseInt(expanded, 16));
     } else if (first instanceof Color) {
@@ -289,9 +289,9 @@ class Scene extends Object3D {
 const geometrySymbol = Symbol('geometry');
 
 export function createThreeCompat(core) {
-  for (const name of ['Renderer67', 'box', 'sphere', 'cylinder', 'torus']) {
+  for (const name of ['CrucibleRenderer', 'box', 'sphere', 'cylinder', 'torus']) {
     if (typeof core?.[name] !== 'function') {
-      throw new TypeError(`createThreeCompat needs the 67js export ${name}. Pass { ...core } from import * as core from '@codepawlhq/67js'.`);
+      throw new TypeError(`createThreeCompat needs the Crucible export ${name}. Pass { ...core } from import * as core from '@codepawlhq/crucible'.`);
     }
   }
   const shapeCache = new Map();
@@ -325,7 +325,7 @@ export function createThreeCompat(core) {
   class CylinderGeometry {
     constructor(radiusTop = 1, radiusBottom = 1, height = 1, radialSegments = 32) {
       if (radiusTop !== radiusBottom) {
-        throw unsupported('CylinderGeometry with different radii', 'Use equal radii, or model a cone with createModel() from 67js/addons/model.');
+        throw unsupported('CylinderGeometry with different radii', 'Use equal radii, or model a cone with createModel() from crucible/addons/model.');
       }
       this[geometrySymbol] = {
         build: () => shared(`cylinder:${radialSegments}`, () => core.cylinder(radialSegments)),
@@ -355,7 +355,7 @@ export function createThreeCompat(core) {
 
   function textureDescriptor(texture, colorSpace) {
     if (!(texture instanceof Texture)) {
-      throw new CompatError('A map must be a THREE.Texture or THREE.CanvasTexture made by this addon (67js: material.map = { image, colorSpace }).');
+      throw new CompatError('A map must be a THREE.Texture or THREE.CanvasTexture made by this addon (Crucible: material.map = { image, colorSpace }).');
     }
     return { image: texture.image, colorSpace };
   }
@@ -381,7 +381,7 @@ export function createThreeCompat(core) {
     }
 
     toMaterial() {
-      if (this.side === BACK_SIDE) throw unsupported('BackSide', 'Use DoubleSide (67js: material.doubleSided = true).');
+      if (this.side === BACK_SIDE) throw unsupported('BackSide', 'Use DoubleSide (Crucible: material.doubleSided = true).');
       const isEmissive = this.emissive.r + this.emissive.g + this.emissive.b > 0;
       const material = {
         color: this.color.toArray(),
@@ -431,10 +431,10 @@ export function createThreeCompat(core) {
     constructor(geometry, material = new MeshStandardMaterial()) {
       super();
       if (!geometry?.[geometrySymbol]) {
-        throw new CompatError('Mesh needs BoxGeometry, SphereGeometry, CylinderGeometry, TorusGeometry or PlaneGeometry (67js: box(), sphere(), cylinder(), torus()).');
+        throw new CompatError('Mesh needs BoxGeometry, SphereGeometry, CylinderGeometry, TorusGeometry or PlaneGeometry (Crucible: box(), sphere(), cylinder(), torus()).');
       }
       if (!(material instanceof MeshStandardMaterial)) {
-        throw new CompatError('Mesh needs MeshStandardMaterial or MeshPhysicalMaterial (67js: a material { color, metallic, roughness }).');
+        throw new CompatError('Mesh needs MeshStandardMaterial or MeshPhysicalMaterial (Crucible: a material { color, metallic, roughness }).');
       }
       this.geometry = geometry;
       this.material = material;
@@ -555,7 +555,7 @@ export function createThreeCompat(core) {
 
   function cameraFrame(camera) {
     if (!(camera instanceof PerspectiveCamera || camera instanceof OrthographicCamera)) {
-      throw new CompatError('render() needs a PerspectiveCamera or OrthographicCamera from this addon (67js: renderer.render({ eye, target, fov })).');
+      throw new CompatError('render() needs a PerspectiveCamera or OrthographicCamera from this addon (Crucible: renderer.render({ eye, target, fov })).');
     }
     const matrix = camera.worldMatrix();
     const eye = transformPoint(matrix, 0, 0, 0);
@@ -570,7 +570,7 @@ export function createThreeCompat(core) {
     return frame;
   }
 
-  /** Walk a scene and return what Renderer67 draws: the parts, the environment of its lights and a frame from the camera. */
+  /** Walk a scene and return what CrucibleRenderer draws: the parts, the environment of its lights and a frame from the camera. */
   function collectScene(scene, camera) {
     if (!(scene instanceof Scene)) throw new CompatError('render() needs a THREE.Scene from this addon.');
     const parts = [];
@@ -599,7 +599,7 @@ export function createThreeCompat(core) {
 
   class WebGLRenderer {
     constructor(parameters = {}) {
-      if (!parameters.canvas) throw new CompatError('WebGLRenderer needs { canvas } (67js: new Renderer67(canvas, parts)).');
+      if (!parameters.canvas) throw new CompatError('WebGLRenderer needs { canvas } (Crucible: new CrucibleRenderer(canvas, parts)).');
       this.domElement = parameters.canvas;
       this.antialias = parameters.antialias ?? true;
       this.pixelRatio = 1.5;
@@ -634,7 +634,7 @@ export function createThreeCompat(core) {
       const key = this.structureKey(parts);
       if (!this.renderer67 || key !== this.structure) {
         this.renderer67?.dispose();
-        this.renderer67 = new core.Renderer67(this.domElement, parts, {
+        this.renderer67 = new core.CrucibleRenderer(this.domElement, parts, {
           ground: false, samples: this.antialias ? 4 : 1, pixelRatio: this.pixelRatio, environment,
         });
         this.structure = key;
@@ -751,7 +751,7 @@ export function createThreeCompat(core) {
   class GLTFLoader {
     async loadAsync(url, onProgress) {
       if (typeof core.loadGltf !== 'function') {
-        throw new CompatError('GLTFLoader needs loadGltf. Pass createThreeCompat({ ...core, loadGltf }) with loadGltf from 67js/addons/gltf.');
+        throw new CompatError('GLTFLoader needs loadGltf. Pass createThreeCompat({ ...core, loadGltf }) with loadGltf from crucible/addons/gltf.');
       }
       const asset = await core.loadGltf(url);
       onProgress?.({ loaded: 1, total: 1 });
@@ -780,7 +780,7 @@ export function createThreeCompat(core) {
     get(target, name) {
       if (typeof name === 'string' && !(name in target)) {
         if (UNSUPPORTED[name]) throw unsupported(name, UNSUPPORTED[name]);
-        if (/^[A-Z]/.test(name)) throw unsupported(name, 'It is not part of the common subset. Build the 67js part, material, camera or light directly.');
+        if (/^[A-Z]/.test(name)) throw unsupported(name, 'It is not part of the common subset. Build the Crucible part, material, camera or light directly.');
       }
       return target[name];
     },

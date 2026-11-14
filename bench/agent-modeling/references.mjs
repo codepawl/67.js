@@ -19,7 +19,7 @@ import { EASING_PLAIN_SOLUTION, EASING_SOLUTION } from './easing.mjs';
 const material = [{ id: 'paint', color: [0.6, 0.55, 0.5] }];
 
 function scene(geometries, nodes) {
-  return { format: '67js.scene', schemaVersion: 1, geometries, materials: material, nodes: nodes.map(node => ({ material: 'paint', ...node })) };
+  return { format: 'crucible.scene', schemaVersion: 1, geometries, materials: material, nodes: nodes.map(node => ({ material: 'paint', ...node })) };
 }
 
 function axisRotation(axis, angle) {
@@ -220,7 +220,7 @@ export const REFERENCES = {
     workshopNodes(),
   ),
   'robot-shot': {
-    format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
+    format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
     animation: { clip: 2, time: 0 },
     camera: { target: [0, 2, 0], eye: [7, 2.5, 0.5], up: [0, 1, 0], fov: 45, near: 0.1, far: 100 },
     motion: {
@@ -232,14 +232,14 @@ export const REFERENCES = {
     },
   },
   'robot-leg-hole': {
-    format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
+    format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
     meshEdits: [{
       id: 'mesh-10',
       edits: [{ op: 'boolean', operation: 'difference', cutter: { type: 'cylinder', segments: 24 }, scale: [0.0003, 0.01, 0.0003] }],
     }],
   },
   'robot-reach': {
-    format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
+    format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
     animation: { clip: 2, time: 0 },
     motion: {
       duration: 2, tracks: [],
@@ -250,12 +250,12 @@ export const REFERENCES = {
     },
   },
   'robot-ragdoll': {
-    format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
+    format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
     root: { translation: [0, 2, 0] },
     physics: { duration: 4, ragdoll: {} },
   },
   'robot-walk-wave': {
-    format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
+    format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
     motion: {
       duration: 2, loop: true,
       layers: [
@@ -394,7 +394,7 @@ export const REFERENCES = {
   'overshoot-lift': EASING_SOLUTION,
   'overshoot-lift-plain': EASING_PLAIN_SOLUTION,
   'terrain-hole-walk': {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'hills', type: 'terrain', size: 40, resolution: 64, seed: 3, amplitude: 1, holes: [{ center: [0, 0], radius: 3 }] },
       { id: 'body', type: 'box', bevel: 0 },
@@ -413,7 +413,7 @@ export const REFERENCES = {
     },
   },
   'terrain-path-walk': {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'hills', type: 'terrain', size: 40, resolution: 64, seed: 3, amplitude: 1, holes: [{ center: [0, 0], radius: 3 }, { center: [9, 9], radius: 2.5 }] },
       { id: 'body', type: 'box', bevel: 0 },

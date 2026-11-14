@@ -1,3 +1,0 @@
-- entry:fog-shader: a noise-free profile form for the light taps, and the key gain and shadow strength constants in the lit local volume step, so the sunward side of a smoke is clearly brighter than its shade and the lit step costs less than half as much.
-- scene:agent-scene+lazy: the same key gain and shadow strength in the CPU path tracer's lit volume step, counted in the lazy bundle.
-- entry:path-tracer: the key gain and shadow strength in the CPU path tracer's lit volume step, a few dozen bytes to match the rasterizer.

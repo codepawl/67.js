@@ -21,11 +21,11 @@ let moduleUrl = publishedUrl;
 let server;
 if (!publishedUrl) {
   assert.ok(tarball, 'Pass the packed tarball path.');
-  const unpacked = await mkdtemp(join(tmpdir(), '67js-cdn-'));
+  const unpacked = await mkdtemp(join(tmpdir(), 'crucible-cdn-'));
   const extracted = spawnSync('tar', ['-xzf', resolve(tarball), '-C', unpacked], { encoding: 'utf8' });
   assert.equal(extracted.status, 0, extracted.stderr);
   const packageFolder = join(unpacked, 'package');
-  const mountPath = `/npm/@codepawlhq/67js@${version}/`;
+  const mountPath = `/npm/@codepawlhq/crucible@${version}/`;
   const standalone = await readFile(join(packageFolder, 'build/67.standalone.js'));
   console.log(`standalone bytes=${standalone.length} gzip=${gzipSync(standalone, { level: 9 }).length}`);
   server = createServer(async (request, response) => {
@@ -42,9 +42,9 @@ if (!publishedUrl) {
 
 const page = `<!doctype html><canvas id="view" width="320" height="240"></canvas>
 <script type="module">
-  import { Renderer67, box } from ${JSON.stringify(moduleUrl)};
+  import { CrucibleRenderer, box } from ${JSON.stringify(moduleUrl)};
   const parts = [{ name: 'Cube', geometry: box(), matrix: new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]), material: { color: [0.8, 0.3, 0.2], metallic: 0, roughness: 0.4, emission: 0 } }];
-  const renderer = new Renderer67(document.querySelector('#view'), parts, { samples: 4 });
+  const renderer = new CrucibleRenderer(document.querySelector('#view'), parts, { samples: 4 });
   renderer.render({ eye: [2.5, 2, 3.5], target: [0, 0, 0] });
   const context = renderer.context;
   const pixels = new Uint8Array(320 * 240 * 4);

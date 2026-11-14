@@ -11,7 +11,7 @@ const SHEET_TOP = 0.5;
 // A sheet made of the top face of a unit box, so it draws half a metre above its node.
 function seaRecipe(ocean) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'cube', type: 'box' },
       {

@@ -3,11 +3,11 @@ import './brand.js';
 import './marketplace.css';
 import { npmManifestPath } from './marketplace-npm.js';
 
-const NPM_SEARCH_URL = 'https://registry.npmjs.org/-/v1/search?text=keywords:67js-addon&size=50';
+const NPM_SEARCH_URL = 'https://registry.npmjs.org/-/v1/search?text=keywords:crucible-addon&size=50';
 const NPM_MANIFEST_URL = 'https://registry.npmjs.org/';
 const MAXIMUM_RANGE_LOOKUPS = 20;
 const CONCURRENT_RANGE_LOOKUPS = 5;
-const ADDONS_DOC_URL = 'https://github.com/codepawl/67.js/blob/main/docs/addons.md';
+const ADDONS_DOC_URL = 'https://github.com/codepawl/crucible/blob/main/docs/addons.md';
 const KIND_LABELS = {
   assets: ['model', 'models'],
   images: ['image', 'images'],
@@ -101,7 +101,7 @@ function packCard(pack) {
   const title = element('h3', '', pack.name);
   title.append(element('span', 'market-version', pack.version));
   const facts = element('ul', 'market-facts');
-  const factTexts = [...Object.entries(pack.items).map(([kind, count]) => countLabel(kind, count)), pack.license, `67js ${pack.engines}`, formatBytes(pack.bytes), `by ${pack.author}`];
+  const factTexts = [...Object.entries(pack.items).map(([kind, count]) => countLabel(kind, count)), pack.license, `Crucible ${pack.engines}`, formatBytes(pack.bytes), `by ${pack.author}`];
   for (const text of factTexts) facts.append(element('li', '', text));
   const download = link('Download', pack.zip, 'market-button');
   download.setAttribute('download', '');
@@ -122,7 +122,7 @@ async function loadPacks(container) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const { packs } = await response.json();
     if (!Array.isArray(packs) || packs.length === 0) {
-      showState(container, 'empty', 'No packs are published yet.', link('How to make one', 'https://github.com/codepawl/67.js/blob/main/docs/packs.md'));
+      showState(container, 'empty', 'No packs are published yet.', link('How to make one', 'https://github.com/codepawl/crucible/blob/main/docs/packs.md'));
       return;
     }
     container.replaceChildren(...packs.map(packCard));
@@ -144,7 +144,7 @@ function addonCard(addon) {
   body.append(title);
   if (addon.description) body.append(element('p', 'market-description', addon.description));
   const facts = element('ul', 'market-facts');
-  facts.append(element('li', '', addon.range ? `67js ${addon.range}` : 'Range not stated'));
+  facts.append(element('li', '', addon.range ? `Crucible ${addon.range}` : 'Range not stated'));
   body.append(facts);
   const npm = link('npm', npmUrl(addon.name), 'market-button market-button-quiet');
   const logo = element('span', 'package-logo package-logo-npm');
@@ -162,13 +162,13 @@ async function fetchLatestRange(name) {
     const response = await fetch(`${NPM_MANIFEST_URL}${path}`);
     if (!response.ok) return null;
     const manifest = await response.json();
-    return typeof manifest['67js']?.range === 'string' ? manifest['67js'].range : null;
+    return typeof manifest['crucible']?.range === 'string' ? manifest['crucible'].range : null;
   } catch {
     return null;
   }
 }
 
-// The search result carries no `67js` field, so the latest manifest of each listed package is read, a few at a time.
+// The search result carries no `crucible` field, so the latest manifest of each listed package is read, a few at a time.
 async function fillRanges(addons, container) {
   const queue = addons.slice(0, MAXIMUM_RANGE_LOOKUPS);
   const workers = Array.from({ length: Math.min(CONCURRENT_RANGE_LOOKUPS, queue.length) }, async () => {
@@ -196,7 +196,7 @@ async function loadAddons(container) {
     container.replaceChildren(...addons.map(addonCard));
     await fillRanges(addons, container);
   } catch {
-    showState(container, 'error', 'npm did not answer, so the addon list is missing. Search npm for 67js-addon instead.', link('Open the npm search', 'https://www.npmjs.com/search?q=keywords%3A67js-addon'));
+    showState(container, 'error', 'npm did not answer, so the addon list is missing. Search npm for crucible-addon instead.', link('Open the npm search', 'https://www.npmjs.com/search?q=keywords%3Acrucible-addon'));
   }
 }
 

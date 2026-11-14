@@ -1,14 +1,14 @@
 # Import and export models
 
-67js reads and writes GLB, the binary form of glTF 2.0. Blender, Maya, Sketchfab and most model sites export it. The importer is the addon `67js/addons/gltf`, so a scene without models does not download it.
+Crucible reads and writes GLB, the binary form of glTF 2.0. Blender, Maya, Sketchfab and most model sites export it. The importer is the addon `crucible/addons/gltf`, so a scene without models does not download it.
 
 ## Load a GLB file
 
-`loadGltf(url)` returns an asset. `asset.parts` is a list of ordinary parts, ready for `Renderer67`. The example loads a robot from this site and frames it from its size.
+`loadGltf(url)` returns an asset. `asset.parts` is a list of ordinary parts, ready for `CrucibleRenderer`. The example loads a robot from this site and frames it from its size.
 
 ```js live poster=gltf-robot
-import { Renderer67 } from '67js';
-import { loadGltf } from '67js/addons/gltf';
+import { CrucibleRenderer } from 'crucible';
+import { loadGltf } from 'crucible/addons/gltf';
 
 // The smallest box that holds every vertex of every part, in world units.
 function boundsOf(parts) {
@@ -31,7 +31,7 @@ function boundsOf(parts) {
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
 const asset = await loadGltf('/wall-e.glb');
-const renderer = new Renderer67(canvas, asset.parts, { hdr: true });
+const renderer = new CrucibleRenderer(canvas, asset.parts, { hdr: true });
 const { minimum, maximum } = boundsOf(asset.parts);
 const center = minimum.map((value, axis) => (value + maximum[axis]) / 2);
 const size = Math.max(...maximum.map((value, axis) => value - minimum[axis]));
@@ -89,7 +89,7 @@ The second argument is the index of the clip. Skinned characters work the same w
 The canvas holds the last frame until the browser paints. Draw a frame, then read the canvas in the same task. `exportGlb(parts)` returns the parts as a GLB `ArrayBuffer`. Click the buttons in the example to save both files.
 
 ```js live poster=export-buttons
-import { Renderer67, box, sphere, exportGlb } from '67js';
+import { CrucibleRenderer, box, sphere, exportGlb } from 'crucible';
 
 const placeAt = (x, y, z, size) => new Float32Array([size, 0, 0, 0, 0, size, 0, 0, 0, 0, size, 0, x, y, z, 1]);
 const parts = [
@@ -97,7 +97,7 @@ const parts = [
   { name: 'Ball', geometry: sphere(), matrix: placeAt(0.9, 0.45, 0.2, 0.45), material: { color: [1, 0.72, 0.3], metallic: 1, roughness: 0.25 } },
 ];
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const draw = () => renderer.render({ eye: [0, 2, 4.5], target: [0, 0.4, 0] });
 
 function save(blob, fileName) {

@@ -347,7 +347,7 @@ export function downloadGlb(parts, options) {
   const url = URL.createObjectURL(new Blob([exportGlb(parts, options)], { type: 'model/gltf-binary' }));
   const link = document.createElement('a');
   link.href = url;
-  link.download = '67js-wall-e.glb';
+  link.download = 'crucible-wall-e.glb';
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

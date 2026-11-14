@@ -152,7 +152,7 @@ try {
       assert.equal(await page.evaluate(() => window.__studio.state.assembly),0.65);
       const download = page.waitForEvent('download');
       await page.locator('#save-model').click();
-      assert.equal((await download).suggestedFilename(),'67js-wall-e.png');
+      assert.equal((await download).suggestedFilename(),'crucible-wall-e.png');
       await page.locator('#assembly-tour').click();
       assert.equal(await page.evaluate(() => window.__studio.state.touring),false);
       const graphics = await page.evaluate(() => window.__studio.renderer.context.getError());
@@ -165,7 +165,7 @@ try {
       await page.evaluate(() => window.__scene.renderAt(3));
       const download = page.waitForEvent('download');
       await page.locator('#motion-save').click();
-      assert.equal((await download).suggestedFilename(),'67js-clockwork.png');
+      assert.equal((await download).suggestedFilename(),'crucible-clockwork.png');
       assert.equal(await page.evaluate(() => window.__scene.renderer.context.getError()),0);
       report.interactions.push('Motion looks, portrait framing, deterministic seek and PNG');
     }

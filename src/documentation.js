@@ -49,7 +49,7 @@ function inlineText(value) {
   return escapeHtml(value)
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, href) => {
-      const external = /^https?:/.test(href) && new URL(href, 'https://67js.codepawl.com').origin !== 'https://67js.codepawl.com';
+      const external = /^https?:/.test(href) && new URL(href, 'https://crucible.codepawl.com').origin !== 'https://crucible.codepawl.com';
       return `<a href="${href}"${external ? ' rel="noopener"' : ''}>${label}</a>`;
     });
 }
@@ -393,7 +393,7 @@ function openTopic(focus = false) {
   }
   article.append(pagination);
   document.querySelector('#doc-topic-name').textContent = currentTopic.title;
-  document.title = `${currentTopic.title} · 67js documentation`;
+  document.title = `${currentTopic.title} · Crucible documentation`;
   copyStatus.textContent = '';
   document.querySelector('.doc-copy-fallback')?.remove();
   copyPage.innerHTML = `${icon('copy')}Copy page`;

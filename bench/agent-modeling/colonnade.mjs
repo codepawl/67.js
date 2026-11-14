@@ -36,7 +36,7 @@ function colonnadeRecipe(lightPosition) {
     })),
   ];
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'plaster', color: [0.8, 0.78, 0.72] }],
     nodes: parts.map(part => ({ material: 'plaster', ...part })),

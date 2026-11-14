@@ -1,2 +1,0 @@
-- The README, home page, `llms.txt`, package keywords and plugin text name each renderer backend (Glaze on WebGL2, Cook on CPU and WebGL2, and on Vulkan with the optional `packages/render-native`, with opt-in WebGPU) (#890)
-- The README and home page show the measured tier table across six scenes on an idle card, with realtime-high marked as planned and Cook against Cycles stated per sample and at equal error (#890)

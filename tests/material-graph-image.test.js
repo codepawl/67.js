@@ -70,7 +70,7 @@ test('graphImageAssets lists the images a graph reads and the host finds them in
 test('a scene material with an image graph bakes through the frame pool the host decodes', () => {
   const pool = imagePool(2, 2, column => [column * 255, 0, 0, 255]);
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'grid', segments: 1 }],
     materials: [{ id: 'photo', tag: 'surface', pattern: { type: 'graph', resolution: 256, mapping: 'uv', graph: { color: { image: { asset: IMAGE_ASSET } } } } }],
     nodes: [{ id: 'a', geometry: 'block', material: 'photo' }],

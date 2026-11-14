@@ -42,7 +42,7 @@ export function createCallLogger(logPath, { now = () => performance.now(), clock
     try {
       appendFileSync(logPath, `${JSON.stringify(line)}\n`);
     } catch (error) {
-      console.error(`67js call log write failed: ${error.message}`);
+      console.error(`Crucible call log write failed: ${error.message}`);
     }
     if (thrown !== undefined) {
       throw thrown;

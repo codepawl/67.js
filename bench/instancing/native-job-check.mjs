@@ -25,13 +25,13 @@ function cardMemoryMiB() {
 async function run(scene, outputFolder, samples, entry) {
   const { Client } = await import('@modelcontextprotocol/client');
   const { StdioClientTransport } = await import('@modelcontextprotocol/client/stdio');
-  const workFolder = mkdtempSync(join(tmpdir(), '67js-native-job-'));
+  const workFolder = mkdtempSync(join(tmpdir(), 'crucible-native-job-'));
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [resolve(entry), '--backend', 'gpu', '--memory', '192', '--jobs', join(workFolder, 'jobs'), ...(process.env.CHROME_PATH ? ['--browser', process.env.CHROME_PATH] : [])],
     cwd: workFolder, env: { ...process.env }, stderr: 'pipe' });
   let diagnostics = '';
   transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
-  const client = new Client({ name: '67js-native-job-check', version: '1' });
+  const client = new Client({ name: 'crucible-native-job-check', version: '1' });
   await client.connect(transport);
   const call = async (name, argumentsValue) => {
     const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 60000 });
@@ -90,7 +90,7 @@ async function compare(candidatePath, referencePath) {
 
 const [command, first, second, third, fourth] = process.argv.slice(2);
 if (command === 'run' && (first === 'repeated' || first === 'distinct') && second) {
-  await run(first, second, Number(third ?? 1024), fourth ?? 'bin/67js-mcp.mjs');
+  await run(first, second, Number(third ?? 1024), fourth ?? 'bin/crucible-mcp.mjs');
 } else if (command === 'compare' && first && second) {
   await compare(first, second);
 } else {

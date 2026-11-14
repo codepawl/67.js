@@ -1,4 +1,4 @@
-// Runs the skill evals through headless `claude -p` with the 67js MCP server, one model at a time.
+// Runs the skill evals through headless `claude -p` with the Crucible MCP server, one model at a time.
 // Usage: node scripts/run-skill-evals.mjs --model haiku|sonnet|opus [--only <eval name>] [--out <folder>]
 // It needs the built server (`npm run build:lib`), Chrome and the claude CLI. Each eval file holds a prompt and checks that
 // read the tool calls and the last recipe the agent exported with scene_export_recipe. Skills are injected as system
@@ -35,13 +35,13 @@ function skillText(skill) {
 
 function runClaude(item, workFolder) {
   const mcpConfig = {
-    mcpServers: { '67js': { command: process.execPath, args: [join(repositoryRoot, 'bin', '67js-mcp.mjs'), '--backend', 'cpu', '--jobs', join(workFolder, 'jobs')] } },
+    mcpServers: { 'crucible': { command: process.execPath, args: [join(repositoryRoot, 'bin', 'crucible-mcp.mjs'), '--backend', 'cpu', '--jobs', join(workFolder, 'jobs')] } },
   };
   const configPath = join(workFolder, 'mcp.json');
   writeFileSync(configPath, JSON.stringify(mcpConfig));
-  const system = `You have the 67js MCP tools. Follow these skills. Read bundled reference files with the Read tool.\n${item.skills.map(skillText).join('\n')}`;
+  const system = `You have the Crucible MCP tools. Follow these skills. Read bundled reference files with the Read tool.\n${item.skills.map(skillText).join('\n')}`;
   const args = ['-p', '--model', model, '--output-format', 'stream-json', '--verbose', '--mcp-config', configPath, '--strict-mcp-config',
-    '--disable-slash-commands', '--allowedTools', 'mcp__67js__*', 'Read', '--append-system-prompt', system, '--permission-mode', 'default'];
+    '--disable-slash-commands', '--allowedTools', 'mcp__crucible__*', 'Read', '--append-system-prompt', system, '--permission-mode', 'default'];
   return new Promise(resolveRun => {
     const child = spawn('claude', args, { cwd: workFolder, stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '';
@@ -61,7 +61,7 @@ function readTranscript(output) {
     let event;
     try { event = JSON.parse(line); } catch { continue; }
     for (const block of event.message?.content ?? []) {
-      if (block.type === 'tool_use') calls.push({ id: block.id, tool: block.name.replace(/^mcp__67js__/, ''), input: block.input });
+      if (block.type === 'tool_use') calls.push({ id: block.id, tool: block.name.replace(/^mcp__crucible__/, ''), input: block.input });
       if (block.type === 'tool_result') {
         const text = Array.isArray(block.content) ? block.content.filter(part => part.type === 'text').map(part => part.text).join('\n') : String(block.content);
         results.set(block.tool_use_id, { text, isError: block.is_error === true });

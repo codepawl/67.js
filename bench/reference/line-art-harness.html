@@ -9,7 +9,7 @@
 // Draws bench/reference/line-art-scene.json once, with or without lines, at the viewport size.
 import { createAgentScene, loadAllAgentSceneModules } from '/src/agent-scene.js';
 import { resolveAgentShadow } from '/src/agent-look.js';
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { installRenderPasses } from '/src/render-passes.js';
 import { installLineArt, resolveLineArt } from '/src/line-art.js';
 
@@ -17,7 +17,7 @@ await loadAllAgentSceneModules();
 const recipe = await (await fetch('/bench/reference/line-art-scene.json')).json();
 const session = createAgentScene(recipe);
 const canvas = document.querySelector('canvas');
-const baseRenderer = new Renderer67(canvas, session.parts, { ground: false, hdr: true, depth: true, samples: 1, pixelRatio: 1, memoryBudgetMiB: 512 });
+const baseRenderer = new CrucibleRenderer(canvas, session.parts, { ground: false, hdr: true, depth: true, samples: 1, pixelRatio: 1, memoryBudgetMiB: 512 });
 const renderer = installLineArt(installRenderPasses(baseRenderer));
 const context = renderer.context;
 

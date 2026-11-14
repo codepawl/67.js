@@ -12,7 +12,7 @@ import { AGENT_ASSET_LIMITS, agentAssetDecodeOptions, withCatalogLimitAdvice } f
 import { GLTF_CAPABILITIES, parseGltf } from '../src/gltf.js';
 
 async function fixture(context) {
-  const directory = await mkdtemp(join(tmpdir(), '67js-catalog-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-catalog-'));
   context.after(async () => {
     assert.equal(dirname(directory), tmpdir());
     await rm(directory, { recursive: true, force: true });
@@ -46,7 +46,7 @@ test('catalog IDs bind self-contained GLB content and metadata stays detached wi
   assert.equal(listing.assets.length, 1);
   assert.match(listing.assets[0].assetId, /^[a-f0-9]{64}$/);
   assert.equal(listing.assets[0].meshes, 1);
-  assert.doesNotMatch(JSON.stringify(listing), /67js-catalog-/);
+  assert.doesNotMatch(JSON.stringify(listing), /crucible-catalog-/);
   const id = listing.assets[0].assetId;
   listing.assets[0].name = 'changed';
   assert.equal(catalog.list().assets[0].name, 'cube.glb');
@@ -154,7 +154,7 @@ test('an .hdr that is not Radiance data and a .cube that is not a 3D look are re
 const KENNEY_BOAT_FOLDER = new URL('./fixtures/kenney-boat/', import.meta.url);
 
 async function boatFixture(context) {
-  const directory = await mkdtemp(join(tmpdir(), '67js-catalog-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-catalog-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   await cp(KENNEY_BOAT_FOLDER, directory, { recursive: true });
   return directory;
@@ -204,7 +204,7 @@ test('a GLB texture that is missing, remote, outside the folder or not an image 
 
 test('a texture folder that links out of the catalog folder is refused', async context => {
   const directory = await boatFixture(context);
-  const outside = await mkdtemp(join(tmpdir(), '67js-outside-'));
+  const outside = await mkdtemp(join(tmpdir(), 'crucible-outside-'));
   context.after(() => rm(outside, { recursive: true, force: true }));
   await cp(join(directory, 'Textures', 'colormap.png'), join(outside, 'colormap.png'));
   await rm(join(directory, 'Textures'), { recursive: true });

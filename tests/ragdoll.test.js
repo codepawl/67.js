@@ -115,7 +115,7 @@ const robotBytes = readFileSync(new URL('./fixtures/RobotExpressive.glb', import
 
 async function robotScene(physics, root = { translation: [0, 2, 0] }) {
   const asset = await parseGltf(robotBytes.buffer.slice(robotBytes.byteOffset, robotBytes.byteOffset + robotBytes.byteLength), { maxVertices: 500000 });
-  return createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID, root, physics });
+  return createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID, root, physics });
 }
 
 test('an imported robot ragdolls onto the floor and seeks to the same pose', async () => {

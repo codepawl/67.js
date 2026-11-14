@@ -13,7 +13,7 @@ import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light
 
 function baseRecipe(extra = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box' }],
     materials: [{ id: 'blue', color: [0.1, 0.3, 0.8] }],
     nodes: [{ id: 'mesh', geometry: 'cube', material: 'blue' }],

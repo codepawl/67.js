@@ -40,7 +40,7 @@ def load_compare_module():
 COMPARE = load_compare_module()
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
@@ -51,7 +51,7 @@ def quantise_to_8_bit(display):
 
 
 def display_of_linear(linear):
-    return quantise_to_8_bit(tone_map_like_67js(linear))
+    return quantise_to_8_bit(tone_map_like_crucible(linear))
 
 
 def load_png(path, width, height):

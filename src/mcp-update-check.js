@@ -1,14 +1,14 @@
-// Tells the MCP server whether a newer @codepawlhq/67js exists on npm. The one request goes to a fixed URL, runs in the
+// Tells the MCP server whether a newer @codepawlhq/crucible exists on npm. The one request goes to a fixed URL, runs in the
 // background, is cached for a day and never throws: offline, a slow registry or a bad answer leave the server as it was.
 import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const UPDATE_CHECK_URL = 'https://registry.npmjs.org/@codepawlhq/67js/latest';
+export const UPDATE_CHECK_URL = 'https://registry.npmjs.org/@codepawlhq/crucible/latest';
 export const UPDATE_CHECK_TIMEOUT_MS = 2000;
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const RELEASE_NOTES_BASE = 'https://github.com/codepawl/67.js/releases/tag/v';
+const RELEASE_NOTES_BASE = 'https://github.com/codepawl/crucible/releases/tag/v';
 const STABLE_VERSION = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
 
 // Any one of these turns the check off. CI counts as set when it holds any text other than 0 or false.
@@ -40,7 +40,7 @@ export function isNewerVersion(latest, current) {
 export function updateCachePath(env = process.env, platform = process.platform) {
   const base = env.XDG_CACHE_HOME
     || (platform === 'win32' && env.LOCALAPPDATA ? env.LOCALAPPDATA : join(homedir(), '.cache'));
-  return join(base, '67js', 'update-check.json');
+  return join(base, 'crucible', 'update-check.json');
 }
 
 export function buildUpdateAvailable(current, latest) {
@@ -49,16 +49,16 @@ export function buildUpdateAvailable(current, latest) {
     latest,
     releaseNotes: `${RELEASE_NOTES_BASE}${latest}`,
     update: {
-      plugin: 'Run /plugin marketplace update 67js, then /plugin update 67js@67js, then restart the client.',
-      npx: 'Run npx -y -p @codepawlhq/67js@latest 67js-mcp --version once, then restart the client.',
-      project: 'Run npm install @codepawlhq/67js@latest (or 67js@npm:@codepawlhq/67js@latest) in the project, then restart the client.',
+      plugin: 'Run /plugin marketplace update Crucible, then /plugin update crucible@crucible, then restart the client.',
+      npx: 'Run npx -y -p @codepawlhq/crucible@latest crucible-mcp --version once, then restart the client.',
+      project: 'Run npm install @codepawlhq/crucible@latest (or crucible@npm:@codepawlhq/crucible@latest) in the project, then restart the client.',
     },
-    ask: 'Tell the user a newer 67js exists and ask whether to update. Run an update command only after they say yes.',
+    ask: 'Tell the user a newer Crucible exists and ask whether to update. Run an update command only after they say yes.',
   };
 }
 
 export function updateNoticeText(updateAvailable) {
-  return ` A newer 67js is out (running ${updateAvailable.current}, latest ${updateAvailable.latest}; notes ${updateAvailable.releaseNotes}). Tell the user and ask whether to update; do not update on your own. Commands per install route are in the updateAvailable field of the first scene_capabilities result.`;
+  return ` A newer Crucible is out (running ${updateAvailable.current}, latest ${updateAvailable.latest}; notes ${updateAvailable.releaseNotes}). Tell the user and ask whether to update; do not update on your own. Commands per install route are in the updateAvailable field of the first scene_capabilities result.`;
 }
 
 function readCache(cachePath) {
@@ -129,7 +129,7 @@ async function refreshCache({ fetchImpl, now, cachePath, timeoutMs, previousLate
   return found;
 }
 
-// `67js-mcp --check-update`: one explicit request, ignores the cache and the off switches, prints and returns.
+// `crucible-mcp --check-update`: one explicit request, ignores the cache and the off switches, prints and returns.
 export async function describeUpdateCheck({ currentVersion, fetchImpl = globalThis.fetch, timeoutMs = UPDATE_CHECK_TIMEOUT_MS }) {
   const found = await fetchLatestVersion(fetchImpl, timeoutMs);
   const lines = [`current ${currentVersion}`];

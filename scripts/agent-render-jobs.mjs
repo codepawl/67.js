@@ -115,7 +115,7 @@ function settingsFrom(input, clips, recipe) {
   const fps = boundedNumber(input.fps ?? 24, 1, MAXIMUM_JOB_FPS, 'fps', true);
   const timelineStart = timelineStartFrom(input, recipe);
   // A physics-only film runs as long as its bake, counted from the motion start.
-  const bakeSeconds = recipe?.format === '67js.scene' && !recipe.motion ? bakedPhysicsDuration(recipe) : undefined;
+  const bakeSeconds = recipe?.format === 'crucible.scene' && !recipe.motion ? bakedPhysicsDuration(recipe) : undefined;
   const bakeDefault = bakeSeconds && input.kind !== 'image' && input.motion ? Math.max(0.1, bakeSeconds - (Number(input.motion.start) || 0)) : undefined;
   const defaultDuration = timelineStart === undefined || input.kind === 'image' ? bakeDefault ?? 1 : filmTimelineDuration(recipe.timeline) - timelineStart;
   const duration = boundedNumber(input.duration ?? defaultDuration, 0.1, MAXIMUM_VIDEO_SECONDS, 'duration');
@@ -141,10 +141,10 @@ function settingsFrom(input, clips, recipe) {
   if (input.motion !== undefined) {
     objectKeys(input.motion, ['start'], 'motion');
     // Clips of placed assets play on scene time, so a scene that places one needs no authored motion.
-    const placesClips = recipe?.format === '67js.scene' && recipeAssetNeeds(recipe).some(need => need.copies > 1);
+    const placesClips = recipe?.format === 'crucible.scene' && recipeAssetNeeds(recipe).some(need => need.copies > 1);
     // A map sequence reads the same clock.
     const sequenced = JSON.stringify(recipe?.materials ?? []).includes('"sequence":{');
-    if (!['67js.scene', '67js.asset'].includes(recipe?.format) || (!recipe.motion && !placesClips && !sequenced && !(recipe.format === '67js.scene' && playsPhysics(recipe)))) {
+    if (!['crucible.scene', 'crucible.asset'].includes(recipe?.format) || (!recipe.motion && !placesClips && !sequenced && !(recipe.format === 'crucible.scene' && playsPhysics(recipe)))) {
       throw new RangeError('Motion settings require a recipe with authored motion, physics (or cloth, particles), a placed clip or a map sequence.');
     }
     const motionDuration = recipe.motion ? boundedNumber(recipe.motion.duration, 0.1, 30, 'motion duration') : undefined;
@@ -246,7 +246,7 @@ function rendererFrom(renderer, passes) {
 function timelineStartFrom(input, recipe) {
   if (input.timeline === undefined) return undefined;
   objectKeys(input.timeline, ['start'], 'timeline');
-  if (recipe?.format !== '67js.scene' || !recipe.timeline) throw new RangeError('Timeline settings require a recipe with a timeline.');
+  if (recipe?.format !== 'crucible.scene' || !recipe.timeline) throw new RangeError('Timeline settings require a recipe with a timeline.');
   normalizeFilmTimeline(recipe.timeline, recipe);
   return boundedNumber(input.timeline.start ?? 0, 0, MAXIMUM_VIDEO_SECONDS, 'timeline start');
 }
@@ -441,7 +441,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     try {
       return JSON.parse(text);
     } catch (error) {
-      if (error instanceof SyntaxError) throw new Error(`The job store lock ${path} is held by a live process or is incomplete. If no other 67js server uses this folder, delete ${path}.`);
+      if (error instanceof SyntaxError) throw new Error(`The job store lock ${path} is held by a live process or is incomplete. If no other Crucible server uses this folder, delete ${path}.`);
       throw error;
     }
   }
@@ -687,7 +687,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       validateClips(snapshot.clips ?? []);
       if (!snapshot.recipe || typeof snapshot.recipe !== 'object' || Array.isArray(snapshot.recipe)) throw new Error('Persisted snapshot recipe must be an object.');
       if ((await readdir(directory)).includes('asset.glb') && (await regularFile(join(directory, 'asset.glb'))).size > MAXIMUM_ASSET_BYTES) throw new Error('Persisted asset exceeds its byte budget.');
-      if (snapshot.recipe.format === '67js.asset') {
+      if (snapshot.recipe.format === 'crucible.asset') {
         const asset = await hashFile(join(directory, 'asset.glb'), MAXIMUM_ASSET_BYTES);
         if (asset.sha256 !== snapshot.recipe.assetId) throw new Error('Persisted asset does not match its recipe digest.');
       }
@@ -834,7 +834,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       const settings = settingsFrom(input.settings, clips, recipe);
       if (input.snapshot.assetBytes !== undefined && (!Buffer.isBuffer(input.snapshot.assetBytes) || input.snapshot.assetBytes.length > MAXIMUM_ASSET_BYTES || !input.snapshot.assetBytes.length)) throw new RangeError(`Asset snapshot must be a nonempty Buffer of at most ${MAXIMUM_ASSET_BYTES} bytes (${describeAssetBytes(MAXIMUM_ASSET_BYTES)}).`);
       const snapshot = { recipe, clips, ...(input.snapshot.assetBytes ? { assetBytes: Buffer.from(input.snapshot.assetBytes) } : {}) };
-      if (recipe.format === '67js.asset' && (!snapshot.assetBytes || createHash('sha256').update(snapshot.assetBytes).digest('hex') !== recipe.assetId)) throw new Error('Asset snapshot bytes must match the recipe SHA256 assetId.');
+      if (recipe.format === 'crucible.asset' && (!snapshot.assetBytes || createHash('sha256').update(snapshot.assetBytes).digest('hex') !== recipe.assetId)) throw new Error('Asset snapshot bytes must match the recipe SHA256 assetId.');
       const operation = (async () => {
         if (jobs.size >= limits.maxRecords) throw new RangeError('Job record budget exhausted. Release a finished job.');
         const snapshotText = JSON.stringify(snapshotMetadata);

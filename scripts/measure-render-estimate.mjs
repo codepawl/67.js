@@ -41,7 +41,7 @@ function recipeFor({ spheres, segments, rings, pointLights }) {
   }
   const span = columns * 0.6 + 4;
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }, { id: 'sphere', type: 'sphere', segments, rings }],
     materials: [{ id: 'matte', color: [0.7, 0.7, 0.7], roughness: 0.6 }, { id: 'glow', color: [0.1, 0.3, 0.9], emission: 1 }],
     nodes,
@@ -50,15 +50,15 @@ function recipeFor({ spheres, segments, rings, pointLights }) {
   };
 }
 
-const directory = await mkdtemp(join(tmpdir(), '67js-estimate-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-estimate-'));
 const assetDirectory = join(directory, 'assets');
 if (assetFile) {
   await mkdir(assetDirectory);
   await copyFile(assetFile, join(assetDirectory, basename(assetFile)));
 }
 const transport = new StdioClientTransport({ command: process.execPath,
-  args: [resolve('bin/67js-mcp.mjs'), '--backend', backend, '--memory', '256', '--jobs', join(directory, 'jobs'), ...(assetFile ? ['--assets', assetDirectory] : [])], cwd: directory, stderr: 'pipe' });
-const client = new Client({ name: '67js-estimate-measure', version: '1' });
+  args: [resolve('bin/crucible-mcp.mjs'), '--backend', backend, '--memory', '256', '--jobs', join(directory, 'jobs'), ...(assetFile ? ['--assets', assetDirectory] : [])], cwd: directory, stderr: 'pipe' });
+const client = new Client({ name: 'crucible-estimate-measure', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 120000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });
@@ -85,7 +85,7 @@ try {
     const assetId = catalog.assets.find(asset => asset.name === basename(assetFile)).assetId;
     const copies = Array.from({ length: ASSET_COPIES }, (_, index) => ({ id: `copy-${index}`, translation: [index * 2 - ASSET_COPIES, 0, 0], asset: { id: assetId } }));
     scenes.push({ scene: { name: 'asset-heavy', rasterOnly: true }, recipe: {
-      format: '67js.scene', schemaVersion: 1,
+      format: 'crucible.scene', schemaVersion: 1,
       geometries: [{ id: 'box', type: 'box' }], materials: [{ id: 'matte', color: [0.7, 0.7, 0.7], roughness: 0.6 }],
       nodes: [{ id: 'floor', geometry: 'box', material: 'matte', translation: [0, -0.1, 0], scale: [30, 0.2, 10] }, ...copies],
       camera: { eye: [0, 6, 16], target: [0, 1, 0], fov: 45 },

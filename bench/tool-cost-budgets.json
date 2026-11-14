@@ -1,19 +1,19 @@
 {
-  "schemaTotalBytes": 72130,
+  "schemaTotalBytes": 74990,
   "schemaToolBytes": {
-    "scene_apply": 22220,
-    "scene_create": 13360,
+    "scene_apply": 23360,
+    "scene_create": 13410,
     "scene_create_asset": 8980,
-    "scene_render_submit": 4280
+    "scene_render_submit": 4760
   },
   "schemaOtherToolBytes": 4000,
   "resultBytes": {
-    "scene_capabilities": 1560,
+    "scene_capabilities": 1630,
     "scene_create": 1200,
     "scene_inspect": 1150,
     "mesh_inspect": 1110,
     "mesh_edit": 2220,
     "scene_apply": 100,
-    "scene_export_recipe": 2720
+    "scene_export_recipe": 2730
   }
 }

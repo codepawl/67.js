@@ -19,8 +19,8 @@ test('llms.txt is what the generator writes from the current registry', async ()
 
 test('llms.txt points agents at the server, the plugin and the changelog data', () => {
   assert.doesNotMatch(llmsText, /does not expose an MCP server/);
-  assert.match(llmsText, /\/plugin marketplace add codepawl\/67\.js/);
-  assert.match(llmsText, /\/plugin install 67js@67js/);
-  assert.match(llmsText, /@codepawlhq\/67js/);
+  assert.match(llmsText, /\/plugin marketplace add codepawl\/crucible/);
+  assert.match(llmsText, /\/plugin install crucible@crucible/);
+  assert.match(llmsText, /@codepawlhq\/crucible/);
   assert.match(llmsText, /changelog\.json/);
 });

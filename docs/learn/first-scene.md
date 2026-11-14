@@ -12,11 +12,11 @@ You learn how to:
 - place and size shapes
 - animate a part and draw frames in a loop
 
-Start with the project from [Install](#install). It has Vite and the `67js` package.
+Start with the project from [Install](#install). It has Vite and the `crucible` package.
 
 ## 1. Add a canvas
 
-67js draws into an HTML `<canvas>` element. Replace the contents of `index.html` with this page:
+Crucible draws into an HTML `<canvas>` element. Replace the contents of `index.html` with this page:
 
 ```html file=index.html
 <!doctype html>
@@ -24,7 +24,7 @@ Start with the project from [Install](#install). It has Vite and the `67js` pack
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My first 67js scene</title>
+    <title>My first Crucible scene</title>
     <style>
       html, body { margin: 0; height: 100%; background: #101014; }
       #scene { display: block; width: 100%; height: 100%; }
@@ -61,7 +61,7 @@ Open the `Local` address. The page is dark and empty, because `main.js` does not
 Replace the contents of `src/main.js` with this code. You can delete `src/counter.js` and `src/style.css`, because this tutorial does not use them.
 
 ```js live poster=first-scene-cube
-import { Renderer67, box } from '67js';
+import { CrucibleRenderer, box } from 'crucible';
 
 const canvas = document.querySelector('#scene');
 const cube = {
@@ -75,7 +75,7 @@ const cube = {
   ]),
   material: { color: [0.2, 0.55, 0.38], metallic: 0, roughness: 0.55 },
 };
-const renderer = new Renderer67(canvas, [cube]);
+const renderer = new CrucibleRenderer(canvas, [cube]);
 
 function draw() {
   renderer.render({ eye: [2.5, 1.8, 3.5], target: [0, 0.5, 0] });
@@ -92,18 +92,18 @@ The browser shows a green cube on a dark floor. The code has four parts:
 - **The part.** `cube` is a part. Each part has a unique `name`, a `geometry`, a `matrix` and a `material`.
 - **The geometry.** `box()` makes a cube with rounded edges. Each side is 1 unit long, and its center is at the origin.
 - **The matrix.** The 16 numbers place the part in the world. The last row moves the cube up by 0.5, so it stands on the floor. The [next step](#first-scene/place-more-shapes) shows a shorter way to write it.
-- **The renderer.** `new Renderer67(canvas, parts)` uploads the parts. `renderer.render()` draws one picture from a camera at `eye` that looks at `target`.
+- **The renderer.** `new CrucibleRenderer(canvas, parts)` uploads the parts. `renderer.render()` draws one picture from a camera at `eye` that looks at `target`.
 
 `ResizeObserver` calls `resize()` and draws again when the canvas changes size. It also runs one time at the start, so it draws the first frame.
 
-> **Tip:** The renderer adds a floor by default. For a scene with its own ground, pass `{ ground: false }` as the third argument of `Renderer67`.
+> **Tip:** The renderer adds a floor by default. For a scene with its own ground, pass `{ ground: false }` as the third argument of `CrucibleRenderer`.
 
 ## 3. Change the material
 
 A material sets how light hits the surface. Change the material of the cube to gold:
 
 ```js live poster=first-scene-material
-import { Renderer67, box } from '67js';
+import { CrucibleRenderer, box } from 'crucible';
 
 const canvas = document.querySelector('#scene');
 const cube = {
@@ -112,7 +112,7 @@ const cube = {
   matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0.5, 0, 1]),
   material: { color: [1, 0.72, 0.3], metallic: 1, roughness: 0.25 },
 };
-const renderer = new Renderer67(canvas, [cube]);
+const renderer = new CrucibleRenderer(canvas, [cube]);
 
 function draw() {
   renderer.render({ eye: [2.5, 1.8, 3.5], target: [0, 0.5, 0] });
@@ -140,7 +140,7 @@ Try `roughness: 0.6` for brushed metal, or `metallic: 0` with `roughness: 0.9` f
 Writing 16 numbers for every part is slow. A small function can make the matrix from a position and a size:
 
 ```js live poster=first-scene-shapes
-import { Renderer67, box, sphere, torus } from '67js';
+import { CrucibleRenderer, box, sphere, torus } from 'crucible';
 
 // Column-major 4x4 matrix: scale by `size`, then move to x, y, z.
 function placeAt(x, y, z, size = 1) {
@@ -173,7 +173,7 @@ const parts = [
     material: { color: [0.75, 0.18, 0.28], metallic: 0, roughness: 0.4 },
   },
 ];
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 
 function draw() {
   renderer.render({ eye: [0, 2, 5], target: [0, 0.4, 0] });
@@ -203,7 +203,7 @@ The Y axis points up. One unit is one meter for the lights and the fog. [Parts a
 To animate a part, change its matrix, upload the change, and draw again in each frame. This version turns the cube about the Y axis:
 
 ```js live poster=first-scene-animate loop=1.9635
-import { Renderer67, box, sphere, torus } from '67js';
+import { CrucibleRenderer, box, sphere, torus } from 'crucible';
 
 // Scale by `size`, turn by `angle` radians about the Y axis, then move to x, y, z.
 function placeAt(x, y, z, size = 1, angle = 0) {
@@ -239,7 +239,7 @@ const parts = [
     material: { color: [0.75, 0.18, 0.28], metallic: 0, roughness: 0.4 },
   },
 ];
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 
 function frame(milliseconds) {
   const seconds = milliseconds / 1000;
@@ -284,7 +284,7 @@ Store the request from each `requestAnimationFrame` call in `frameRequest`, so `
 
 ## What you built
 
-You made a scene with three parts, gave them materials, placed them with matrices and animated one of them. Most 67js programs follow the same pattern.
+You made a scene with three parts, gave them materials, placed them with matrices and animated one of them. Most Crucible programs follow the same pattern.
 
 ```cards
 Parts and geometry | #parts-and-geometry | Matrices, shared geometry and your own meshes.

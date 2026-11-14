@@ -5,7 +5,7 @@ The optional modeling entry builds its meshes itself and has no dependency on Th
 The core renderer does not import the modeling addon.
 
 ```js
-import { lathe, extrude, tube } from '@codepawlhq/67js/addons/modeling';
+import { lathe, extrude, tube } from '@codepawlhq/crucible/addons/modeling';
 
 const vessel = lathe([[0, 0], [0.6, 0], [0.8, 1], [0.6, 2], [0, 2]]);
 const panel = extrude([[-2, -2], [2, -2], [2, 2], [-2, 2]], {
@@ -17,7 +17,7 @@ const cable = tube([[0, 0, 0], [1, 1, 0], [2, 0, 1]], { radius: 0.04 });
 ```
 
 Each result has Float32 positions, normalized normals and UV channel zero, plus Uint32 triangle indices.
-Pass it as a part's `geometry` to `Renderer67`. Inputs are copied. Repeated instances can share the returned mesh.
+Pass it as a part's `geometry` to `CrucibleRenderer`. Inputs are copied. Repeated instances can share the returned mesh.
 These generators run when constructing a scene, rather than every frame.
 
 ## Lathe

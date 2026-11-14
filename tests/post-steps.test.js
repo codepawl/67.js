@@ -77,7 +77,7 @@ test('a recipe that names a step loads the module, validates it and keeps the gr
 
 test('an edit adds a step to a scene that has none', async () => {
   await loadAgentSceneModules({ effects: { colorBalance: {} } });
-  const scene = createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] });
+  const scene = createAgentScene({ format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [] });
   scene.apply([{ type: 'set-effects', effects: { colorBalance: { gain: [1.2, 1, 0.8] } } }], { expectedRevision: scene.revision });
   assert.deepEqual(scene.effects.colorBalance.gain, [1.2, 1, 0.8]);
 });

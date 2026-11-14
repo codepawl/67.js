@@ -1,1 +1,0 @@
-- A node takes `shadowOnly: true` to cast a shadow while staying out of the picture, for a gobo such as a window frame outside the shot (#926)

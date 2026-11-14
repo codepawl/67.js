@@ -5,7 +5,7 @@ import process from 'node:process';
 
 export class DefaultJsonSchemaValidator {
   getValidator() {
-    throw new Error('This 67js server does not validate elicitation results; it never requests elicitation.');
+    throw new Error('This Crucible server does not validate elicitation results; it never requests elicitation.');
   }
 }
 

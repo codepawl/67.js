@@ -1,6 +1,6 @@
 // Crosses the procedural tile world through the runtime, with tiles built in workers and streamed under a byte budget.
 // window.runCrossing(options) resolves with per-frame timings, resident bytes and counts. See run.mjs and docs/streaming.md.
-import { Renderer67, box } from '../../src/index.js';
+import { CrucibleRenderer, box } from '../../src/index.js';
 import { createRuntime } from '../../src/runtime.js';
 import { createStreaming, createWorkerLoader } from '../../src/streaming.js';
 import { createCrossingWorld, createPathPlayer, tileId } from './world.js';
@@ -59,7 +59,7 @@ async function runCrossing(options = {}) {
   const { settings } = world;
   const canvas = document.querySelector('canvas');
   const marker = { name: 'Player', geometry: box(), matrix: IDENTITY, material: MARKER_MATERIAL };
-  const renderer = new Renderer67(canvas, [marker], { world: true, ground: false, pixelRatio: 1, samples: 4 });
+  const renderer = new CrucibleRenderer(canvas, [marker], { world: true, ground: false, pixelRatio: 1, samples: 4 });
   renderer.resize();
 
   const workerLoader = createWorkerLoader({ createWorker: () => new Worker(new URL('./tile-worker.js', import.meta.url), { type: 'module' }) });

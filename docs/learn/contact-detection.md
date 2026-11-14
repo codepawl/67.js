@@ -1,6 +1,6 @@
 # Contact detection
 
-Version `0.4.0` provides static BVH queries through `67js/addons/mesh-query`. `createMeshQueryIndex` copies positions and indices. `createMeshPairQuery` tests two indices under explicit affine matrices. The `surfaces` mode finds triangle contact. The `closed-solids` mode also tests containment between two validated solid indices.
+Version `0.4.0` provides static BVH queries through `crucible/addons/mesh-query`. `createMeshQueryIndex` copies positions and indices. `createMeshPairQuery` tests two indices under explicit affine matrices. The `surfaces` mode finds triangle contact. The `closed-solids` mode also tests containment between two validated solid indices.
 
 The workflow has five steps:
 
@@ -17,8 +17,8 @@ Rebuild indices after geometry edits. Queries reject skin and morph channels. Co
 The small sphere moves along X through the big one. Every move evaluates the pair query with both current matrices, and the sphere turns red while the surfaces touch. The log prints one line each time the answer changes.
 
 ```js live poster=contact-solids
-import { Renderer67, sphere } from '67js';
-import { createMeshQueryIndex, createMeshPairQuery } from '67js/addons/mesh-query';
+import { CrucibleRenderer, sphere } from 'crucible';
+import { createMeshQueryIndex, createMeshPairQuery } from 'crucible/addons/mesh-query';
 
 function placeAt(x, size) {
   return new Float32Array([size, 0, 0, 0, 0, size, 0, 0, 0, 0, size, 0, x, 0, 0, 1]);
@@ -36,7 +36,7 @@ console.log(`two solid indices: ${(performance.now() - started).toFixed(0)} ms, 
 const query = createMeshPairQuery(bigIndex, smallIndex, { mode: 'closed-solids' });
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, [big, small], { ground: false, samples: 4, pixelRatio: 1.25 });
+const renderer = new CrucibleRenderer(canvas, [big, small], { ground: false, samples: 4, pixelRatio: 1.25 });
 let lastKind = '';
 
 function update(x) {
@@ -79,8 +79,8 @@ The slider sweeps the small sphere through four states: `separate` / `outside` w
 An index also supports `raycast(matrix, ray)` for a triangle number, hit point and barycentric coordinates. The two sliders move the origin of a ray that points down the -Z axis at a torus. The gold marker sits on the hit point, and the log prints the hit or `null` for a miss.
 
 ```js live poster=contact-raycast
-import { Renderer67, torus, sphere } from '67js';
-import { createMeshQueryIndex } from '67js/addons/mesh-query';
+import { CrucibleRenderer, torus, sphere } from 'crucible';
+import { createMeshQueryIndex } from 'crucible/addons/mesh-query';
 
 const ringMatrix = new Float32Array([1.2, 0, 0, 0, 0, 1.2, 0, 0, 0, 0, 1.2, 0, 0, 0, 0, 1]);
 const ring = { name: 'Ring', geometry: torus(0.3, 64, 24), matrix: ringMatrix, material: { color: [0.3, 0.5, 0.8], metallic: 0.1, roughness: 0.4 } };
@@ -93,7 +93,7 @@ const marker = {
 
 const index = createMeshQueryIndex(ring.geometry);
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, [ring, marker], { ground: false, samples: 4, pixelRatio: 1.25 });
+const renderer = new CrucibleRenderer(canvas, [ring, marker], { ground: false, samples: 4, pixelRatio: 1.25 });
 const origin = { x: 1.2, y: 0 };
 
 function update() {
@@ -143,8 +143,8 @@ A ray uses world-space `origin` and `direction`. `maxDistance` defaults to infin
 Contact queries find triangle contact. They do not explain why two parts flicker. Z-fighting has its own check: `renderer.diagnostics` and `scene_inspect` report `coplanar-overlap` for two parts that draw the same plane (within 1 mm, same facing, at least 1 cm2 shared). The example below puts a slab and a patch on the same top plane. Tick the box to mark the patch as a decal and watch the warning leave.
 
 ```js live poster=contact-coplanar
-import { Renderer67, box } from '67js';
-import { installCoplanarDiagnostics } from '67js/addons/coplanar-overlap';
+import { CrucibleRenderer, box } from 'crucible';
+import { installCoplanarDiagnostics } from 'crucible/addons/coplanar-overlap';
 
 function slab(x, y, z, width, height, depth) {
   return new Float32Array([width, 0, 0, 0, 0, height, 0, 0, 0, 0, depth, 0, x, y, z, 1]);
@@ -160,7 +160,7 @@ function build(useDecal) {
     { name: 'Patch', geometry, matrix: slab(0.6, 0.05, 0.4, 1.8, 0.1, 1.6), material: { color: [0.9, 0.55, 0.2], metallic: 0, roughness: 0.5 }, decal: useDecal },
   ];
   renderer?.dispose();
-  renderer = new Renderer67(canvas, parts, { ground: false, samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, parts, { ground: false, samples: 4, pixelRatio: 1.25 });
   installCoplanarDiagnostics(renderer);
   renderer.resize();
   renderer.render({ eye: [3, 5.5, 5.5], target: [0, 0, 0], fov: 40 });
@@ -186,7 +186,7 @@ Both parts draw the plane `y = 0.1`, so the patch flickers against the slab. The
 
 Use a real offset along the normal when the gap should be visible in exports or the path tracer.
 
-The coplanar code is not in the core bundle. Call `installCoplanarDiagnostics(renderer)` from `67js/addons/coplanar-overlap` to add the warning to `renderer.diagnostics` (checked once per layout). To fix the flicker instead of naming it, pass `resolveCoplanar: resolveFlushParts` (same addon) to `new Renderer67`: it ranks flush and near-flush triangles, inside one part and across parts, and draws each rank with a small depth-only bias, so the face in front wins at every distance; ranked pairs leave the warning. Where an opaque face covers another on the same plane, or in front of it by at most a thousandth of the side of the shared area (never less than a millimetre or more than a centimetre), and they share 1 cm2 or more, the covered part is cut away instead. Seen at a grazing angle, that cut can open a strip no wider than the gap, which does not show, and it settles city models that nest facades of stacked blocks a few millimetres apart deeper than the ranks go: the part keeps its geometry, and the cut copy it draws with sits beside it (`flushOrderOf(part).geometry` in `depth-layer.js`), which the path tracer reads too. A face under a blended or masked face, and a double-sided face under a one-sided one, is ranked and not cut. Agent scenes do this by default wherever the code is loaded (the MCP preview always has it, a recipe that places an asset or names `resolveCoplanar` loads it with `loadAgentSceneModules(recipe)`; for any other recipe call `loadAllAgentSceneModules()`), and `environment.resolveCoplanar: false` opts out. Skinned and morphed parts are skipped, because their triangles move.
+The coplanar code is not in the core bundle. Call `installCoplanarDiagnostics(renderer)` from `crucible/addons/coplanar-overlap` to add the warning to `renderer.diagnostics` (checked once per layout). To fix the flicker instead of naming it, pass `resolveCoplanar: resolveFlushParts` (same addon) to `new CrucibleRenderer`: it ranks flush and near-flush triangles, inside one part and across parts, and draws each rank with a small depth-only bias, so the face in front wins at every distance; ranked pairs leave the warning. Where an opaque face covers another on the same plane, or in front of it by at most a thousandth of the side of the shared area (never less than a millimetre or more than a centimetre), and they share 1 cm2 or more, the covered part is cut away instead. Seen at a grazing angle, that cut can open a strip no wider than the gap, which does not show, and it settles city models that nest facades of stacked blocks a few millimetres apart deeper than the ranks go: the part keeps its geometry, and the cut copy it draws with sits beside it (`flushOrderOf(part).geometry` in `depth-layer.js`), which the path tracer reads too. A face under a blended or masked face, and a double-sided face under a one-sided one, is ranked and not cut. Agent scenes do this by default wherever the code is loaded (the MCP preview always has it, a recipe that places an asset or names `resolveCoplanar` loads it with `loadAgentSceneModules(recipe)`; for any other recipe call `loadAllAgentSceneModules()`), and `environment.resolveCoplanar: false` opts out. Skinned and morphed parts are skipped, because their triangles move.
 
 ### Depth precision far from the camera
 
@@ -217,7 +217,7 @@ On the RTX 3060 a 0.1 mm gap at 500 m still draws the far surface on 6.9% of pix
 
 `index.info` has frozen `vertexCount`, `triangleCount` and `estimatedBytes`. `index.memoryPlan` adds `reservedBytes`, `memoryBudgetMiB` and `validationPairs`. `dispose()` can be called twice, but later queries throw.
 
-A solid index needs closed geometry: every welded edge has two oppositely directed faces, the boundary is connected, and the surface does not cross itself. Separate shells and cavities are rejected. Query matrices are column-major, finite, affine and nonsingular, and reflections, nonuniform scales and shear are supported. The [mesh query contract](https://github.com/codepawl/67.js/blob/main/docs/mesh-query.md) describes results, solid validation, numerical limits and budget errors.
+A solid index needs closed geometry: every welded edge has two oppositely directed faces, the boundary is connected, and the surface does not cross itself. Separate shells and cavities are rejected. Query matrices are column-major, finite, affine and nonsingular, and reflections, nonuniform scales and shear are supported. The [mesh query contract](https://github.com/codepawl/crucible/blob/main/docs/mesh-query.md) describes results, solid validation, numerical limits and budget errors.
 
 ## Common mistakes
 

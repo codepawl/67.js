@@ -20,7 +20,7 @@ let response;
 let live;
 for (let attempt = 0; attempt < 6; attempt++) {
   try {
-    response = await fetch(`https://67js.codepawl.com/release.json?commit=${commit}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+    response = await fetch(`https://crucible.codepawl.com/release.json?commit=${commit}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
     if (response.ok) {
       live = await response.json();
       if (live.commit === commit && live.version === release.version && live.integrity === release.integrity) break;

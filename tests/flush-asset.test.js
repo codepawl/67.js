@@ -65,7 +65,7 @@ function facadeAsset(gap) {
 
 function recipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [], materials: [],
     nodes: [{ id: 'building', asset: { id: ASSET_ID } }],
   };

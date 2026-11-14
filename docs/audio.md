@@ -1,11 +1,11 @@
 # Audio: spatial sound for a live game
 
-`67js/addons/audio` plays sounds tied to what happens in the world: a ball hits the floor, a clip reaches a footstep marker, the player presses a key, a vehicle drives past. It is a [runtime](runtime.md) system on Web Audio. It loads only when imported and adds no dependency.
+`crucible/addons/audio` plays sounds tied to what happens in the world: a ball hits the floor, a clip reaches a footstep marker, the player presses a key, a vehicle drives past. It is a [runtime](runtime.md) system on Web Audio. It loads only when imported and adds no dependency.
 
 ```js
-import { createRuntime } from '67js/addons/runtime';
-import { createInput } from '67js/addons/input';
-import { createAudio } from '67js/addons/audio';
+import { createRuntime } from 'crucible/addons/runtime';
+import { createInput } from 'crucible/addons/input';
+import { createAudio } from 'crucible/addons/audio';
 
 const audio = createAudio({
   input,                                   // from createInput; optional

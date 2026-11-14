@@ -3,8 +3,8 @@
 Run from the repo root:
   PATH="/c/Program Files/Blender Foundation/Blender 5.2:$PATH" blender -b --factory-startup --python scripts/blender-cloth.py
 
-Positions are written in 67js axes (Y up): Blender (x, y, z) becomes (x, z, -y). Vertex order matches the grid
-geometry of 67js: rows from the top down, columns left to right.
+Positions are written in Crucible axes (Y up): Blender (x, y, z) becomes (x, z, -y). Vertex order matches the grid
+geometry of Crucible: rows from the top down, columns left to right.
 """
 import json
 import math
@@ -30,7 +30,7 @@ def reset_scene():
 
 
 def grid_object(name, center, width, height, plane):
-    """A (SEGMENTS + 1)^2 vertex sheet. plane 'vertical' lies in XZ (67js XY), 'horizontal' in XY (67js XZ)."""
+    """A (SEGMENTS + 1)^2 vertex sheet. plane 'vertical' lies in XZ (Crucible XY), 'horizontal' in XY (Crucible XZ)."""
     mesh = bpy.data.meshes.new(name)
     builder = bmesh.new()
     vertices = []
@@ -41,7 +41,7 @@ def grid_object(name, center, width, height, plane):
             if plane == "vertical":
                 vertices.append(builder.verts.new((center[0] + across, 0.0, center[1] + down)))
             else:
-                # Row 0 is the far edge (negative z in 67js axes), as in the 67js grid turned flat.
+                # Row 0 is the far edge (negative z in Crucible axes), as in the Crucible grid turned flat.
                 vertices.append(builder.verts.new((center[0] + across, -(center[2] - down), center[1])))
     for row in range(SEGMENTS):
         for column in range(SEGMENTS):
@@ -56,9 +56,9 @@ def grid_object(name, center, width, height, plane):
 
 
 # Blender's default air damping of 1 is a drag of about 54 per second on a sheet this light (terminal speed 0.18 m/s,
-# measured in free fall), against 0.3 per second in 67js. 0.1 gives 5.4 per second on both sides.
+# measured in free fall), against 0.3 per second in Crucible. 0.1 gives 5.4 per second on both sides.
 AIR_DAMPING = 0.1
-EQUIVALENT_67JS_DAMPING = 5.4
+EQUIVALENT_CRUCIBLE_DAMPING = 5.4
 
 
 def add_cloth(obj, pinned_indices, vertex_mass):

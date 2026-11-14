@@ -50,7 +50,7 @@ const FRAME = { width: 1, height: 2, color: new Float32Array([1, 2, 3, 4, 5, 6])
 test('findOidnLibrary reads OIDN_LIBRARY_PATH and the release folder of the tool', context => {
   const layout = LIBRARY_LAYOUTS[process.platform];
   if (!layout) return context.skip('no official OIDN build for this platform');
-  const release = mkdtempSync(join(tmpdir(), '67js-oidn-layout-'));
+  const release = mkdtempSync(join(tmpdir(), 'crucible-oidn-layout-'));
   context.after(() => rmSync(release, { recursive: true, force: true }));
   mkdirSync(join(release, 'bin'), { recursive: true });
   mkdirSync(join(release, layout.directory), { recursive: true });

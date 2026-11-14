@@ -13,7 +13,7 @@ function runLinkCheck(folder) {
 }
 
 function makeRepository() {
-  const folder = mkdtempSync(join(tmpdir(), '67js-check-links-'));
+  const folder = mkdtempSync(join(tmpdir(), 'crucible-check-links-'));
   execFileSync('git', ['init', '-q'], { cwd: folder });
   mkdirSync(join(folder, 'public'));
   writeFileSync(join(folder, '.gitignore'), 'public/*.md\n');

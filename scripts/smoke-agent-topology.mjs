@@ -13,11 +13,11 @@ await mkdir('artifacts', { recursive: true });
 const fixture = createAgentPreviewFixture();
 const harness = `<!doctype html><html><head><style>html,body{margin:0;height:100%;background:#182126}canvas{width:100vw;height:100vh;display:block}</style></head><body><canvas></canvas><script type="module">
 import {createAgentScene,loadAllAgentSceneModules} from '/src/agent-scene.js';
-import {Renderer67} from '/src/renderer.js';
+import {CrucibleRenderer} from '/src/renderer.js';
 await loadAllAgentSceneModules();
 const recipe=${JSON.stringify(fixture)};
 const session=createAgentScene({...recipe,geometries:[],materials:[],nodes:[]});
-const renderer=new Renderer67(document.querySelector('canvas'),session.parts,{ground:false,hdr:true,samples:4,pixelRatio:1,memoryBudgetMiB:192});
+const renderer=new CrucibleRenderer(document.querySelector('canvas'),session.parts,{ground:false,hdr:true,samples:4,pixelRatio:1,memoryBudgetMiB:192});
 const counters={buffers:0,arrays:0,textures:0,framebuffers:0,renderbuffers:0,staticUploads:0,dynamicUploads:0};
 const liveBuffers=new Set();
 const context=renderer.context;

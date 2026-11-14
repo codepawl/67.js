@@ -5,7 +5,7 @@ import { applyQuality, parseQuality, rasterOptionsFor, tierReport, QUALITY_TIERS
 import { chooseBudgetSettings, parseBudget } from '../scripts/agent-render-budget.mjs';
 import { estimateRenderJob } from '../scripts/agent-render-estimate.mjs';
 
-const recipe = { format: '67js.scene' };
+const recipe = { format: 'crucible.scene' };
 const base = { kind: 'image', width: 640, height: 360 };
 
 test('the four tiers are named worst to best and a bad name says what to pass', () => {

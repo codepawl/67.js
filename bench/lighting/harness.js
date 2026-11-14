@@ -1,5 +1,5 @@
 // Runs in the page: draws a server hall lit by a chosen number of point and area lights and times the frames.
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { box } from '/src/geometry.js';
 
 const HALL_WIDTH = 24;
@@ -46,7 +46,7 @@ const camera = { eye: [0, 1.7, 7.5], target: [0, 1.2, 0], fov: 60 };
 
 async function measureLightCounts({ pointCount, areaCount, range = 0, warmupFrames = 20, measuredFrames = 200 }) {
   const canvas = document.querySelector('canvas');
-  const renderer = new Renderer67(canvas, hallParts(), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024 });
+  const renderer = new CrucibleRenderer(canvas, hallParts(), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024 });
   renderer.resize();
   const frame = { ...camera, environment: environmentFor(pointCount, areaCount, range), time: 0, exposure: 1, effects: { ambientOcclusion: 0 } };
   // Reading one pixel back is what waits for a hardware GPU to finish the frame.
@@ -93,7 +93,7 @@ function changedPixelCount(first, second) {
 // picture as it was, so each removal has to change some pixels.
 async function checkEachLightVisible({ pointCount, areaCount }) {
   const canvas = document.querySelector('canvas');
-  const renderer = new Renderer67(canvas, hallParts(), { ground: false, hdr: true, depth: true, samples: 1, pixelRatio: 1, memoryBudgetMiB: 1024 });
+  const renderer = new CrucibleRenderer(canvas, hallParts(), { ground: false, hdr: true, depth: true, samples: 1, pixelRatio: 1, memoryBudgetMiB: 1024 });
   renderer.resize();
   const environment = environmentFor(pointCount, areaCount, 0);
   const frame = { ...camera, environment, time: 0, exposure: 1, effects: { ambientOcclusion: 0 } };

@@ -11,7 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const backend = process.argv[2] ?? 'gpu';
-const directory = await mkdtemp(join(tmpdir(), '67js-topology-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-topology-'));
 const assets = join(directory, 'assets');
 await mkdir(assets);
 await copyFile(resolve('tests/fixtures/RobotExpressive.glb'), join(assets, 'robot.glb'));
@@ -22,7 +22,7 @@ const transport = new StdioClientTransport({
   stderr: 'pipe',
   cwd: process.cwd(),
 });
-const client = new Client({ name: '67js-topology-smoke', version: '1' });
+const client = new Client({ name: 'crucible-topology-smoke', version: '1' });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 180000 });
@@ -44,7 +44,7 @@ const report = {};
 try {
   await client.connect(transport);
   const catalog = await call('scene_asset_catalog');
-  const created = await call('scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId } });
+  const created = await call('scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId } });
   const { sessionId } = created;
   let { revision } = created;
   const before = (await call('mesh_inspect', { sessionId, geometries: ['mesh-10', 'mesh-15', 'mesh-3'] })).meshes;

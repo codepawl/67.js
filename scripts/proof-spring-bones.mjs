@@ -22,7 +22,7 @@ const FPS = 24;
 const DURATION = 4;
 const COMPARISON_TIME = Number(process.env.PROOF_COMPARISON_TIME ?? 1.25);
 
-const workDirectory = await mkdtemp(join(tmpdir(), '67js-springs-'));
+const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-springs-'));
 const assets = join(workDirectory, 'assets');
 const jobs = join(workDirectory, 'jobs');
 await mkdir(assets);
@@ -42,13 +42,13 @@ if (browserPath && process.env.PROOF_CHROME_FLAGS) {
 }
 
 const serverArguments = [
-  resolve('bin/67js-mcp.mjs'), '--backend', backend, '--memory', '192', '--jobs', jobs, '--assets', assets,
+  resolve('bin/crucible-mcp.mjs'), '--backend', backend, '--memory', '192', '--jobs', jobs, '--assets', assets,
   ...(browserPath ? ['--browser', browserPath] : []),
 ];
 const transport = new StdioClientTransport({ command: process.execPath, args: serverArguments, cwd: workDirectory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-spring-proof', version: '1' });
+const client = new Client({ name: 'crucible-spring-proof', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 120000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });
@@ -75,7 +75,7 @@ function ffmpeg(...argumentsList) {
 
 try {
   await client.connect(transport);
-  const probeRecipe = { format: '67js.asset', schemaVersion: 1, assetId, motion: { duration: DURATION, loop: false, layers: [{ clip: 0 }] } };
+  const probeRecipe = { format: 'crucible.asset', schemaVersion: 1, assetId, motion: { duration: DURATION, loop: false, layers: [{ clip: 0 }] } };
   const probe = await call('scene_create_asset', { recipe: probeRecipe }, 240000);
   const hierarchy = await call('scene_inspect', { sessionId: probe.sessionId, kind: 'hierarchy', limit: 128 });
   const nodes = hierarchy.nodes ?? hierarchy.hierarchy ?? [];
@@ -100,7 +100,7 @@ try {
 
   async function renderClip(name, withSprings) {
     const motion = { duration: DURATION, loop: false, layers: [{ clip: Number(process.env.PROOF_CLIP ?? 0), loop: true }], tracks: turnTracks, ...(withSprings ? { springs } : {}) };
-    const created = await call('scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId, motion } }, 240000);
+    const created = await call('scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId, motion } }, 240000);
     const submitted = await call('scene_render_submit', { sessionId: created.sessionId, expectedRevision: created.revision ?? 0, settings: {
       kind: 'video', width: WIDTH, height: HEIGHT, fps: FPS, duration: DURATION, motion: { start: 0 },
     } }, 240000);

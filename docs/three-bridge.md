@@ -1,31 +1,31 @@
 # three.js bridge
 
-![The same three.js scene drawn by three.js on the left and by 67js after import on the right](three-bridge-comparison.jpg)
+![The same three.js scene drawn by three.js on the left and by Crucible after import on the right](three-bridge-comparison.jpg)
 
-Left: the three.js scene. Right: the same scene after `fromThreeObject` turned it into 67js parts. Geometry, colours, metalness, roughness and the checker texture carry over. Light and sky are not part of the tree: you set them on the 67js side, so they differ by design.
+Left: the three.js scene. Right: the same scene after `fromThreeObject` turned it into Crucible parts. Geometry, colours, metalness, roughness and the checker texture carry over. Light and sky are not part of the tree: you set them on the Crucible side, so they differ by design.
 
-`@codepawlhq/67js-three-bridge` (folder `packages/three-bridge`) moves meshes between a live three.js object tree and 67js parts. Use it to try 67js on a scene you already have, or to hand 67js parts to code that expects three.js objects. For a GLB you do not need three.js at all: 67js writes it.
+`@codepawlhq/crucible-three-bridge` (folder `packages/three-bridge`) moves meshes between a live three.js object tree and Crucible parts. Use it to try Crucible on a scene you already have, or to hand Crucible parts to code that expects three.js objects. For a GLB you do not need three.js at all: Crucible writes it.
 
-The addon is optional and not part of the core archive. It imports neither `three` nor 67js. `three` is a peer dependency of the addon only, and you pass the namespace in when you export.
+The addon is optional and not part of the core archive. It imports neither `three` nor Crucible. `three` is a peer dependency of the addon only, and you pass the namespace in when you export.
 
 ## Import a three.js tree
 
 ```js
 import * as THREE from 'three';
-import { Renderer67 } from '@codepawlhq/67js';
-import { fromThreeObject } from '@codepawlhq/67js-three-bridge';
+import { CrucibleRenderer } from '@codepawlhq/crucible';
+import { fromThreeObject } from '@codepawlhq/crucible-three-bridge';
 
 const group = new THREE.Group();
 group.add(new THREE.Mesh(new THREE.TorusKnotGeometry(0.7, 0.24), new THREE.MeshStandardMaterial({ color: 0xe0782a, metalness: 0.9, roughness: 0.3 })));
 
 const { parts, warnings } = fromThreeObject(group);
 if (warnings.length > 0) console.warn(warnings.join('\n'));
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 ```
 
 Each mesh becomes one part with its world matrix, so groups, parents and their transforms are applied. `InstancedMesh` becomes one part per instance, and meshes that share a `BufferGeometry` share one geometry object, which the renderer batches. A material array with `geometry.groups` becomes one part per group.
 
-| three.js | 67js |
+| three.js | Crucible |
 | --- | --- |
 | `position`, `normal`, `uv`, `index` (or no index) | `positions`, `normals`, `uvs`, `indices`. Missing normals are computed and listed in `warnings`. |
 | `color` attribute, when `material.vertexColors` is on | `colors` (three channels) |
@@ -40,7 +40,7 @@ Each mesh becomes one part with its world matrix, so groups, parents and their t
 
 Nothing is dropped silently. `warnings` names the object and the property for: morph targets, `drawRange`, `instanceColor`, `envMap`, `bumpMap`, `displacementMap`, `alphaMap`, `lightMap`, `wireframe`, `flatShading`, `BackSide`, texture repeat, offset and rotation, sheen, iridescence, anisotropy, separate roughness and metalness maps, and materials that are not `MeshStandardMaterial` (only colour, map and opacity are used). Invisible objects, points, lines, sprites, lights and cameras are skipped and listed. A `SkinnedMesh` with a skeleton is imported in its current pose.
 
-Two inputs throw an error that names the object and what to change: a `ShaderMaterial` or `RawShaderMaterial` (67js runs no custom shaders) and a `SkinnedMesh` without `skeleton.bones`. Pass `skipUnsupported: true` to leave such an object out and get a warning instead.
+Two inputs throw an error that names the object and what to change: a `ShaderMaterial` or `RawShaderMaterial` (Crucible runs no custom shaders) and a `SkinnedMesh` without `skeleton.bones`. Pass `skipUnsupported: true` to leave such an object out and get a warning instead.
 
 ### Limits
 
@@ -50,7 +50,7 @@ Two inputs throw an error that names the object and what to change: a `ShaderMat
 
 ```js
 import * as THREE from 'three';
-import { toThreeObject } from '@codepawlhq/67js-three-bridge';
+import { toThreeObject } from '@codepawlhq/crucible-three-bridge';
 
 const { object, warnings } = toThreeObject(parts, THREE, { name: 'scene' });
 threeScene.add(object);
@@ -61,7 +61,7 @@ threeScene.add(object);
 ## Export a GLB
 
 ```js
-import { exportGlb } from '@codepawlhq/67js';
+import { exportGlb } from '@codepawlhq/crucible';
 
 const glb = exportGlb(fromThreeObject(group).parts);
 ```
@@ -72,4 +72,4 @@ The GLB loads with `GLTFLoader`, with node transforms matching the source within
 
 `tests/three-bridge.test.js` builds a group with a box, a sphere, a textured plane and a vertex coloured box, imports it, builds three.js objects from the parts and compares positions, normals, indices, world matrices and material fields (matrices within 1e-6, geometry arrays byte for byte). It also loads the `exportGlb` result with `GLTFLoader`.
 
-The picture above comes from the same scene rendered by `THREE.WebGLRenderer` and by `Renderer67` on a software GPU at 640 by 360, so edges and timing differ from a real GPU.
+The picture above comes from the same scene rendered by `THREE.WebGLRenderer` and by `CrucibleRenderer` on a software GPU at 640 by 360, so edges and timing differ from a real GPU.

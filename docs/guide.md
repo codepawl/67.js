@@ -1,15 +1,15 @@
-# 67js guide
+# Crucible guide
 
 Build a scene once. Make it interactive. Export the frame or film.
 
-67js is a WebGL2 graphics toolkit with shared geometry, deterministic animation and a bounded media pipeline. It is not API-compatible with Three.js and does not provide a Blender-style modeling editor.
+Crucible is a WebGL2 graphics toolkit with shared geometry, deterministic animation and a bounded media pipeline. It is not API-compatible with Three.js and does not provide a Blender-style modeling editor.
 
 ## Render a PNG from a script without MCP
 
 A coding agent that has no MCP client can still produce an image from the installed package.
 The renderer needs a browser, so the script serves one page over HTTP and reads the canvas back through `playwright-core`, which the package already depends on.
 It needs an installed Google Chrome. Use `executablePath` instead of `channel` for another Chromium. Run it from the folder that holds `node_modules`.
-The import map assumes the alias install (`node_modules/67js`). After a plain `npm install @codepawlhq/67js`, use `node_modules/@codepawlhq/67js` in the map instead.
+The import map assumes the alias install (`node_modules/crucible`). After a plain `npm install @codepawlhq/crucible`, use `node_modules/@codepawlhq/crucible` in the map instead.
 
 ```js
 import { createServer } from 'node:http';
@@ -17,10 +17,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 
 const page = `<!doctype html>
-<script type="importmap">{ "imports": { "67js": "/node_modules/67js/build/67.module.js" } }</script>
+<script type="importmap">{ "imports": { "crucible": "/node_modules/crucible/build/67.module.js" } }</script>
 <canvas width="512" height="512"></canvas>
 <script type="module">
-  import { Renderer67, box } from '67js';
+  import { CrucibleRenderer, box } from 'crucible';
   const parts = [{
     name: 'Box',
     geometry: box(),
@@ -28,7 +28,7 @@ const page = `<!doctype html>
     material: { color: [0.8, 0.3, 0.2], metallic: 0, roughness: 0.35, emission: 0 },
   }];
   const canvas = document.querySelector('canvas');
-  new Renderer67(canvas, parts, { samples: 4, memoryBudgetMiB: 256 }).render({ eye: [3, 2.5, 4], target: [0, 0, 0] });
+  new CrucibleRenderer(canvas, parts, { samples: 4, memoryBudgetMiB: 256 }).render({ eye: [3, 2.5, 4], target: [0, 0, 0] });
   window.pngDataUrl = canvas.toDataURL('image/png');
 </script>`;
 
@@ -59,16 +59,16 @@ server.close();
 The canvas is read in the same task as the render, so no `preserveDrawingBuffer` option is needed.
 The frame clears to a dark grey behind the scene. Pass `background: [red, green, blue]` or `[red, green, blue, alpha]` (each `0` to `1`) as a renderer option, or call `renderer.setBackground(color)` between frames; `setBackground(null)` restores the grey. With `transparent: true` the canvas clears to nothing unless you give a `background`, whose alpha then shows the page behind the canvas. A scene sky or environment background still covers it, and the scene recipe's background field does not reach this option yet.
 The `matrix` is a column-major 4x4 transform, and `box()` is a unit cube centred on the origin.
-The MCP server (`67js-mcp`) is the route for scene recipes, review grids and video, and `npm run render` in a source checkout exports video.
+The MCP server (`crucible-mcp`) is the route for scene recipes, review grids and video, and `npm run render` in a source checkout exports video.
 
 ## Addons and limits
 
-Core exports are available from `67js`:
+Core exports are available from `crucible`:
 
 | Export | Purpose |
 | --- | --- |
 | VERSION | Build version from the package metadata |
-| Renderer67 | WebGL2 rendering and owned GPU resources |
+| CrucibleRenderer | WebGL2 rendering and owned GPU resources |
 | box, cylinder, sphere, torus | Shared primitive geometry |
 | exportGlb | Geometry and basic material export |
 | RENDER_PRESETS | Dimensions, MSAA, FPS and budgets for media |
@@ -81,20 +81,20 @@ Core exports are available from `67js`:
 
 `planRenderSize` accepts width, height, pixelRatio, samples, memoryBudgetMiB, geometryBytes, textureBytes, hdr, bloom, shadowResolution and maximumSize. It returns actual dimensions, estimatedBytes and reduced status. `estimateFrameBytes(width, height, samples, shadowResolution, { hdr, bloom })` estimates target storage. Neither function measures total VRAM.
 
-`67js/addons/model`: createModel. `67js/addons/nature`: createNatureWorld. `67js/addons/motion`: createMotionScene.
+`crucible/addons/model`: createModel. `crucible/addons/nature`: createNatureWorld. `crucible/addons/motion`: createMotionScene.
 
-`67js/addons/canvas2d`: 2D recipes. `67js/addons/gltf`: optional asset decoding. These are separate imports to keep the core smaller.
+`crucible/addons/canvas2d`: 2D recipes. `crucible/addons/gltf`: optional asset decoding. These are separate imports to keep the core smaller.
 
-The [three.js bridge](https://github.com/codepawl/67.js/blob/main/docs/three-bridge.md) imports a three.js object tree as parts and exports parts back to three.js objects and GLB.
+The [three.js bridge](https://github.com/codepawl/crucible/blob/main/docs/three-bridge.md) imports a three.js object tree as parts and exports parts back to three.js objects and GLB.
 
-Other people's addons follow the [addon contract](addons.md): a peer dependency on 67js, the `67js-addon` keyword and a `67js` manifest.
+Other people's addons follow the [addon contract](addons.md): a peer dependency on Crucible, the `crucible-addon` keyword and a `crucible` manifest.
 
-67js targets WebGL2. Version `0.4.0` includes the APIs below. Check the installed package version and release metadata before using them.
+Crucible targets WebGL2. Version `0.4.0` includes the APIs below. Check the installed package version and release metadata before using them.
 
 ## Release and source availability
 
 Published npm `0.4.0` includes modeling, sculpting, static mesh queries, shrinkwrap, surface patches, animation mixing, skinning, morphs, physics and lighting.
-Retained [surface attachments](https://github.com/codepawl/67.js/blob/main/docs/surface-attachment.md) are introduced in `0.4.1` and are absent from published npm `0.4.0`.
+Retained [surface attachments](https://github.com/codepawl/crucible/blob/main/docs/surface-attachment.md) are introduced in `0.4.1` and are absent from published npm `0.4.0`.
 Source checkouts can contain unreleased changes beyond their package version.
 
 The [release metadata](/release.json) identifies the published package and browser module.

@@ -27,7 +27,7 @@ function armSolver(asset, target = ARM_TARGET) {
 }
 
 function assetScene(asset, motion, extra = {}) {
-  return createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID, motion, ...extra });
+  return createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID, motion, ...extra });
 }
 
 const partIndex = (asset, name) => asset.parts.findIndex(part => part.name === name);

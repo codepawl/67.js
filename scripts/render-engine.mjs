@@ -1,4 +1,4 @@
-// The contract between 67js and a native render engine module (see docs/render-engines.md). 67js checks the module once, when
+// The contract between Crucible and a native render engine module (see docs/render-engines.md). Crucible checks the module once, when
 // the native tracer is first looked for, and a module that does not fit gives one clear reason instead of a failure in the
 // middle of a render job.
 
@@ -28,7 +28,7 @@ function revisionProblem(description) {
   }
   const [oldest, newest] = range;
   if (revision < oldest || revision > newest) {
-    return `the pack revision ${revision} of the scene packer 67js uses is outside revisions ${oldest} to ${newest}, which this engine reads. Install a matching version of the engine.`;
+    return `the pack revision ${revision} of the scene packer Crucible uses is outside revisions ${oldest} to ${newest}, which this engine reads. Install a matching version of the engine.`;
   }
   return null;
 }
@@ -49,7 +49,7 @@ function optionalCallProblems(engineModule, description) {
 }
 
 /**
- * Checks that a loaded module is a render engine this build of 67js can drive. Never throws. Resolves to
+ * Checks that a loaded module is a render engine this build of Crucible can drive. Never throws. Resolves to
  * `{ engine, description }` when it fits, or `{ reason }` with one sentence that says what is wrong.
  */
 export function requireRenderEngine(engineModule) {
@@ -58,7 +58,7 @@ export function requireRenderEngine(engineModule) {
   }
   const missing = missingCalls(engineModule, REQUIRED_CALLS);
   if (missing.length > 0) {
-    return { reason: `the render engine module has no ${missing.join(' or ')}; it is not a render engine this 67js can use.` };
+    return { reason: `the render engine module has no ${missing.join(' or ')}; it is not a render engine this Crucible can use.` };
   }
   const read = readDescription(engineModule);
   if (read.reason) return { reason: `the render engine module is broken: ${read.reason}` };
@@ -77,7 +77,7 @@ export function requireRenderEngine(engineModule) {
 }
 
 /**
- * The limits a job uses: each 67js default, lowered to the engine's declared limit of the same name when it declares one.
+ * The limits a job uses: each Crucible default, lowered to the engine's declared limit of the same name when it declares one.
  * An engine limit of null (or none) declares no limit, so the default stays.
  */
 export function clampLimitsByEngine(defaultLimits, engineLimits) {

@@ -11,7 +11,7 @@ function runInCleanProcess(source) {
 }
 
 const MESH_RECIPE = `{
-  format: '67js.scene',
+  format: 'crucible.scene',
   schemaVersion: 1,
   geometries: [{ id: 'block', type: 'mesh', base: { type: 'box' }, edits: [{ op: 'flip_normals' }] }],
   materials: [{ id: 'paint' }],
@@ -41,7 +41,7 @@ test('a primitive recipe runs without loading any module', () => {
   const output = runInCleanProcess(`
     import { createAgentScene, agentSceneModulesNeeded } from './src/agent-scene.js';
     import { agentSceneModuleLoaded } from './src/agent-scene-modules.js';
-    const recipe = { format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'cube', type: 'box' }], materials: [{ id: 'paint' }], nodes: [{ id: 'part', geometry: 'cube', material: 'paint' }] };
+    const recipe = { format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'cube', type: 'box' }], materials: [{ id: 'paint' }], nodes: [{ id: 'part', geometry: 'cube', material: 'paint' }] };
     const scene = createAgentScene(recipe);
     console.log(JSON.stringify({ parts: scene.parts.length, needed: agentSceneModulesNeeded(recipe), loaded: ['mesh', 'modeling', 'motion', 'patterns'].filter(agentSceneModuleLoaded) }));
   `);

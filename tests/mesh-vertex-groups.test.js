@@ -82,7 +82,7 @@ test('vertex_color writes corner colors for the selected faces only', () => {
 
 function recipeWithColors() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{
       id: 'block', type: 'mesh', base: { type: 'box', bevel: 0, subdivisions: 2 },
       edits: [{ op: 'vertex_color', gradient: { axis: 'y', range: [-0.5, 0.5], colors: [[0, 0, 1], [1, 0, 0]] } }],
@@ -113,7 +113,7 @@ test('vertex colors of a recipe mesh reach the part and export as COLOR_0 in a G
 
 test('cloth holds the vertices of a pin group', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{
       id: 'sheet', type: 'mesh', base: { type: 'grid', segments: 6 },
       edits: [{ op: 'vertex_group', name: 'hem', gradient: { axis: 'x', range: [-0.5, -0.4], weights: [1, 0] } }],

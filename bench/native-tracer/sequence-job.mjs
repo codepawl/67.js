@@ -48,13 +48,13 @@ function buildVariants(recipe) {
 }
 
 async function runJob(variantRecipe, sessions) {
-  const workDirectory = await mkdtemp(join(tmpdir(), '67js-sequence-job-'));
+  const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-sequence-job-'));
   const transport = new StdioClientTransport({ command: process.execPath,
-    args: [resolve('bin/67js-mcp.mjs'), '--backend', runtimeBackend, '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
+    args: [resolve('bin/crucible-mcp.mjs'), '--backend', runtimeBackend, '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
     cwd: workDirectory, stderr: 'pipe', env: { ...process.env, JS67_NATIVE_SESSIONS: sessions ? 'on' : 'off' } });
   let diagnostics = '';
   transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
-  const client = new Client({ name: '67js-sequence-job', version: '1' });
+  const client = new Client({ name: 'crucible-sequence-job', version: '1' });
   const call = (name, toolArguments) => client.callTool({ name, arguments: toolArguments }, { timeout: 600000 });
   try {
     await client.connect(transport);

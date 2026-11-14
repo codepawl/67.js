@@ -23,7 +23,7 @@ const transport = new StdioClientTransport({ command: process.execPath,
 });
 let diagnostics = '';
 transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
-const client = new Client({ name: '67js-scene-assets-proof', version: '1' }, {
+const client = new Client({ name: 'crucible-scene-assets-proof', version: '1' }, {
   versionNegotiation: { mode: { pin: '2026-07-28' }, probe: { timeoutMs: 180000 } },
 });
 async function call(name, argumentsValue = {}) {
@@ -66,7 +66,7 @@ try {
     asset: index === 4 ? { id: rig, clip: { index: 0, start: 0.25 } } : { id: rig },
   }));
   const created = (await call('scene_create', { recipe: {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'hills', type: 'terrain', size: 30, resolution: 48, amplitude: 0.4 }],
     materials: [{ id: 'grass', color: [0.25, 0.45, 0.2], roughness: 0.9 }],
     nodes: [

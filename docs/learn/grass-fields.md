@@ -1,14 +1,14 @@
 # Grass fields
 
-`67js/addons/grass` is in the current source and not yet published. It covers terrain with clumped, curved blades in tiles, with distance level of detail. Each tile is one part and one draw, and a coarser level keeps a fixed subset of the same blades, so a tile that changes level does not reshuffle.
+`crucible/addons/grass` is in the current source and not yet published. It covers terrain with clumped, curved blades in tiles, with distance level of detail. Each tile is one part and one draw, and a coarser level keeps a fixed subset of the same blades, so a tile that changes level does not reshuffle.
 
 ## Tiles and levels of detail
 
 The example calls `createGrass` for a 40 by 40 m meadow with a path cleared by `mask`. The slider walks the eye along the field: tiles near it keep every blade and tiles farther out keep 35 percent and then 12 percent, as the default levels say. A coarser level keeps a fixed subset of the same blades, so a tile that changes level does not reshuffle. The buttons rebuild the field with another preset. The console prints `grass.stats()` and the build time, and says when `update(eye)` returned true.
 
 ```js live poster=grass-tiles
-import { Renderer67 } from '67js';
-import { createGrass } from '67js/addons/grass';
+import { CrucibleRenderer } from 'crucible';
+import { createGrass } from 'crucible/addons/grass';
 
 const area = { minX: -20, maxX: 20, minZ: -20, maxZ: 20 };
 const mask = (x, z) => (Math.abs(z) < 0.8 ? 0 : 1);
@@ -26,7 +26,7 @@ function build(preset) {
 
 let grass = build(state.preset);
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, grass.parts, { world: true });
+const renderer = new CrucibleRenderer(canvas, grass.parts, { world: true });
 
 function draw() {
   renderer.render({ eye: eye(), target: [state.eyeX + 12, 0.3, 4], fov: 60, wind: 0.3 });
@@ -78,7 +78,7 @@ With a terrain from `createTerrain`, pass its `heightAt` as `terrainHeight` and 
 
 ```js
 const grass = createGrass({ preset: 'meadow', area, terrainHeight: terrain.heightAt, mask, eye });
-const renderer = new Renderer67(canvas, [...terrain.parts, ...grass.parts], { world: true, memoryBudgetMiB: 512 });
+const renderer = new CrucibleRenderer(canvas, [...terrain.parts, ...grass.parts], { world: true, memoryBudgetMiB: 512 });
 ```
 
 Tint the ground under the grass with `grass.groundColor`. On a splat terrain, darken every layer the grass covers, not only the grass layer, because soil under a sward sits in the blades' shade and a bright floor between blades is what makes a field look fake.
@@ -110,9 +110,9 @@ On the demo meadow (80 by 100 m, eye 1.3 m above the ground, RTX 3060, headless 
 
 ## Clutter and baked light
 
-`67js/addons/clutter` is in the current source and not yet published. It scatters pebbles, rocks, twigs and fallen leaves over terrain in the same streamed tiles. Pick a `preset` (`meadow`, `forest`, `riverbed`, `scree`), pass `terrainHeight`, and add `clutter.parts` next to the grass. The [clutter contract](https://github.com/codepawl/67.js/blob/main/docs/clutter.md) lists options and budgets.
+`crucible/addons/clutter` is in the current source and not yet published. It scatters pebbles, rocks, twigs and fallen leaves over terrain in the same streamed tiles. Pick a `preset` (`meadow`, `forest`, `riverbed`, `scree`), pass `terrainHeight`, and add `clutter.parts` next to the grass. The [clutter contract](https://github.com/codepawl/crucible/blob/main/docs/clutter.md) lists options and budgets.
 
-`67js/addons/light-bake` is in the current source and not yet published. `bakeLightmaps(parts, lights, options)` ray traces the light that bounces between surfaces into a lightmap texture for each part, and returns new parts that draw it through the emissive map. Direct light stays live. The [light bake contract](https://github.com/codepawl/67.js/blob/main/docs/light-bake.md) lists the limits.
+`crucible/addons/light-bake` is in the current source and not yet published. `bakeLightmaps(parts, lights, options)` ray traces the light that bounces between surfaces into a lightmap texture for each part, and returns new parts that draw it through the emissive map. Direct light stays live. The [light bake contract](https://github.com/codepawl/crucible/blob/main/docs/light-bake.md) lists the limits.
 
 ## Limits
 
@@ -120,7 +120,7 @@ On the demo meadow (80 by 100 m, eye 1.3 m above the ground, RTX 3060, headless 
 - Tiles change level with a pop, not a cross-fade.
 - Wind has one fixed direction, and there is no interaction with characters or vehicles.
 
-The [grass contract](https://github.com/codepawl/67.js/blob/main/docs/grass.md) lists options, levels, measured budgets and limits.
+The [grass contract](https://github.com/codepawl/crucible/blob/main/docs/grass.md) lists options, levels, measured budgets and limits.
 
 ## Common mistakes
 

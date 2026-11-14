@@ -1,4 +1,4 @@
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import { createSharedTextures, loadGltf } from './gltf.js';
 import { loadHdri } from './hdri.js';
 import { createCascadedShadows } from './cascaded-shadows.js';
@@ -57,7 +57,7 @@ async function start() {
   const rendererOptions = description.renderer ?? {};
   const shadowCascades = rendererOptions.shadowCascades ? createCascadedShadows(rendererOptions.shadowCascades) : undefined;
   const reflection = description.waterReflection ? applyWaterReflection(asset.parts) : { parts: asset.parts, surface: null };
-  const renderer = new Renderer67(document.querySelector('#file-viewport'), reflection.parts, {
+  const renderer = new CrucibleRenderer(document.querySelector('#file-viewport'), reflection.parts, {
     ground: false, hdr: true, samples: 4, memoryBudgetMiB: 384,
     ...rendererOptions,
     shadowCascades,

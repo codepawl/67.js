@@ -199,7 +199,7 @@ test('render passes need the addon, reject unknown names and bind per-pass unifo
 test('materials accept scalar or RGB aov values and material graphs bake aovMap descriptors', async () => {
   await loadAllAgentSceneModules();
   const scene = createAgentScene({
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box' }],
     materials: [
@@ -215,7 +215,7 @@ test('materials accept scalar or RGB aov values and material graphs bake aovMap 
   assert.deepEqual(scene.parts[1].material.aov, [0.2, 0.4, 0.8]);
   assert.equal(scene.parts[0].material.id, 'scalar-aov');
   assert.throws(() => createAgentScene({
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box' }],
     materials: [{ id: 'bad', aov: [1.5, 0, 0] }],
@@ -273,7 +273,7 @@ test('artifact names and multilayer EXR encoders cover new passes and multilayer
 });
 
 test('a job with passes or multilayer EXR publishes every expected file and rejects bad pass requests', async context => {
-  const root = await mkdtemp(join(tmpdir(), '67js-render-passes-'));
+  const root = await mkdtemp(join(tmpdir(), 'crucible-render-passes-'));
   context.after(() => rm(root, { recursive: true, force: true }));
   const run = async ({ directory, settings }) => {
     const artifacts = [];

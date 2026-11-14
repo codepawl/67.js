@@ -16,12 +16,12 @@ POST_ALBEDO = (0.6, 0.4, 0.3)
 POOL_SIZE = 12.0
 POST_TOP = 1.5
 POST_WIDTH = 0.5
-SUN_DIRECTION_67JS = (-0.6, 1.0, 0.0)
+SUN_DIRECTION_CRUCIBLE = (-0.6, 1.0, 0.0)
 CAMERA_HEIGHT = 12.0
 
 
 def to_blender(point):
-    """67js is y up; Blender is z up: (x, y, z) becomes (x, -z, y)."""
+    """Crucible is y up; Blender is z up: (x, y, z) becomes (x, -z, y)."""
     return Vector((point[0], -point[2], point[1]))
 
 
@@ -83,9 +83,9 @@ def build_scene(case, calibration, width, height):
     scene.view_settings.look = "None"
 
     depth = case["depth"]
-    # The sky and sun are set from the dry bed 67js measured: the shadowed bed is albedo times the sky, the lit bed adds the sun.
+    # The sky and sun are set from the dry bed Crucible measured: the shadowed bed is albedo times the sky, the lit bed adds the sun.
     sky = float(np.mean(calibration["shadowed"])) / ALBEDO
-    cosine = SUN_DIRECTION_67JS[1] / math.hypot(SUN_DIRECTION_67JS[0], SUN_DIRECTION_67JS[1])
+    cosine = SUN_DIRECTION_CRUCIBLE[1] / math.hypot(SUN_DIRECTION_CRUCIBLE[0], SUN_DIRECTION_CRUCIBLE[1])
     sun_strength = (float(np.mean(calibration["lit"])) - float(np.mean(calibration["shadowed"]))) * math.pi / (ALBEDO * cosine)
     world = bpy.data.worlds.new("sky")
     world.use_nodes = True
@@ -96,7 +96,7 @@ def build_scene(case, calibration, width, height):
     sun.energy = sun_strength
     sun_object = bpy.data.objects.new("sun", sun)
     scene.collection.objects.link(sun_object)
-    sun_object.rotation_euler = to_blender(SUN_DIRECTION_67JS).to_track_quat("Z", "Y").to_euler()
+    sun_object.rotation_euler = to_blender(SUN_DIRECTION_CRUCIBLE).to_track_quat("Z", "Y").to_euler()
 
     add_box("bed", (0, -depth - 0.5, 0), (POOL_SIZE, 1.0, POOL_SIZE), diffuse_material("bed", (ALBEDO,) * 3))
     add_box("post", (0, (POST_TOP - depth) / 2, 0), (POST_WIDTH, POST_TOP + depth, POST_WIDTH), diffuse_material("post", POST_ALBEDO))

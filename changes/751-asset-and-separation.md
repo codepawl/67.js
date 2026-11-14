@@ -1,1 +1,0 @@
-- A recipe that places a glTF asset now loads the flush code on its own, so asset facades a few millimetres apart are cut or ranked in hosts that did not call `loadAllAgentSceneModules()`; tests pin both on asset parts and show that 24-bit and float depth separate all 16 ranks from 1 m to 1 km (#751).

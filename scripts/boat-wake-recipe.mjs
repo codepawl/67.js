@@ -30,7 +30,7 @@ function followKeyframes(offset) {
 export function buildBoatRecipe(boatAssetId, duration) {
   const boatLift = BOAT_SIZE.hullHeight / 2;
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'hull', type: 'box' },
       { id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: SEA_EDITS, stack: [{ op: 'ocean', windSpeed: 2.5, choppiness: 0, size: 30, seed: 5, resolution: 5 }] },

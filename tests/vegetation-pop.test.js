@@ -45,7 +45,7 @@ async function evaluateWithRetry(page, task, argument) {
 async function frameChanges(page, settings) {
   return evaluateWithRetry(page, async (options) => {
     const { scatterVegetation, selectLevels, prepareImpostors } = await import('/src/vegetation.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const forest = scatterVegetation({ area: { minX: -2, maxX: 2, minZ: -2, maxZ: 2 }, density: 0.05, mix: { broadleaf: 1 }, seed: 5 });
     const tree = forest.instances.slice(0, 1);
     prepareImpostors(forest.variants, { frameSize: 96 });
@@ -65,7 +65,7 @@ async function frameChanges(page, settings) {
       const distance = options.start + (options.end - options.start) * step / options.steps;
       const eye = [tree[0].position[0], 4, tree[0].position[2] + distance];
       const view = selectLevels(tree, eye, { impostors: { from: 3 }, fade: options.fade, distanceScale: options.distanceScale });
-      const renderer = new Renderer67(canvas, view.parts, { ground: true, world: true, samples: 1, pixelRatio: 1 });
+      const renderer = new CrucibleRenderer(canvas, view.parts, { ground: true, world: true, samples: 1, pixelRatio: 1 });
       renderer.render({ eye, target: [tree[0].position[0], 6, tree[0].position[2]], up: [0, 1, 0], fov: 50, near: 0.5, far: 1500, time: 1, wind: 0 });
       copyContext.drawImage(canvas, 0, 0);
       const pixels = copyContext.getImageData(0, 0, width, height).data;

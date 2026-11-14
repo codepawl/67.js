@@ -1,1 +1,0 @@
-- A post pass can list parts in `objects` and call `objectSlotAt(uv)` to read the object ID pass, so a snippet grades or blurs one object (#707)

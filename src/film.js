@@ -1022,7 +1022,7 @@ export function sampleFilm(time, { aspect = 16 / 9 } = {}) {
     monochrome: selected.monochrome,
     fade: 1 - visibility,
     title: titleVisible ? 'OPPENHEIMER' : '',
-    subtitle: titleVisible ? 'A 67js trailer study' : '',
+    subtitle: titleVisible ? 'A Crucible trailer study' : '',
     time: boundedTime,
     sceneTime: boundedTime - FILM_SHOTS.find(candidate => candidate.scene === selected.scene).start,
     explosionProgress: selected.scene === 'ignition' ? smoothstep(ignitionTime / 1.7) : 0,

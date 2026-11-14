@@ -1,4 +1,4 @@
-// Build the API reference from the package's real exports: every name that `67js` and each documented addon export,
+// Build the API reference from the package's real exports: every name that `crucible` and each documented addon export,
 // with its kind, its signature and the comment above its declaration.
 // `node scripts/api-reference.mjs` writes public/api-reference.json. `npm run build` runs it, so the site always matches the code.
 import { readFile, writeFile } from 'node:fs/promises';
@@ -14,9 +14,9 @@ async function entryFiles() {
   const sources = Object.fromEntries([...libraryConfig.matchAll(/^\s*'?([\w-]+)'?:\s*'(src\/[\w-]+\.js)'/gm)].map(match => [match[1], match[2]]));
   const entries = [];
   for (const exportPath of Object.keys(packageJson.exports)) {
-    if (exportPath === '.') entries.push({ module: '67js', file: sources.core });
+    if (exportPath === '.') entries.push({ module: 'crucible', file: sources.core });
     const addon = exportPath.match(/^\.\/addons\/([\w-]+)$/);
-    if (addon && sources[addon[1]]) entries.push({ module: `67js/addons/${addon[1]}`, file: sources[addon[1]] });
+    if (addon && sources[addon[1]]) entries.push({ module: `crucible/addons/${addon[1]}`, file: sources[addon[1]] });
   }
   return entries;
 }

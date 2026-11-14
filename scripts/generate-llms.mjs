@@ -9,13 +9,13 @@ import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { createAgentMcpServer } from './mcp-server.mjs';
 
-const siteOrigin = 'https://67js.codepawl.com';
+const siteOrigin = 'https://crucible.codepawl.com';
 const outputUrl = new URL('../public/llms.txt', import.meta.url);
 const maximumSummaryLength = 140;
 
 export async function listRegisteredTools() {
   const server = createAgentMcpServer({ async close() {} });
-  const client = new Client({ name: '67js-llms-generator', version: '1' });
+  const client = new Client({ name: 'crucible-llms-generator', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -59,29 +59,29 @@ function taskMap() {
 
 export function buildLlmsText(tools) {
   const toolLines = tools.map(tool => `- \`${tool.name}\`: ${summarize(tool.description ?? '')}`).join('\n');
-  return `# 67js
+  return `# Crucible
 
 > A 3D engine that AI agents drive. Glaze draws real-time scenes on WebGL2, and Cook path traces stills on the CPU or WebGL2, and on Vulkan with the optional Cook package. PNG, MP4 and GLB output comes from the same scene.
 
-67js has an MCP server (\`67js-mcp\`, ${tools.length} tools) that builds, edits, looks at and renders scenes from JSON recipes.
+Crucible has an MCP server (\`crucible-mcp\`, ${tools.length} tools) that builds, edits, looks at and renders scenes from JSON recipes.
 The same engine is a JavaScript library for pages and Node. The library API is in the guide below.
 Scenes are plain data with stable IDs, so an agent can edit by ID and check each change with a rendered image.
 
 ## Renderers
 
-- Glaze (\`Renderer67\`) is the real-time rasterizer. It runs on WebGL2 only.
+- Glaze (\`CrucibleRenderer\`) is the real-time rasterizer. It runs on WebGL2 only.
 - Cook is the path tracer. Its backends are cpu (the default), gpu (WebGL2), webgpu (a software BVH in WGSL compute) and native (Vulkan ray queries, from the optional Cook package, \`@codepawlhq/cook\`).
 - An experimental real-time path tracer runs on WebGPU with a WebGL2 fallback. The MCP server does not expose it. MCP render jobs take the cpu, gpu and native backends of Cook.
 - In the MCP server, \`--backend gpu\` means hardware WebGL2 in Chrome, and \`--backend cpu\` means software rendering.
-- Planned, not shipped: a \`quality\` setting that picks a tier (draft, realtime, realtime-high, final), and Glaze on WebGPU. Do not call either one. The roadmap is [issue 890](https://github.com/codepawl/67.js/issues/890).
+- Planned, not shipped: a \`quality\` setting that picks a tier (draft, realtime, realtime-high, final), and Glaze on WebGPU. Do not call either one. The roadmap is [issue 890](https://github.com/codepawl/crucible/issues/890).
 
 ## Connect
 
-- npm package: \`@codepawlhq/67js\`. The MCP server is its \`67js-mcp\` binary. Node.js 20.19 or newer and an installed Chrome are required.
-- Claude Code plugin, which adds the server and both skills: \`/plugin marketplace add codepawl/67.js\`, then \`/plugin install 67js@67js\`.
-- Any other MCP client: \`npm install 67js@npm:@codepawlhq/67js\`, then run Node on \`node_modules/67js/bin/67js-mcp.mjs --backend gpu --memory 192\` over stdio. Use the absolute path.
+- npm package: \`@codepawlhq/crucible\`. The MCP server is its \`crucible-mcp\` binary. Node.js 20.19 or newer and an installed Chrome are required.
+- Claude Code plugin, which adds the server and both skills: \`/plugin marketplace add codepawl/crucible\`, then \`/plugin install crucible@crucible\`.
+- Any other MCP client: \`npm install crucible@npm:@codepawlhq/crucible\`, then run Node on \`node_modules/crucible/bin/crucible-mcp.mjs --backend gpu --memory 192\` over stdio. Use the absolute path.
 - Setup, flags and client notes: [mcp.md](${page('mcp.md')}).
-- Skills in the package: \`skills/build-67js-scene\` (build and light) and \`skills/render-67js-media\` (stills and video).
+- Skills in the package: \`skills/build-crucible-scene\` (build and light) and \`skills/render-crucible-media\` (stills and video).
 
 ## Start
 
@@ -101,7 +101,7 @@ Call \`scene_capabilities\` for field detail. This list is generated from the se
 
 ## If you know three.js
 
-Models write three.js from memory. The section "If you know three.js" of the [complete guide](${page('guide.md')}) maps each common three.js idiom to the 67js call. The optional addon \`@codepawlhq/67js-three-compat\` (folder \`packages/three-compat\`) accepts the common three.js shapes (\`Scene\`, \`Mesh\`, \`MeshStandardMaterial\`, \`PerspectiveCamera\`, the light classes, \`GLTFLoader\`, \`setAnimationLoop\`) and builds 67js parts from them. It throws an error that names the 67js call when you use a name it does not support.
+Models write three.js from memory. The section "If you know three.js" of the [complete guide](${page('guide.md')}) maps each common three.js idiom to the Crucible call. The optional addon \`@codepawlhq/crucible-three-compat\` (folder \`packages/three-compat\`) accepts the common three.js shapes (\`Scene\`, \`Mesh\`, \`MeshStandardMaterial\`, \`PerspectiveCamera\`, the light classes, \`GLTFLoader\`, \`setAnimationLoop\`) and builds Crucible parts from them. It throws an error that names the Crucible call when you use a name it does not support.
 
 ## Docs
 

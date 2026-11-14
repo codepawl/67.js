@@ -113,7 +113,7 @@ test('a run with 0 scene calls is classified by cause: infra for start-up, serve
   assert.equal(classify('toolsearch-empty').kind, 'infra');
 });
 
-test('a ToolSearch that showed the 67js tools and then quit, a refusal and a no-tool answer are model failures', () => {
+test('a ToolSearch that showed the Crucible tools and then quit, a refusal and a no-tool answer are model failures', () => {
   const classify = name => classifyZeroCalls(readFixture(name), { exitCode: 0, toolCalls: 0 });
   assert.deepEqual([classify('toolsearch-then-quit').kind, classify('toolsearch-then-quit').cause], ['model', 'toolsearch-then-quit']);
   assert.deepEqual([classify('refusal').kind, classify('refusal').cause], ['model', 'refusal']);

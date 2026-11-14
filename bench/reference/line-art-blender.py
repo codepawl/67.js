@@ -17,7 +17,7 @@ recipe = json.load(open(sceneFile))
 
 
 def toBlender(vector):
-    # 67js is Y up, Blender is Z up.
+    # Crucible is Y up, Blender is Z up.
     return Vector((vector[0], -vector[2], vector[1]))
 
 

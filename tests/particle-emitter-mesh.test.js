@@ -9,7 +9,7 @@ const TOLERANCE = 1e-4;
 
 function recipe(system) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'speck', type: 'box', bevel: 0 },
       { id: 'cube', type: 'box', bevel: 0 },

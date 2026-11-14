@@ -370,7 +370,7 @@ body.site > main > section { scroll-margin-top: 96px; }
   height: 100%;
   border-radius: 999px;
 }
-.site .size-bar-fill.is-67js {
+.site .size-bar-fill.is-crucible {
   background: linear-gradient(90deg, #ff6a2b, #f59e0b);
 }
 .site .size-bar-fill.is-other {
@@ -424,7 +424,7 @@ body.site > main > section { scroll-margin-top: 96px; }
 .site .tier-track { position: relative; display: block; height: 8px; border-radius: 999px; background: #ffffff10; overflow: hidden; }
 .site .is-quality .tier-track { height: 5px; }
 .site .tier-fill { position: absolute; top: 0; bottom: 0; left: var(--l, 0%); width: max(var(--w), 6px); border-radius: 999px; background: #ffffff40; }
-.site .is-67js .tier-fill { background: linear-gradient(90deg, #ff6a2b, #f59e0b); }
+.site .is-crucible .tier-fill { background: linear-gradient(90deg, #ff6a2b, #f59e0b); }
 .site .tier-card.is-planned .tier-fill { width: 0; }
 .site .tier-plan { margin: 0; font-size: 12.5px; }
 .site .tiers .tiers-note { font-size: 12.5px; }

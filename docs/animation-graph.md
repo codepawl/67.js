@@ -1,13 +1,13 @@
 # Animation graph: states, blend spaces and layers
 
-`67js/addons/animation-graph` plays clips from live game state. Game logic sets parameters such as `speed` or `grounded`; the graph moves between states, blends clips and says which clip plays at which time and weight. It loads only when imported, adds no dependency and does not touch the film path, where `createAnimationMixer` still plays clips at absolute times.
+`crucible/addons/animation-graph` plays clips from live game state. Game logic sets parameters such as `speed` or `grounded`; the graph moves between states, blends clips and says which clip plays at which time and weight. It loads only when imported, adds no dependency and does not touch the film path, where `createAnimationMixer` still plays clips at absolute times.
 
 The graph knows no rig. It reads only `duration` and `loop` from a clip, so a clip from `clipFromGltfAnimation`, `retargetClip` or `createAnimationClip` all work, and one graph can drive any rig whose clips are mapped to it. `graph.poseLayers()` hands the result to `createSkeletonPose` or `createAssetPose` (see [skeleton pose](skeleton-pose.md)), which writes the skin or the node transforms.
 
 ```js
-import { createAnimationGraph } from '67js/addons/animation-graph';
-import { createAssetPose } from '67js/addons/skeleton-pose';
-import { createRuntime } from '67js/addons/runtime';
+import { createAnimationGraph } from 'crucible/addons/animation-graph';
+import { createAssetPose } from 'crucible/addons/skeleton-pose';
+import { createRuntime } from 'crucible/addons/runtime';
 
 const graph = createAnimationGraph({
   clips: { Idle, Walking, Running, Wave },          // name -> clip

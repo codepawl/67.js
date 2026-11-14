@@ -7,7 +7,7 @@ The installed package version determines availability.
 ## Scene and MCP usage
 
 ```js
-import { createAgentScene } from '67js/addons/agent-scene';
+import { createAgentScene } from 'crucible/addons/agent-scene';
 
 const scene = createAgentScene(recipe);
 scene.apply([{ type: 'set-motion', motion }], { expectedRevision: scene.revision });
@@ -152,7 +152,7 @@ each blending over the pose so far, before tracks and IK:
 | `additive`, `reference` | Add the clip's change from `reference` seconds instead of replacing the pose |
 | `bones` | Retarget by name: `{ "UpperArmR": "node-20" }` makes the clip's track for `UpperArmR` move that node of this asset. Up to 64 entries; the clip must have the track |
 | `morph` | `false` leaves morph weights alone. Default: the clip's morph tracks play |
-| `strip` | Places the clip on the timeline in place of `speed`, `offset` and `loop`: `{ start, scale, repeat, end, blendIn, blendOut, extend, blend }`. `{ "repeat": 3 }` plays three cycles; an overlapping strip with `blendIn` crossfades. See [clip strips](https://67js.codepawl.com/animation-mixer.md#clip-strips) |
+| `strip` | Places the clip on the timeline in place of `speed`, `offset` and `loop`: `{ start, scale, repeat, end, blendIn, blendOut, extend, blend }`. `{ "repeat": 3 }` plays three cycles; an overlapping strip with `blendIn` crossfades. See [clip strips](https://crucible.codepawl.com/animation-mixer.md#clip-strips) |
 
 ```json
 "motion": { "duration": 2, "loop": true, "layers": [
@@ -186,7 +186,7 @@ matched), `unmapped` (joints no bone claimed, up to 24, with `unmappedCount`) an
 
 `motion.drive` (imported assets only; a placed asset takes `asset.drive`) drives a car GLB along a path: wheels found by name and geometry roll and steer with Ackermann angles, the body leans with the speed profile, legs can reverse, and tail lights glow with the brake.
 `motion.duration` may be left out and becomes the drive time.
-Fields, the `motionDrive` report of `scene_inspect` and the limits are in [vehicle.md](https://67js.codepawl.com/vehicle.md#driving-through-mcp).
+Fields, the `motionDrive` report of `scene_inspect` and the limits are in [vehicle.md](https://crucible.codepawl.com/vehicle.md#driving-through-mcp).
 
 ### Foot lock
 

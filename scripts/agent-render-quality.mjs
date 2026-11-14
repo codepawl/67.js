@@ -8,7 +8,7 @@ export const QUALITY_TIERS = Object.freeze(['draft', 'realtime', 'realtime-high'
 /** What scene_capabilities topic jobs says about quality. The details are in docs/render-quality.md. */
 export const RENDER_QUALITY_NOTE = 'settings.quality names what the render is for: draft (Glaze, light shading, no multisampling, coarse detail), realtime (Glaze defaults), realtime-high (Glaze with 8 samples and finer detail; needs a hardware GPU) or final (the path tracer at 256 samples, denoised; needs a lit PNG with no passes, transparency, region, multilayer or EXR). The same scene renders in any tier from a call that differs only in quality. A tier this device or job cannot run falls back one tier at a time, and submit returns quality { requested, picked, steps } with the missing capability of each step. quality is for choosing; settings.budget is for limits and picks the tier itself, so give one of them. tiers below lists which tiers this device can run.';
 
-/** Glaze (Renderer67) options per raster tier. realtime keeps the preview's own defaults. */
+/** Glaze (CrucibleRenderer) options per raster tier. realtime keeps the preview's own defaults. */
 export const RASTER_TIER_OPTIONS = Object.freeze({
   draft: Object.freeze({ samples: 1, shading: 'light', lodPixelError: 4 }),
   realtime: Object.freeze({}),

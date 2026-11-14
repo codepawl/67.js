@@ -1,6 +1,6 @@
 """Comparison sheets for the grand scene options (issue #168): one sheet per scene, one row per option.
 
-Each row has the Cycles render and the 67js render side by side, labelled with the option letter, the FLIP score of 67js
+Each row has the Cycles render and the Crucible render side by side, labelled with the option letter, the FLIP score of Crucible
 against Cycles and the Cycles time. Run after `npm run reference -- --grand`:
 
     uv run --no-project --python 3.12 --with pillow --with numpy --with flip-evaluator python -I bench/reference/grand-sheets.py <output directory>
@@ -25,7 +25,7 @@ def load_tone_map():
     assert source.endswith("main()")
     namespace = {"__name__": "score_functions"}
     exec(compile(source[: -len("main()")], "score.py", "exec"), namespace)
-    return namespace["tone_map_like_67js"]
+    return namespace["tone_map_like_crucible"]
 
 
 def to_image(display_array):
@@ -60,7 +60,7 @@ def main():
             seconds = report["seconds"][option_id]["cycles"]
             draw.text((12, top + 6), letter.upper(), font=font(30), fill=(255, 214, 90))
             draw.text((60, top + 12), f"Cycles ({seconds:.0f} s)", font=font(22), fill=(230, 230, 230))
-            draw.text((PANEL_SIZE[0] + 24, top + 12), f"67js   FLIP {flip:.4f}", font=font(22), fill=(230, 230, 230))
+            draw.text((PANEL_SIZE[0] + 24, top + 12), f"Crucible   FLIP {flip:.4f}", font=font(22), fill=(230, 230, 230))
         path = output_directory / f"{scene_id}.png"
         sheet.save(path)
         print(path)

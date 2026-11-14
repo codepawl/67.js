@@ -65,7 +65,7 @@ export function cabinetRecipe(width, height, withRelations) {
     ...placed(withRelations, [{ kind: 'attach', to: 'body', side: '+y' }]),
   });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.55, 0.5, 0.45] }],
     nodes: parts.map(part => ({ material: 'paint', ...part })),

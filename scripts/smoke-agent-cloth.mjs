@@ -9,14 +9,14 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-cloth-'));
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-cloth-'));
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '96', '--jobs', join(directory, 'jobs')],
   cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-cloth-proof', version: '1' });
+const client = new Client({ name: 'crucible-cloth-proof', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 60000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });
@@ -32,7 +32,7 @@ async function look(sessionId, motionTime) {
 
 // A red flag pinned along its top edge, blown by wind, beside a pole and a ball it can touch.
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [
     { id: 'flag', type: 'grid', segments: 20 },
     { id: 'pole', type: 'box', bevel: 0 },

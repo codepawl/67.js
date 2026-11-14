@@ -17,7 +17,7 @@ try {
   await page.waitForFunction(() => window.__scene?.renderer);
   const report = await page.evaluate(async () => {
     window.__scene.renderer.dispose();
-    const { Renderer67, sphere } = await import('/src/index.js');
+    const { CrucibleRenderer, sphere } = await import('/src/index.js');
     document.body.replaceChildren();
     document.body.style.cssText = 'margin:0;padding:24px;background:#141a1c;color:white;display:flex;flex-wrap:wrap;font:16px sans-serif;gap:20px';
     const geometry = sphere(64, 32);
@@ -46,7 +46,7 @@ try {
       }
       const mesh = channel === 'normalMapSmallUV' ? { ...geometry, uvs: geometry.uvs.map(value => value * 0.001) } : geometry;
       const part = { name: channel, geometry: mesh, material, matrix: new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]) };
-      const renderer = new Renderer67(canvas, [part], { ground: false, shadows: false, samples: 4, pixelRatio: 1, memoryBudgetMiB: 32 });
+      const renderer = new CrucibleRenderer(canvas, [part], { ground: false, shadows: false, samples: 4, pixelRatio: 1, memoryBudgetMiB: 32 });
       renderer.render({ eye: [0, 0, 5], target: [0, 0, 0] });
       const gl = renderer.context;
       const pixels = new Uint8Array(canvas.width * canvas.height * 4);

@@ -1,1 +1,0 @@
-- `scene_render_submit` takes `settings.quality` (`draft`, `realtime`, `realtime-high` or `final`) to render a scene in the tier you need, falls back one tier with the missing capability named, and `scene_capabilities` jobs lists the tiers this device can run (#904)

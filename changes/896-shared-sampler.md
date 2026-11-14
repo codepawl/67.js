@@ -1,1 +1,0 @@
-- The Cycles kernel reads cutout alpha through the same texture sampler as shading, a masked or blended material no longer multiplies its alpha by the colour map's red, and a texture set past the 1 GiB pool fails at packing with its size and the limit (#896)

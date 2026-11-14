@@ -70,7 +70,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
   const acquisitionStarted = new Promise(resolve => { resolveAcquisitionStarted = resolve; });
   let resolvePrivatePage;
   const acquiredPage = new Promise(resolve => { resolvePrivatePage = () => resolve(privatePage = new FakePage(true)); });
-  const recipe = { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], ...(sceneBake ? { bake: sceneBake } : {}) };
+  const recipe = { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], ...(sceneBake ? { bake: sceneBake } : {}) };
   class FakePage {
     constructor(privateTarget) { this.privateTarget = privateTarget; this.closed = false; }
     route() {}
@@ -328,7 +328,7 @@ test('the preview server accepts only its own loopback host', () => {
 });
 
 async function webExportHarness({ exportedRecipe, failCopy = () => false } = {}) {
-  const root = await mkdtemp(join(tmpdir(), '67js-web-runtime-'));
+  const root = await mkdtemp(join(tmpdir(), 'crucible-web-runtime-'));
   const buildDirectory = join(root, 'build');
   await mkdir(join(buildDirectory, 'mcp'), { recursive: true });
   await writeFile(join(buildDirectory, 'game.js'), 'export {};');
@@ -351,7 +351,7 @@ async function webExportHarness({ exportedRecipe, failCopy = () => false } = {})
   return { ...harness, keptBuilds };
 }
 
-const PLAYABLE_RECIPE = { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], game: { player: { node: 'creature' }, physics: false } };
+const PLAYABLE_RECIPE = { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], game: { player: { node: 'creature' }, physics: false } };
 
 test('exportWeb keeps only the newest four builds and returns a real entry page', async () => {
   const { runtime, sessionId, keptBuilds } = await webExportHarness({ exportedRecipe: PLAYABLE_RECIPE });

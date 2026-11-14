@@ -1,1 +1,0 @@
-- `water` ripples keep every wave a pixel can still show, so far open sea matches a supersampled render more closely and shimmers less when the camera moves (#853)

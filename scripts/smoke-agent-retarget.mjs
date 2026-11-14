@@ -13,7 +13,7 @@ import { FACE_TARGETS, MIXAMO_LIKE, UNREAL_LIKE, humanoidGlb, humanoidJoints, wa
 // morph weights. Foot positions are read from GLB files the server exports at sampled motion times.
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-retarget-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-retarget-'));
 const jobs = join(directory, 'jobs');
 const assets = join(directory, 'assets');
 await mkdir(assets);
@@ -30,12 +30,12 @@ await writeFile(join(assets, 'target.glb'), targetBytes);
 
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [resolve(process.argv[2] ?? 'bin/67js-mcp.mjs'), '--backend', 'cpu', '--memory', '96', '--jobs', jobs, '--assets', assets],
+  args: [resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs'), '--backend', 'cpu', '--memory', '96', '--jobs', jobs, '--assets', assets],
   cwd: directory, stderr: 'pipe',
 });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-retarget-proof', version: '1' });
+const client = new Client({ name: 'crucible-retarget-proof', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 60000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });
@@ -91,7 +91,7 @@ const slope = [0, Math.cos(angle), -Math.sin(angle)];
 
 /** Creates the target character with a motion, runs the check on its session, and disposes it: one scene at a time. */
 async function withTarget(motion, check) {
-  const recipe = { format: '67js.asset', schemaVersion: 1, assetId: targetId, motion: { duration: 1, loop: true, ...motion } };
+  const recipe = { format: 'crucible.asset', schemaVersion: 1, assetId: targetId, motion: { duration: 1, loop: true, ...motion } };
   const sessionId = (await call('scene_create_asset', { recipe }, 180000)).structuredContent.sessionId;
   try {
     return await check(sessionId);

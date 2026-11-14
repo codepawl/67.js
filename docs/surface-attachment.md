@@ -7,7 +7,7 @@ It returns a retained rigid world matrix for an accessory placed at a barycentri
 The accessory's local positive Z axis faces along the posed triangle's geometric winding.
 
 ```js
-import { createSurfaceAttachment } from '67js/addons/surface-attachment';
+import { createSurfaceAttachment } from 'crucible/addons/surface-attachment';
 
 const attachment = createSurfaceAttachment(targetPart, {
   triangle: hit.triangle,

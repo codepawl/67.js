@@ -63,33 +63,33 @@ Same scenes, `node bench/runtime/run.mjs --scene <id> --engine <name> --frames 8
 
 ## Equal feature set, and where the frame goes (2026-11-01, no engine change)
 
-Measured on `perf/frame-cost-equal-features`, 960 by 540, Chrome headless. Four new engines in `bench/runtime` turn one feature off at a time and need `--engine <name>`: `67js-ldr` (no HDR target), `67js-one-sample` (no MSAA), `67js-ldr-one-sample` (both), `three-one-sample` (three.js without MSAA). `--cpu-only` runs only SwiftShader.
+Measured on `perf/frame-cost-equal-features`, 960 by 540, Chrome headless. Four new engines in `bench/runtime` turn one feature off at a time and need `--engine <name>`: `crucible-ldr` (no HDR target), `crucible-one-sample` (no MSAA), `crucible-ldr-one-sample` (both), `three-one-sample` (three.js without MSAA). `--cpu-only` runs only SwiftShader.
 
 **SwiftShader, frame in ms, 6 frames each, one run per row** (`base-cpu`, `base-cpu-three-one-sample`):
 
 | Engine | `large-mesh` | `many-materials` | `instanced-objects` |
 | --- | --- | --- | --- |
 | three.js (4 samples) | 215 | 231 | 48 |
-| 67js (HDR, 4 samples) | 1,684 | 1,219 | 376 |
-| `67js-ldr` | 1,183 | 1,082 | 292 |
-| `67js-one-sample` | 556 | 522 | 227 |
-| `67js-ldr-one-sample` | 533 | 490 | 194 |
+| Crucible (HDR, 4 samples) | 1,684 | 1,219 | 376 |
+| `crucible-ldr` | 1,183 | 1,082 | 292 |
+| `crucible-one-sample` | 556 | 522 | 227 |
+| `crucible-ldr-one-sample` | 533 | 490 | 194 |
 | three.js (one sample) | 94 | 86 | 37 |
 
-Fair comparison: MSAA costs three.js 2.3, 2.7 and 1.3 times and costs 67js 3.0, 2.3 and 1.7 times, so it is not what separates them. With the same feature set (no MSAA, and no HDR target for 67js) 67js is 5.7, 5.7 and 5.2 times three.js, against 7.8, 5.3 and 7.8 for the defaults. 67js still draws an environment background and a post pass that three.js does not, and those are about 45 ms each on `instanced-objects` (measured above). The equal-feature gap is therefore the cost of the lit shader itself, which agrees with the profile above.
+Fair comparison: MSAA costs three.js 2.3, 2.7 and 1.3 times and costs Crucible 3.0, 2.3 and 1.7 times, so it is not what separates them. With the same feature set (no MSAA, and no HDR target for Crucible) Crucible is 5.7, 5.7 and 5.2 times three.js, against 7.8, 5.3 and 7.8 for the defaults. Crucible still draws an environment background and a post pass that three.js does not, and those are about 45 ms each on `instanced-objects` (measured above). The equal-feature gap is therefore the cost of the lit shader itself, which agrees with the profile above.
 
 **RTX 3060, frame in ms, 60 frames, one run per row** (`gpu-matrix`, GPU 5 to 40 percent busy):
 
 | Engine | `large-mesh` | `many-materials` | `instanced-objects` |
 | --- | --- | --- | --- |
 | three.js | 0.56 | 5.67 | 7.25 |
-| 67js | 3.82 | 3.48 | 2.06 |
-| `67js-ldr-one-sample` | 3.24 | 3.17 | 2.08 |
+| Crucible | 3.82 | 3.48 | 2.06 |
+| `crucible-ldr-one-sample` | 3.24 | 3.17 | 2.08 |
 | three.js (one sample) | 0.56 | 6.89 | 9.91 |
 
-Repeated `large-mesh` 67js runs gave 3.41, 3.58, 3.63, 3.82 and 3.11 to 3.98 across sessions, and three.js 0.61 to 0.63. On the GPU 67js wins `many-materials` and `instanced-objects` in this run (three.js draws 965 and 4,154 objects one by one) and loses `large-mesh` by 6.8 times. `instanced-objects` has no `three-instanced` row here, which beat 67js in the earlier report.
+Repeated `large-mesh` Crucible runs gave 3.41, 3.58, 3.63, 3.82 and 3.11 to 3.98 across sessions, and three.js 0.61 to 0.63. On the GPU Crucible wins `many-materials` and `instanced-objects` in this run (three.js draws 965 and 4,154 objects one by one) and loses `large-mesh` by 6.8 times. `instanced-objects` has no `three-instanced` row here, which beat Crucible in the earlier report.
 
-**Why `large-mesh` costs 3.6 ms against 0.6 ms on the GPU.** It is one sphere with 1,046,528 triangles, and 67js draws it in 3 passes (environment background, the mesh, post), which is also true of the RTX run above. Splitting the frame by wrapping the WebGL draw calls (script not kept in the repository):
+**Why `large-mesh` costs 3.6 ms against 0.6 ms on the GPU.** It is one sphere with 1,046,528 triangles, and Crucible draws it in 3 passes (environment background, the mesh, post), which is also true of the RTX run above. Splitting the frame by wrapping the WebGL draw calls (script not kept in the repository):
 
 | What | Frame (ms) |
 | --- | --- |
@@ -101,7 +101,7 @@ Repeated `large-mesh` 67js runs gave 3.41, 3.58, 3.63, 3.82 and 3.11 to 3.98 acr
 | `hdr` off, `samples` 1, or both | 3.2 to 3.3 (2.7 with HDR off alone) |
 | Only 5 of the 15 vertex attributes enabled, or a non-instanced `drawElements` | 3.8 to 3.9 (no change) |
 | Vertex shader cut to `gl_Position` only | 2.4 (no change) |
-| Same page on ANGLE Vulkan instead of D3D11 | 67js 1.20, three.js 0.52 |
+| Same page on ANGLE Vulkan instead of D3D11 | Crucible 1.20, three.js 0.52 |
 
 So: the passes around the mesh cost 1.3 ms, three.js's whole frame is 0.6, and about 2 ms is the mesh itself, split between getting 1 million tiny triangles through the pipeline (about 0.8 ms even with trivial shaders) and shading them (about 1.5 ms). Neither HDR nor MSAA nor the vertex shader's contents nor the number of attributes moves it. On Vulkan the ratio falls from 5.8 to 2.3, so more than half of the gap is specific to ANGLE's D3D11 path, and the cause inside it was not found. Almost every one of the 1 million triangles covers less than a pixel, so the lit shader runs on a 2 by 2 quad per triangle; that fits the shading share but was not isolated.
 
@@ -118,9 +118,9 @@ Method: the changed file and the unchanged file were swapped in `src/` between r
 
 Both medians are inside the noise, so neither was committed and the reference images were not needed again (the engine is unchanged; the 16 baseline renders were taken first and no code differs from them).
 
-**Current numbers, SwiftShader frame in ms, 3 runs each, 67js and three.js alternated** (a loop over `--scene` and `--engine`, script not kept in the repository):
+**Current numbers, SwiftShader frame in ms, 3 runs each, Crucible and three.js alternated** (a loop over `--scene` and `--engine`, script not kept in the repository):
 
-| Scene | 67js | three.js | Ratio (medians) |
+| Scene | Crucible | three.js | Ratio (medians) |
 | --- | --- | --- | --- |
 | `large-mesh` | 1,327, 1,336, 1,431 | 219, 221, 232 | 6.0 |
 | `many-materials` | 1,216, 1,227, 1,254 | 238, 246, 256 | 5.0 |
@@ -165,9 +165,9 @@ So the roughly 130 ms was the fixed part around the mesh (post 63, resolve 32, b
 
 The vertex split on `large-mesh` (1,070 ms; the vertex stage alone is 360 ms there): skin and morph calls cost 100, box position 25, water and explosion branches 25, wind and the inverse-transpose normal matrix under 5 each, everything together 170.
 
-**Ratio now** (SwiftShader frame, 67js and three.js alternated, 3 runs; `instanced-objects` lost one run each, so 2):
+**Ratio now** (SwiftShader frame, Crucible and three.js alternated, 3 runs; `instanced-objects` lost one run each, so 2):
 
-| Scene | 67js (ms) | three.js (ms) | Ratio (medians) | Was |
+| Scene | Crucible (ms) | three.js (ms) | Ratio (medians) | Was |
 | --- | --- | --- | --- | --- |
 | `large-mesh` | 901, 888, 909 | 225, 234, 239 | 3.85 | 6.0 |
 | `many-materials` | 1,290 (load spike), 898, 899 | 231, 243, 331 | 3.69 | 5.0 |
@@ -239,11 +239,11 @@ Next ideas, by expected size: a far level that keeps the picture (try the clump 
 
 ## Lit shader cost on SwiftShader, three tries, none kept (2026-11-03, branch `perf/lit-shader-cost`)
 
-Issue 74. Same method as before: `--cpu-only --frames 6`, `67js-ldr-one-sample` against `three-one-sample`, at below-normal priority, other sessions running (CPU 5 to 100 percent). Changed and unchanged file were swapped in `src/` and alternated, three rounds, no code is left changed.
+Issue 74. Same method as before: `--cpu-only --frames 6`, `crucible-ldr-one-sample` against `three-one-sample`, at below-normal priority, other sessions running (CPU 5 to 100 percent). Changed and unchanged file were swapped in `src/` and alternated, three rounds, no code is left changed.
 
 **The baseline moved with the machine, not with the code.** The same unchanged `origin/main` gave two different states within 30 minutes. Frame in ms, ranges over 3 to 5 runs (measured):
 
-| State | Scene | 67js | three.js | Ratio |
+| State | Scene | Crucible | three.js | Ratio |
 | --- | --- | --- | --- | --- |
 | First (quiet) | `large-mesh` | 116 to 122 | 39 to 40 | 2.9 to 3.1 |
 | First (quiet) | `many-materials` | 120 to 122 | 44 to 46 | 2.6 to 2.7 |
@@ -266,7 +266,7 @@ So with MSAA and the HDR target removed on both sides, the 2026-11-01 figures (5
 
 The last row is the finding: in the busy state a constant fragment shader costs the same as the lit one, so the frame was not bound by the lit shader there. What remains then is outside it: the vertex stage (1 million triangles in `large-mesh`), and the environment background and post passes that three.js does not draw (about 45 ms each on `instanced-objects` at 4 samples, measured on 2026-10-31). The shadow filter (36 `texelFetch`) is the largest single block of the lit shader when the shader is the bottleneck, about 25 percent on `many-materials` and `instanced-objects`.
 
-**Changes tried (all pixel identical unless stated), alternated with the unchanged file, 3 rounds, `67js-ldr-one-sample`, busy state:**
+**Changes tried (all pixel identical unless stated), alternated with the unchanged file, 3 rounds, `crucible-ldr-one-sample`, busy state:**
 
 | Change | `large-mesh` before / after (ms) | `many-materials` | `instanced-objects` | Kept |
 | --- | --- | --- | --- | --- |
@@ -280,11 +280,11 @@ Inferred, not isolated: SwiftShader still pays for a branch that pixels in the s
 
 ## Remeasure on current main, and one exact change that did not pay (2026-11-03, branch `perf/swiftshader-ratio`, issue #74)
 
-Method: `bench/runtime/run.mjs --cpu-only --frames 8`, one scene and one engine per process, 67js and three.js alternated inside each round, 3 rounds, below-normal priority. CPU load was sampled for 1 s before each pair: 2 to 41 percent (the machine was quiet, other sessions mostly idle). The RTX 3060 showed 0 percent busy before the GPU runs. The driver script is not kept in the repository.
+Method: `bench/runtime/run.mjs --cpu-only --frames 8`, one scene and one engine per process, Crucible and three.js alternated inside each round, 3 rounds, below-normal priority. CPU load was sampled for 1 s before each pair: 2 to 41 percent (the machine was quiet, other sessions mostly idle). The RTX 3060 showed 0 percent busy before the GPU runs. The driver script is not kept in the repository.
 
 **Frame on SwiftShader, default settings (4 samples, HDR target), milliseconds, medians of 3 (measured):**
 
-| Scene | 67js | three.js | Ratio median | Ratio range |
+| Scene | Crucible | three.js | Ratio median | Ratio range |
 | --- | --- | --- | --- | --- |
 | `instanced-objects` | 174 | 32 | 5.4 | 5.2 to 5.6 |
 | `many-materials` | 568 | 181 | 3.1 | 2.7 to 3.2 |
@@ -299,7 +299,7 @@ So `large-mesh`, `many-lights` and `large-outdoor` are at or under 3, `many-mate
 
 **First frame on the RTX 3060** (`--gpu-only`, empty profile, 2 runs per scene, milliseconds, measured): `instanced-objects` 229, 204; `many-materials` 268, 222; `many-lights` 197, 266; `transparency` 235, 210; `moving-shadows` 265, 210; `large-mesh` 389, 365; `skinned-characters` 267, 265; `large-outdoor` 257, 248. Every scene is under 1 s (the worst is 389). The "under 1 s" target holds.
 
-**Where `transparency` (the worst ratio) goes** (`67js-ldr-one-sample`, 202 ms against `three-one-sample` 22 ms, so MSAA and HDR are not the cause; measured, 1 to 2 runs each):
+**Where `transparency` (the worst ratio) goes** (`crucible-ldr-one-sample`, 202 ms against `three-one-sample` 22 ms, so MSAA and HDR are not the cause; measured, 1 to 2 runs each):
 
 | Variant (picture wrong in each) | Frame (ms) |
 | --- | --- |
@@ -309,7 +309,7 @@ So `large-mesh`, `many-lights` and `large-outdoor` are at or under 3, `many-mate
 | `shadowVisibility` returns 1.0 | 114 to 136 |
 | Shadow filter skipped where the surface faces away from the sun | 191 |
 
-Both engines draw 288,000 triangles, and 67js draws them in 4 draw calls against 301. The blend pass is 80 percent of the frame and nearly all of it is the lit fragment shader across 300 overlapping layers; the sun shadow filter is 40 to 45 percent of that. `skinned-characters` with the same facing test: 130 to 80 ms (`67js-ldr-one-sample`, upper bound, picture wrong).
+Both engines draw 288,000 triangles, and Crucible draws them in 4 draw calls against 301. The blend pass is 80 percent of the frame and nearly all of it is the lit fragment shader across 300 overlapping layers; the sun shadow filter is 40 to 45 percent of that. `skinned-characters` with the same facing test: 130 to 80 ms (`crucible-ldr-one-sample`, upper bound, picture wrong).
 
 **One change tried, pixel identical, not kept.** Take the 36 shadow fetches only where the sun lights the surface (`dot(normal, lightDirection) > 0`), or where another term reads `visibility` directly (floor, canopy, grass, sheen, clear coat, moss, and the room occlusion, which needed `room` to be computed before the call). `illuminate` returns nothing when that dot product is not positive, so the result is the same. PNG bytes were identical to the merge base in all 8 scenes. Default settings, 3 alternated rounds, ms:
 
@@ -386,11 +386,11 @@ First frame on the RTX 3060 (`--gpu-only`, GPU 0 percent busy before): `skinned-
 
 ## Opt-in `shading: 'light'` (2026-11-03, issue #74)
 
-Decision of the project owner: the default picture stays as it is, and `new Renderer67(canvas, parts, { shading: 'light' })` draws a cheaper one for weak machines and software rendering. The `67js-light` engine of this suite uses it (`node bench/runtime/run.mjs --cpu-only --scene <id> --engine 67js-light`). What the preset leaves out or replaces: MSAA is capped at 2 samples (4 by default); the sun shadow is one comparison fetch, not 9; the environment BRDF comes from an analytic fit, not the table, with no second bounce gain; the sky reflection is the irradiance of the surface normal, not a prefiltered lookup; irradiance keeps the first four of nine terms; the direct specular term uses the Kelemen visibility and a logarithm free Fresnel.
+Decision of the project owner: the default picture stays as it is, and `new CrucibleRenderer(canvas, parts, { shading: 'light' })` draws a cheaper one for weak machines and software rendering. The `crucible-light` engine of this suite uses it (`node bench/runtime/run.mjs --cpu-only --scene <id> --engine crucible-light`). What the preset leaves out or replaces: MSAA is capped at 2 samples (4 by default); the sun shadow is one comparison fetch, not 9; the environment BRDF comes from an analytic fit, not the table, with no second bounce gain; the sky reflection is the irradiance of the surface normal, not a prefiltered lookup; irradiance keeps the first four of nine terms; the direct specular term uses the Kelemen visibility and a logarithm free Fresnel.
 
-Method: SwiftShader, `--cpu-only --frames 6`, 3 rounds, `67js-light`, three.js and `67js` alternated for each scene inside a round, machine at 5 to 15 percent CPU from other sessions. Frame in ms (measured), then the ratio of the medians to three.js:
+Method: SwiftShader, `--cpu-only --frames 6`, 3 rounds, `crucible-light`, three.js and `crucible` alternated for each scene inside a round, machine at 5 to 15 percent CPU from other sessions. Frame in ms (measured), then the ratio of the medians to three.js:
 
-| Scene | `67js` default | `67js-light` | three.js | Default ratio | Light ratio |
+| Scene | `crucible` default | `crucible-light` | three.js | Default ratio | Light ratio |
 | --- | --- | --- | --- | --- | --- |
 | `instanced-objects` | 145 to 155 | 49 to 52 | 33 to 34 | 4.6 | 1.5 |
 | `many-materials` | 470 to 494 | 93 to 122 | 177 to 184 | 2.7 | 0.66 |

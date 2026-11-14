@@ -1,1 +1,0 @@
-- The agent bench no longer passes `--max-budget-usd` to `claude -p`, which Haiku read as a nearly spent budget and quit on; `bench/agent-modeling/run-guard.mjs` now adds up streamed token cost and kills a runaway run by cost or time (#962).

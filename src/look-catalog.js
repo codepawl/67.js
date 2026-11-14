@@ -5,7 +5,7 @@
 /** Environment maps shipped in assets/looks as 128 x 64 Radiance files (Poly Haven CC0, shrunk; THIRD-PARTY-NOTICES.md). */
 export const BUNDLED_ENVIRONMENT_NAMES = Object.freeze(['sky-clouds', 'studio-softbox']);
 
-/** .cube looks shipped in assets/looks (made for 67js, CC0): 9 points per side. */
+/** .cube looks shipped in assets/looks (made for Crucible, CC0): 9 points per side. */
 export const BUNDLED_CUBE_LOOK_NAMES = Object.freeze(['teal-orange', 'noir']);
 
 export const CATALOG_FILE_ID = /^[a-f0-9]{64}$/;

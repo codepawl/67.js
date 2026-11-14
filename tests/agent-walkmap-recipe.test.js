@@ -9,7 +9,7 @@ test('walkMap works on a procedural recipe scene and marks its box as an obstacl
   preview.create({
     sessionId, backend: 'cpu', memoryBudgetMiB: 64,
     recipe: {
-      format: '67js.scene', schemaVersion: 1,
+      format: 'crucible.scene', schemaVersion: 1,
       geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
       materials: [{ id: 'paint', color: [0.4, 0.5, 0.6] }],
       nodes: [{ id: 'cube', geometry: 'cube', material: 'paint' }],

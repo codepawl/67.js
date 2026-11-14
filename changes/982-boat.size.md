@@ -1,7 +1,0 @@
-- entry:physics+lazy: the boat force model (throttle and rudder at the stern, keel drag, control keyframes) and the wake trail load only with the buoyancy chunk, so bodies that float need them and a scene without floating bodies never fetches them
-- entry:settle+lazy: the same buoyancy chunk, which the settle entry reaches through the physics code
-- entry:physics-runtime+lazy: the same buoyancy chunk plus `setBoatControls`, the call a live controller steers a boat with
-- entry:player: the `boat` controller, about 70 lines that hand two input axes to a physics system and read the hull pose back; it is what makes a boat drivable in a game
-- scene:agent-scene: the wake field of the ocean edit (up to 64 points that add white foam and a small choppy displacement) and the lines that pass a baked wake to the sea each frame and draw its foam as foam (a time-driven sea showed none before), which a film of a boat on the ocean needs
-- scene:agent-scene+lazy: the same wake code, the boat force model and the wake trail in the lazy chunks that scene bundles
-- goal:agent-scene: the ocean wake is an agent-facing capability that replaces a hand-animated trail behind a boat; the 94 bytes are the wake field of the ocean edit and the hook that feeds it

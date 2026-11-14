@@ -56,7 +56,7 @@ function walkTracks() {
 
 export function walkerRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'mesh', base: { type: 'box', bevel: 0 }, stack: [{ op: 'subdivide', levels: 3 }] }],
     materials: [{ id: 'cloth', color: [0.55, 0.5, 0.45] }],
     armatures: [{ id: 'rig', preset: 'humanoid', fit: { bounds: { min: [-0.3, 0, -0.1], max: [0.3, CHARACTER_HEIGHT, 0.1] } } }],

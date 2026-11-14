@@ -1,5 +1,5 @@
 {
-  "format": "67js.scene",
+  "format": "crucible.scene",
   "schemaVersion": 1,
   "geometries": [
     { "id": "box", "type": "box", "bevel": 0 },

@@ -4,7 +4,7 @@ This optional addon uses Rapier 3D to bake collisions and joint motion into a ti
 Scene playback can seek forward or backward without changing the simulation.
 The main renderer does not need Rapier for playback.
 Available from version `0.4.0`.
-The library build exports it through `67js/addons/physics` when using the npm alias.
+The library build exports it through `crucible/addons/physics` when using the npm alias.
 Rapier is an optional peer dependency and remains outside the core and library archive.
 
 ```sh
@@ -44,7 +44,7 @@ applyAnimation(1); // A backward seek produces the same recorded pose.
 physics.dispose();
 ```
 
-`boxPart` is an existing 67js part with a retained `Float32Array(16)` matrix.
+`boxPart` is an existing Crucible part with a retained `Float32Array(16)` matrix.
 The binding replaces its world translation and rotation while keeping its scale and matrix identity.
 The physics body origin must match the visual part origin.
 Multiple visual parts can bind to one body when they share that origin.
@@ -412,7 +412,7 @@ The definition form of the same thing is `ocean` on the definition and `float` o
 
 ### Boats and wakes
 
-![A fishing boat turning through waves, with a wake of foam behind it](https://raw.githubusercontent.com/codepawl/67.js/main/docs/boat-wake-still.jpg)
+![A fishing boat turning through waves, with a wake of foam behind it](https://raw.githubusercontent.com/codepawl/crucible/main/docs/boat-wake-still.jpg)
 
 A floating hull becomes a boat with `float.boat`: throttle pushes the stern along the bow and the rudder pushes it sideways, so the hull still pitches and rolls on the waves. It turns like a real boat: faster water past the rudder turns it harder, and the keel stops it sliding sideways.
 
@@ -577,14 +577,14 @@ Blender comparison (`scripts/blender-cloth.py`, Blender 5.2.2, default stiffness
 
 Why the first drape comparison said 63 percent (found while comparing pictures, measured):
 
-- The comparison paired vertices in the wrong order. `scripts/blender-cloth.py` built the flat grid with row 0 on the near edge, while the 67js grid turned flat has row 0 on the far edge, so every vertex was compared with its mirror across the sheet. A flat sheet falling straight scores about 50 percent that way. Pairing the rows correctly takes the mean distance at 2 s from 53 to 7.5 percent for the same two bakes.
-- The drag was 180 times apart. Blender's air damping of 1 on a particle of 0.003 kg is a drag of about 54 per second: a falling sheet reaches a terminal speed of 0.18 m/s (measured in free fall, 1 to 2 s and 2 to 8 s both 0.17 to 0.18 m/s). 67js defaults to 0.3 per second, so one sheet landed in 0.4 s and the other took over 2 s. The earlier note tried damping 3 and 8; the matching value is about 54, so `damping` now accepts up to 100. Blender air damping 0.1 (5.4 per second) lands like 67js within 5 percent.
+- The comparison paired vertices in the wrong order. `scripts/blender-cloth.py` built the flat grid with row 0 on the near edge, while the Crucible grid turned flat has row 0 on the far edge, so every vertex was compared with its mirror across the sheet. A flat sheet falling straight scores about 50 percent that way. Pairing the rows correctly takes the mean distance at 2 s from 53 to 7.5 percent for the same two bakes.
+- The drag was 180 times apart. Blender's air damping of 1 on a particle of 0.003 kg is a drag of about 54 per second: a falling sheet reaches a terminal speed of 0.18 m/s (measured in free fall, 1 to 2 s and 2 to 8 s both 0.17 to 0.18 m/s). Crucible defaults to 0.3 per second, so one sheet landed in 0.4 s and the other took over 2 s. The earlier note tried damping 3 and 8; the matching value is about 54, so `damping` now accepts up to 100. Blender air damping 0.1 (5.4 per second) lands like Crucible within 5 percent.
 - With air damping 0 Blender's sheet falls through the ball at 2 s (centre vertex at -1.1 m), so a lower drag in Blender is not free either.
 - What remains is a model difference, not a defect: matched, the mean distance is 17 percent at 1 s and 35 percent at 2 s, because Blender's sheet drapes slowly as a wrinkled bell (friction 5 on collision, tension 15, bending 0.5) and this one hangs smooth flat panels over the ball (pictures in `bench/reference/images/cloth-drape-*.jpg`). Nothing was tuned to close that gap.
 
-Earlier drape measurements (old pairing, Blender air damping 1, 67js defaults; same 13 x 13 grid, 1.6 m sheet at 1 m, ball radius 0.4 m, mass 0.2 kg/m2, Blender 5.2.2 default stiffness, quality 8). Only the stretch rows still say something:
+Earlier drape measurements (old pairing, Blender air damping 1, Crucible defaults; same 13 x 13 grid, 1.6 m sheet at 1 m, ball radius 0.4 m, mass 0.2 kg/m2, Blender 5.2.2 default stiffness, quality 8). Only the stretch rows still say something:
 
-| | 67js | Blender |
+| | Crucible | Blender |
 | --- | --- | --- |
 | Longest edge over rest length, at 2 s | 1.021 | 1.048 |
 | Mean edge over rest length, at 2 s | 1.001 | 1.007 |
@@ -593,7 +593,7 @@ Earlier drape measurements (old pairing, Blender air damping 1, 67js defaults; s
 | Nearest vertex to the ball centre when resting on it | 0.410 (radius + 0.01 thickness) | 0.427 (radius + 0.01 ball distance + 0.01 cloth distance, plus the 48-segment sphere) |
 | Mean vertex motion in the last 2 s | 0.025 m, nearly settled | 0.30 m, still sliding off the ball |
 
-- Stretch is far inside 10 percent in both solvers, so stiffness or iteration count does not explain the gap; `tests/cloth-blender.test.js` pins the 67js drape to 10 percent per edge and 5 percent in area.
+- Stretch is far inside 10 percent in both solvers, so stiffness or iteration count does not explain the gap; `tests/cloth-blender.test.js` pins the Crucible drape to 10 percent per edge and 5 percent in area.
 - The setups match except collision margins, which differ by 17 mm and are too small to matter.
 
 Picture comparison (`npm run reference -- --cloth`, scores in `bench/reference/cloth.json`, method and table in `bench/reference/README.md`): the banner scores at the EEVEE yardstick (FLIP 0.043 and 0.044 against Cycles, EEVEE 0.042) and the drape at about twice it (0.080 to 0.093 against 0.039 to 0.043). By eye, Blender's cloth wrinkles and bells over the ball, and this solver gives smooth flat panels. The solvers differ in kind, so these scores say how alike the motion is, not that one is right. Soft bodies are not built; see the ledger.
@@ -611,7 +611,7 @@ Sources: [Rapier JavaScript setup](https://rapier.rs/docs/user_guides/javascript
 A game steps cloth one frame at a time, with pins that move and change while it runs. `createCloth(positions, triangles, options)` is the solver `bakeCloth` records from (`bakeCloth` is now a loop over it), so a live run and a baked recording of the same input give the same numbers, frame for frame. It lives in `src/cloth.js`; the recipe `cloth` section above still bakes ahead of time.
 
 ```js
-import { createCloth } from '@codepawlhq/67js/addons/cloth';
+import { createCloth } from '@codepawlhq/crucible/addons/cloth';
 
 // A 1 m square sheet, 33 x 33 particles, with two grippers holding two corners.
 const cloth = createCloth(positions, triangles, { density: 0.2, bend: 0.1 });
@@ -640,10 +640,10 @@ function frame(deltaSeconds) {
 
 ## Deforming a drawn part in place
 
-`updatePartVertices(renderer, part, positions, normals)` writes new vertex positions, and normals when given, into the buffers a rigid part already uses, with `bufferSubData`. It needs no `replaceParts`, no new geometry object and no new draw batch. It comes from `@codepawlhq/67js/addons/update-part-vertices`, takes the renderer as its first argument and imports nothing from the renderer, so a scene that never deforms a mesh does not carry it.
+`updatePartVertices(renderer, part, positions, normals)` writes new vertex positions, and normals when given, into the buffers a rigid part already uses, with `bufferSubData`. It needs no `replaceParts`, no new geometry object and no new draw batch. It comes from `@codepawlhq/crucible/addons/update-part-vertices`, takes the renderer as its first argument and imports nothing from the renderer, so a scene that never deforms a mesh does not carry it.
 
 ```js
-import { updatePartVertices } from '@codepawlhq/67js/addons/update-part-vertices';
+import { updatePartVertices } from '@codepawlhq/crucible/addons/update-part-vertices';
 
 updatePartVertices(renderer, sheetPart, sheetPositions, sheetNormals);
 renderer.render(frame);
@@ -656,11 +656,11 @@ renderer.render(frame);
 
 ## Settling props
 
-`@codepawlhq/67js/addons/settle` drops props as rigid bodies onto colliders, runs Rapier at 60 Hz for a bounded time and returns the resting transforms, so rubble, crates and pebbles lie against each other instead of hovering where they were placed. The caller keeps the result as static parts. Same seed and inputs give the same transforms byte for byte (they are rounded to 1e-5).
+`@codepawlhq/crucible/addons/settle` drops props as rigid bodies onto colliders, runs Rapier at 60 Hz for a bounded time and returns the resting transforms, so rubble, crates and pebbles lie against each other instead of hovering where they were placed. The caller keeps the result as static parts. Same seed and inputs give the same transforms byte for byte (they are rounded to 1e-5).
 
 ```js
-import { loadPhysicsEngine } from '@codepawlhq/67js/addons/physics';
-import { settleInstances } from '@codepawlhq/67js/addons/settle';
+import { loadPhysicsEngine } from '@codepawlhq/crucible/addons/physics';
+import { settleInstances } from '@codepawlhq/crucible/addons/settle';
 
 await loadPhysicsEngine();
 const { instances, report } = settleInstances({

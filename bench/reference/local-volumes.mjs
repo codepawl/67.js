@@ -17,7 +17,7 @@ const IMAGE_DIRECTORY = new URL('./images/', import.meta.url);
 // Runs in the page. Three rounds of 200 frames per side, the order alternating each round so a drifting machine load favors neither.
 async function measureSmokyRoom({ width, height, rounds, warmupFrames, measuredFrames }) {
   const { box } = await import('/src/geometry.js');
-  const { Renderer67 } = await import('/src/renderer.js');
+  const { CrucibleRenderer } = await import('/src/renderer.js');
   await import('/src/fog-shader.js');
 
   const placed = (translation, scale, color) => ({
@@ -47,7 +47,7 @@ async function measureSmokyRoom({ width, height, rounds, warmupFrames, measuredF
 
   const pixel = new Uint8Array(4);
   const runSide = (withVolumes, frames) => {
-    const renderer = new Renderer67(canvas, room, { hdr: true, depth: true, samples: 4, pixelRatio: 1, ground: false });
+    const renderer = new CrucibleRenderer(canvas, room, { hdr: true, depth: true, samples: 4, pixelRatio: 1, ground: false });
     const environment = withVolumes ? { ...baseEnvironment, localVolumes: [smoke, puff] } : baseEnvironment;
     const draw = () => {
       renderer.render({ ...camera, environment });

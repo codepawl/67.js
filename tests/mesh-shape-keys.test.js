@@ -6,7 +6,7 @@ import { exportGlb } from '../src/export.js';
 
 function faceRecipe(extra = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{
       id: 'face', type: 'mesh', base: { type: 'box', bevel: 0, subdivisions: 2 },
       shapeKeys: [

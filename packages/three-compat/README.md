@@ -1,11 +1,11 @@
-# @codepawlhq/67js-three-compat
+# @codepawlhq/crucible-three-compat
 
-Optional addon that lets code written from memory in the three.js style build a 67js scene. It imports neither `three` nor `67js`: you pass the 67js exports to it, so the core gains no dependency and this package gains none. It is not part of the core `67js` archive.
+Optional addon that lets code written from memory in the three.js style build a Crucible scene. It imports neither `three` nor `crucible`: you pass the Crucible exports to it, so the core gains no dependency and this package gains none. It is not part of the core `crucible` archive.
 
 ```js
-import * as core from '@codepawlhq/67js';
-import { loadGltf } from '@codepawlhq/67js/addons/gltf';
-import { createThreeCompat } from '@codepawlhq/67js-three-compat';
+import * as core from '@codepawlhq/crucible';
+import { loadGltf } from '@codepawlhq/crucible/addons/gltf';
+import { createThreeCompat } from '@codepawlhq/crucible-three-compat';
 
 const THREE = createThreeCompat({ ...core, loadGltf });
 
@@ -28,10 +28,10 @@ renderer.setAnimationLoop(() => {
 
 `Scene`, `Group`, `Object3D`, `Mesh`, `BoxGeometry`, `PlaneGeometry`, `SphereGeometry`, `CylinderGeometry` (equal radii), `TorusGeometry`, `MeshStandardMaterial`, `MeshPhysicalMaterial`, `Texture`, `CanvasTexture`, `PerspectiveCamera`, `OrthographicCamera`, `AmbientLight`, `HemisphereLight`, `DirectionalLight`, `PointLight`, `SpotLight`, `RectAreaLight`, `GLTFLoader` (`load` and `loadAsync`), `OrbitControls`, `WebGLRenderer` (`render`, `setSize`, `setPixelRatio`, `setAnimationLoop`, `dispose`), `Clock`, `Color`, `Vector2`, `Vector3` and `Euler` (order XYZ).
 
-Light intensities pass through unchanged: three.js and 67js use different units, so tune them by eye. A scene with at least one light switches the studio rig off, as in three.js; a scene with none keeps it. `AmbientLight` and `HemisphereLight` use their intensity only, not their colour.
+Light intensities pass through unchanged: three.js and Crucible use different units, so tune them by eye. A scene with at least one light switches the studio rig off, as in three.js; a scene with none keeps it. `AmbientLight` and `HemisphereLight` use their intensity only, not their colour.
 
 ## What it refuses
 
-Any other capitalised name, such as `MeshBasicMaterial`, `ShaderMaterial`, `WebGLRenderTarget` or `Fog`, throws an error that names the three.js call and the 67js call to use instead. The full mapping is in [If you know three.js](../../docs/learn/if-you-know-three-js.md).
+Any other capitalised name, such as `MeshBasicMaterial`, `ShaderMaterial`, `WebGLRenderTarget` or `Fog`, throws an error that names the three.js call and the Crucible call to use instead. The full mapping is in [If you know three.js](../../docs/learn/if-you-know-three-js.md).
 
 `createThreeCompat(core).collectScene(scene, camera)` returns `{ parts, environment, frame }` without a renderer, which is what the tests use.

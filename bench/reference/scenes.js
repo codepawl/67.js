@@ -12,7 +12,7 @@ import { materialPatternTextures, normalizeMaterialPattern } from '/src/material
 const HDRI_FILE = 'public/hdri/kloofendal_48d_partly_cloudy_puresky_1k.hdr';
 const HDRI_URL = '/hdri/kloofendal_48d_partly_cloudy_puresky_1k.hdr';
 // The HDRI holds its own sun: 6 pixels carry 48 percent of the sky light. Scenes add a sun light of their own, so Cycles and
-// EEVEE drew two shadows of each object while 67js, whose environment casts no shadow, drew one. Both sides cap the image
+// EEVEE drew two shadows of each object while Crucible, whose environment casts no shadow, drew one. Both sides cap the image
 // at this radiance, which removes the sun and its halo (208 of 524,288 pixels) and keeps the clouds.
 const HDRI_RADIANCE_LIMIT = 16;
 const ROBOT_FILE = 'tests/fixtures/RobotExpressive.glb';
@@ -180,7 +180,7 @@ export const KHRONOS_SCENES = Object.fromEntries(KHRONOS_ASSET_NAMES.map(name =>
 
 // Grand scenes: the scale people actually want to draw, built from the engine's terrain, vegetation and plain boxes.
 // Only what Blender can draw too is used: the terrain colours are vertex colours, the emissive windows are Emission, the
-// fog is a volume box. Blender rebuilds the 67js leaf model for foliage materials (see the README).
+// fog is a volume box. Blender rebuilds the Crucible leaf model for foliage materials (see the README).
 export function seededRandom(seed) {
   let state = seed >>> 0;
   return () => {
@@ -976,7 +976,7 @@ export const REFERENCE_SCENES = {
     ];
     const placedBox = (id, translation, scale, material) => ({ id, geometry: 'box', material, translation, scale });
     const recipe = {
-      format: '67js.scene', schemaVersion: 1,
+      format: 'crucible.scene', schemaVersion: 1,
       geometries: [{ id: 'box', type: 'box' }, { id: 'ball', type: 'sphere', segments: 48, rings: 32 }],
       materials: [
         { id: 'bricks', color: [1, 1, 1], roughness: 0.9, pattern: { type: 'bricks', size: 0.5 } },
@@ -1329,7 +1329,7 @@ export const REFERENCE_SCENES = {
   },
 };
 
-// Cloth against a Blender cloth bake (npm run reference -- --cloth). 67js bakes the sheet with its own solver and Blender
+// Cloth against a Blender cloth bake (npm run reference -- --cloth). Crucible bakes the sheet with its own solver and Blender
 // bakes the same sheet with its cloth modifier from rest to the same time; both are drawn in the same lit scene.
 // Blender's air damping of 1 acts on a 0.003 kg particle as a drag of about 54 per second (the terminal speed of a
 // falling sheet is 0.18 m/s), so both sides use a drag of 0.1 Blender units, which is 5.4 per second here.
@@ -1349,7 +1349,7 @@ async function clothScene({ kind, seconds }) {
     ? { id: 'cloth', geometry: 'sheet', material: 'cloth', translation: [0, 2.5, 0], scale: [2, 1.2, 1] }
     : { id: 'cloth', geometry: 'sheet', material: 'cloth', translation: [0, 1.4, 0], rotation: [-0.7071068, 0, 0, 0.7071068], scale: [1.6, 1.6, 1] };
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'sheet', type: 'grid', segments: CLOTH_SEGMENTS }, { id: 'ball', type: 'sphere', segments: 48, rings: 32 }, { id: 'box', type: 'box' }],
     materials: [{ id: 'cloth', color: [0.8, 0.25, 0.2], roughness: 0.7 }, { id: 'ball', color: [0.25, 0.4, 0.7], roughness: 0.4 }, { id: 'ground', color: [0.5, 0.5, 0.5], roughness: 0.8 }],
     nodes: [
@@ -1383,7 +1383,7 @@ async function clothScene({ kind, seconds }) {
       airDamping: BLENDER_AIR_DAMPING,
       pinTopRow: isBanner,
       windStrength: isBanner ? BANNER_BLENDER_WIND_STRENGTH : 0,
-      // The wind pushes along the sheet's facing, +Z in 67js axes.
+      // The wind pushes along the sheet's facing, +Z in Crucible axes.
       windDirection: [0, 0, 1],
       colliders: isBanner ? [] : ['ball', 'floor'],
     },

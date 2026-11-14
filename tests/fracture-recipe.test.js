@@ -9,7 +9,7 @@ await loadPhysicsEngine();
 
 function wallRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'slab', type: 'box', bevel: 0 }, { id: 'ball', type: 'sphere' }],
     materials: [{ id: 'brick', color: [0.6, 0.3, 0.2] }],
     nodes: [

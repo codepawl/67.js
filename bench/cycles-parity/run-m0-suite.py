@@ -1,4 +1,4 @@
-"""Run the M0 Cycles 5.3 vs 67js native parity benchmark suite."""
+"""Run the M0 Cycles 5.3 vs Crucible native parity benchmark suite."""
 import json
 import os
 import subprocess

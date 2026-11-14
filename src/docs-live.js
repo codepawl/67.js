@@ -1,10 +1,10 @@
 // Live examples for the documentation: the code beside a small canvas that runs it.
 // Each run gets a fresh same-origin iframe, so a loop, a listener or a WebGL context of the last run cannot leak into the
-// next one. The iframe imports `67js` through an import map whose entries are small modules that re-export the engine
+// next one. The iframe imports `crucible` through an import map whose entries are small modules that re-export the engine
 // this page already loaded, so the docs run the same build as the site and need no published package.
 import { highlightCode } from './code-highlight.js';
 
-// Every addon the package exports, loaded only when an example imports it (67js/addons/<name>).
+// Every addon the package exports, loaded only when an example imports it (crucible/addons/<name>).
 const addonLoaders = import.meta.glob([
   './model.js',
   './nature.js',
@@ -101,8 +101,8 @@ function importSpecifiers(source) {
 }
 
 function sourceFileFor(specifier) {
-  if (specifier === '67js' || specifier === '@codepawlhq/67js') return 'core';
-  const addon = specifier.match(/^(?:67js|@codepawlhq\/67js)\/addons\/([\w-]+)$/);
+  if (specifier === 'crucible' || specifier === '@codepawlhq/crucible') return 'core';
+  const addon = specifier.match(/^(?:crucible|@codepawlhq\/crucible)\/addons\/([\w-]+)$/);
   return addon ? `./${addon[1]}.js` : null;
 }
 

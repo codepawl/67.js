@@ -14,7 +14,7 @@ const archive = resolve('public', release.tarball.slice(1));
 const binary = await readFile(archive);
 assert.equal(release.version, metadata.version);
 assert.equal(release.packageName, metadata.name);
-assert.equal(release.packageAlias, '67js');
+assert.equal(release.packageAlias, 'crucible');
 assert.equal(release.integrity, `sha512-${createHash('sha512').update(binary).digest('base64')}`);
 assert.ok(binary.length <= sizeBudgets.archiveBytes, `Library and optional addon wrappers must fit within the archive budget of ${sizeBudgets.archiveBytes} bytes.`);
 assert.ok((await readFile('build/67.module.js')).length < 150000, 'The core must exclude the optional asset decoder.');
@@ -33,7 +33,7 @@ async function checkArchiveSize(archiveBytes) {
   if (ceilingFailure && process.argv.includes('--absolute')) assert.fail(ceilingFailure);
   if (ceilingFailure) console.log(ceilingFailure);
 }
-const consumer = await mkdtemp(resolve(tmpdir(), '67js-consumer-'));
+const consumer = await mkdtemp(resolve(tmpdir(), 'crucible-consumer-'));
 await writeFile(resolve(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
 const npmCli = process.env.npm_execpath ?? resolve(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
 const published = process.argv.includes('--published');
@@ -42,7 +42,7 @@ const published = process.argv.includes('--published');
 let installTarget;
 if (published) {
   assert.equal(release.registryPublished, true, 'Published consumer checks require registry-backed release metadata.');
-  installTarget = `67js@npm:${metadata.name}@${metadata.version}`;
+  installTarget = `crucible@npm:${metadata.name}@${metadata.version}`;
 } else {
   const sourcePack = spawnSync(process.execPath, [npmCli, 'pack', '--ignore-scripts', '--json', '--pack-destination', consumer], { windowsHide: true, encoding: 'utf8' });
   assert.equal(sourcePack.status, 0, sourcePack.stderr);
@@ -51,31 +51,31 @@ if (published) {
   assert.ok(packedSource?.filename, 'npm pack must return a source archive.');
   await checkArchiveSize(packedSource.size);
   const sourceArchive = resolve(consumer, packedSource.filename);
-  installTarget = `67js@file:${sourceArchive.replaceAll('\\', '/')}`;
+  installTarget = `crucible@file:${sourceArchive.replaceAll('\\', '/')}`;
 }
 const installed = spawnSync(process.execPath, [npmCli, 'install', installTarget, '@dimforge/rapier3d-compat@0.21.0', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: consumer, windowsHide: true, encoding: 'utf8' });
 assert.equal(installed.status, 0, installed.stderr);
 if (published) {
   const installedLock = JSON.parse(await readFile(resolve(consumer, 'package-lock.json'), 'utf8'));
-  assert.equal(installedLock.packages['node_modules/67js'].integrity, release.integrity, 'Installed npm package differs from release integrity.');
+  assert.equal(installedLock.packages['node_modules/crucible'].integrity, release.integrity, 'Installed npm package differs from release integrity.');
 }
 const example = `import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { VERSION, Renderer67, box, assemblyOffset, cameraView, fitPerspectiveDistance, createAnimationClip, sampleAnimationClip, EFFECT_PRESETS, createMorphPose, MAX_MORPH_TARGETS, exportGlb } from '67js';
-import { createModel } from '67js/addons/model';
-import * as nature from '67js/addons/nature';
-import { createMotionScene } from '67js/addons/motion';
-import { createCanvas2D } from '67js/addons/canvas2d';
-import { parseGltf } from '67js/addons/gltf';
-import { sculptGeometry } from '67js/addons/sculpt';
-import { createSurfacePatch } from '67js/addons/surface';
-import { createMeshQueryIndex, createMeshPairQuery } from '67js/addons/mesh-query';
-import { meshFromGeometry, lintMesh } from '67js/addons/mesh';
-import { shrinkwrapGeometry } from '67js/addons/shrinkwrap';
-import { createPhysicsScene, planPhysicsScene } from '67js/addons/physics';
+import { VERSION, CrucibleRenderer, box, assemblyOffset, cameraView, fitPerspectiveDistance, createAnimationClip, sampleAnimationClip, EFFECT_PRESETS, createMorphPose, MAX_MORPH_TARGETS, exportGlb } from 'crucible';
+import { createModel } from 'crucible/addons/model';
+import * as nature from 'crucible/addons/nature';
+import { createMotionScene } from 'crucible/addons/motion';
+import { createCanvas2D } from 'crucible/addons/canvas2d';
+import { parseGltf } from 'crucible/addons/gltf';
+import { sculptGeometry } from 'crucible/addons/sculpt';
+import { createSurfacePatch } from 'crucible/addons/surface';
+import { createMeshQueryIndex, createMeshPairQuery } from 'crucible/addons/mesh-query';
+import { meshFromGeometry, lintMesh } from 'crucible/addons/mesh';
+import { shrinkwrapGeometry } from 'crucible/addons/shrinkwrap';
+import { createPhysicsScene, planPhysicsScene } from 'crucible/addons/physics';
 assert.equal(VERSION, '${metadata.version}');
-assert.equal(typeof Renderer67, 'function');
+assert.equal(typeof CrucibleRenderer, 'function');
 assert.equal(MAX_MORPH_TARGETS, 64);
 assert.ok(createMorphPose(64).weights instanceof Float32Array);
 const morphGeometry = box();
@@ -98,7 +98,7 @@ assert.deepEqual(importedMorph.parts[0].geometry.uvs, morphGeometry.uvs);
 assert.deepEqual(importedMorph.parts[0].material.emissiveColor, [1, 0.25, 0]);
 assert.equal(importedMorph.parts[0].material.emission, 4);
 importedMorph.dispose();
-assert.throws(() => new Renderer67({}, [], { environment: { pointLights: Array(17).fill({ position: [0, 1, 0] }) } }), /at most/, 'Packed renderer must validate light limits before requesting a GPU context.');
+assert.throws(() => new CrucibleRenderer({}, [], { environment: { pointLights: Array(17).fill({ position: [0, 1, 0] }) } }), /at most/, 'Packed renderer must validate light limits before requesting a GPU context.');
 assert.ok(box().positions.length > 0);
 const sculptSource = box();
 const sculptOutput = sculptGeometry(sculptSource, [{ type: 'inflate', center: [0, 0, 0], radius: 10, strength: 0.05 }]);
@@ -132,7 +132,7 @@ assert.deepEqual(wrappedPatch.geometry.indices, packedPatch.indices);
 assert.deepEqual(wrappedPatch.geometry.uvs, packedPatch.uvs);
 assert.ok(wrappedPatch.geometry.positions.every((value, index) => index % 3 !== 2 || Math.abs(value - 0.502) < 1e-6));
 if (${!published || metadata.version !== '0.4.0'}) {
-  const { createSurfaceAttachment } = await import('67js/addons/surface-attachment');
+  const { createSurfaceAttachment } = await import('crucible/addons/surface-attachment');
   const attachmentMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   const attachmentMorph = createMorphPose(1);
   const target = { matrix: attachmentMatrix, morph: attachmentMorph, geometry: {
@@ -151,9 +151,9 @@ if (${!published || metadata.version !== '0.4.0'}) {
 }
 solidIndex.dispose();
 if (${!published}) {
-  const { createAgentScene, loadAgentSceneModules, resolveAgentShadow } = await import('67js/addons/agent-scene');
+  const { createAgentScene, loadAgentSceneModules, resolveAgentShadow } = await import('crucible/addons/agent-scene');
   const agentScene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.2, 0.4, 0.5] }],
     nodes: [{ id: 'object', geometry: 'cube', material: 'paint' }],
@@ -207,28 +207,28 @@ if (${!published}) {
   agentScene.restore(motionCheckpoint, { expectedRevision: agentScene.revision });
   assert.deepEqual(agentScene.exportRecipe(), authoredRecipe);
   agentScene.releaseCheckpoint(motionCheckpoint);
-  const { createAgentAssetScene } = await import('67js/addons/agent-asset');
+  const { createAgentAssetScene } = await import('crucible/addons/agent-asset');
   const parsedAgentAsset = await parseGltf(exportGlb(agentScene.parts));
-  const importedSession = createAgentAssetScene(parsedAgentAsset, { format: '67js.asset', schemaVersion: 1, assetId: '0'.repeat(64) });
+  const importedSession = createAgentAssetScene(parsedAgentAsset, { format: 'crucible.asset', schemaVersion: 1, assetId: '0'.repeat(64) });
   const importedPart = importedSession.parts[0];
   const importedCheckpoint = importedSession.checkpoint();
   importedSession.apply([{ type: 'set-root', translation: [1, 0, 0] }], { expectedRevision: 0 });
   assert.equal(importedSession.parts[0], importedPart);
   importedSession.restore(importedCheckpoint, { expectedRevision: 1 });
   assert.equal(importedSession.parts[0], importedPart);
-  assert.equal(importedSession.exportRecipe().format, '67js.asset');
+  assert.equal(importedSession.exportRecipe().format, 'crucible.asset');
   parsedAgentAsset.dispose();
 }
 const parts = createModel();
 assert.equal(parts.length, 574);
 assert.ok(parts.every(part => assemblyOffset(part, 1).some(value => value !== 0)));
 assert.ok(Object.keys(nature).length > 0);
-await assert.rejects(() => import('67js/addons/film'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
-const installedMetadata = JSON.parse(readFileSync(new URL('./node_modules/67js/package.json', import.meta.url), 'utf8'));
+await assert.rejects(() => import('crucible/addons/film'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
+const installedMetadata = JSON.parse(readFileSync(new URL('./node_modules/crucible/package.json', import.meta.url), 'utf8'));
 const exportedEntries = Object.keys(installedMetadata.exports);
 assert.ok(exportedEntries.length > 30, 'The installed package must publish its export map.');
 for (const entry of exportedEntries) {
-  const specifier = entry === '.' ? '67js' : '67js/' + entry.slice(2);
+  const specifier = entry === '.' ? 'crucible' : 'crucible/' + entry.slice(2);
   const resolvedPath = fileURLToPath(import.meta.resolve(specifier));
   assert.ok(existsSync(resolvedPath), 'Export ' + entry + ' resolves to a file that is missing from the package.');
   if (entry === './package.json') continue;

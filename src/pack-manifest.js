@@ -1,10 +1,11 @@
-// Data-only packs: a folder with a 67js-pack.json manifest and the files it lists (GLB models, images, .cube looks, .hdr
+// Data-only packs: a folder with a crucible-pack.json manifest and the files it lists (GLB models, images, .cube looks, .hdr
 // environments, material and recipe JSON). The checks here are pure; scripts/agent-packs.mjs reads the folder and applies them.
 // A pack never carries code, and nothing in it is fetched: every file is local and listed by a relative path.
 import { invalidField } from './field-error.js';
 
-export const PACK_MANIFEST_FILE = '67js-pack.json';
-export const PACK_FORMAT = '67js.pack';
+import { currentFormatName, LEGACY_ENGINE_KEY } from './legacy-names.js';
+export const PACK_MANIFEST_FILE = 'crucible-pack.json';
+export const PACK_FORMAT = 'crucible.pack';
 export const PACK_SCHEMA_VERSION = 1;
 export const MAXIMUM_PACK_FILES = 256;
 export const MAXIMUM_PACK_BYTES = 256 * 1024 * 1024;
@@ -194,21 +195,21 @@ function normalizeItems(kind, items, label, prefix) {
 }
 
 /**
- * Checks a parsed 67js-pack.json and returns a clean copy. `label` names the pack in errors (its folder name) and
- * `packageVersion` is the running 67js version that engines["67js"] must admit.
+ * Checks a parsed crucible-pack.json and returns a clean copy. `label` names the pack in errors (its folder name) and
+ * `packageVersion` is the running Crucible version that engines["crucible"] must admit.
  */
 export function validatePackManifest(manifest, { label, packageVersion }) {
   const prefix = `pack "${label}" ${PACK_MANIFEST_FILE}`;
   assertKnownKeys(manifest, ['format', 'schemaVersion', 'name', 'version', 'engines', 'license', 'author', 'description', 'contents'], prefix);
-  if (manifest.format !== PACK_FORMAT) throw invalidField(`${prefix}.format`, manifest.format, `"${PACK_FORMAT}"`);
+  if (currentFormatName(manifest.format) !== PACK_FORMAT) throw invalidField(`${prefix}.format`, manifest.format, `"${PACK_FORMAT}"`);
   if (manifest.schemaVersion !== PACK_SCHEMA_VERSION) throw invalidField(`${prefix}.schemaVersion`, manifest.schemaVersion, String(PACK_SCHEMA_VERSION));
   const name = assertIdentifier(manifest.name, `${prefix}.name`);
   if (typeof manifest.version !== 'string' || !parseVersion(manifest.version)) throw invalidField(`${prefix}.version`, manifest.version, 'a version of three numbers, such as "1.0.0"');
-  assertKnownKeys(manifest.engines, ['67js'], `${prefix}.engines`);
-  const range = manifest.engines['67js'];
+  assertKnownKeys(manifest.engines, ['crucible', LEGACY_ENGINE_KEY], `${prefix}.engines`);
+  const range = manifest.engines['crucible'] ?? manifest.engines[LEGACY_ENGINE_KEY];
   const admitted = semverSatisfies(packageVersion, range);
-  if (admitted === null) throw invalidField(`${prefix}.engines.67js`, range, 'a range of space-separated comparators >=, >, <, <=, =, ^ or ~ with numbers, such as ">=0.19.0"');
-  if (!admitted) throw invalidField(`${prefix}.engines.67js`, range, `a range that admits the installed 67js ${packageVersion}, such as ">=${packageVersion}"; this pack needs another 67js version`);
+  if (admitted === null) throw invalidField(`${prefix}.engines.crucible`, range, 'a range of space-separated comparators >=, >, <, <=, =, ^ or ~ with numbers, such as ">=0.19.0"');
+  if (!admitted) throw invalidField(`${prefix}.engines.crucible`, range, `a range that admits the installed Crucible ${packageVersion}, such as ">=${packageVersion}"; this pack needs another Crucible version`);
   const license = assertText(manifest.license, `${prefix}.license`, 64, '"CC0-1.0"');
   const author = assertText(manifest.author, `${prefix}.author`, 120, '"Your Name"');
   const description = assertText(manifest.description, `${prefix}.description`, 200, '"Brick and metal materials"');
@@ -217,5 +218,5 @@ export function validatePackManifest(manifest, { label, packageVersion }) {
   for (const kind of Object.keys(PACK_CONTENT_KINDS)) {
     contents[kind] = manifest.contents[kind] === undefined ? [] : normalizeItems(kind, manifest.contents[kind], label, prefix);
   }
-  return { format: PACK_FORMAT, schemaVersion: PACK_SCHEMA_VERSION, name, version: manifest.version, engines: { '67js': range }, license, author, description, contents };
+  return { format: PACK_FORMAT, schemaVersion: PACK_SCHEMA_VERSION, name, version: manifest.version, engines: { 'crucible': range }, license, author, description, contents };
 }

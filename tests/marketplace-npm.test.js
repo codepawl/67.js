@@ -4,7 +4,7 @@ import { npmManifestPath } from '../src/marketplace-npm.js';
 
 test('a plain or scoped npm name becomes its registry manifest path', () => {
   assert.equal(npmManifestPath('hover-controller'), 'hover-controller/latest');
-  assert.equal(npmManifestPath('@studio/67js-hover'), '@studio%2F67js-hover/latest');
+  assert.equal(npmManifestPath('@studio/crucible-hover'), '@studio%2Fcrucible-hover/latest');
 });
 
 test('a name that npm would not publish is refused instead of reaching the request', () => {

@@ -241,7 +241,7 @@ test('hostile instance records are rejected before any point is made', () => {
 
 test('a recipe with an instanced node creates one instanced batch of ordinary nodes', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'stone', type: 'sphere' }, { id: 'floor', type: 'box' }],
     materials: [{ id: 'paint' }],
     nodes: [

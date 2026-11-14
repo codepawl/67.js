@@ -1,10 +1,10 @@
-# Scores each 67js render against Cycles and EEVEE with FLIP, and saves side by side images.
+# Scores each Crucible render against Cycles and EEVEE with FLIP, and saves side by side images.
 #   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/score.py <work directory> <output directory>
 # A scene that declares brightRegion (scenes.js) also gets region-* scores over the bright pixels of its Cycles image.
 # FLIP is 0 for identical images, and higher means a larger visible difference. EEVEE against Cycles is a yardstick:
 # it shows what a good rasterizer scores on the same scene.
-# Quantisation (#258): 67js is read back from an 8-bit PNG, so the EEVEE array is rounded to 8 bits in display space the same
-# way before FLIP. Cycles stays float because it is the reference both sides are measured against. 67js is not read back as
+# Quantisation (#258): Crucible is read back from an 8-bit PNG, so the EEVEE array is rounded to 8 bits in display space the same
+# way before FLIP. Cycles stays float because it is the reference both sides are measured against. Crucible is not read back as
 # float because the harness reads canvas pixels, which are 8-bit by construction.
 #   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/score.py --self-test
 import json
@@ -22,7 +22,7 @@ PANEL_WIDTH = 480
 PANEL_HEIGHT = 270
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     """The same curve and gamma as the post-processing shader in src/post.js, so both sides meet in one display space."""
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
@@ -35,8 +35,8 @@ def quantise_to_8_bit(display):
 
 
 def load_eevee(path):
-    """An EEVEE render in the same 8-bit display space as a 67js PNG, so FLIP sees equal rounding on both sides."""
-    return quantise_to_8_bit(tone_map_like_67js(np.load(path)))
+    """An EEVEE render in the same 8-bit display space as a Crucible PNG, so FLIP sees equal rounding on both sides."""
+    return quantise_to_8_bit(tone_map_like_crucible(np.load(path)))
 
 
 def self_test():
@@ -47,12 +47,12 @@ def self_test():
         np.save(path, linear)
         loaded = load_eevee(path)
         png_path = Path(directory) / "scene.png"
-        Image.fromarray(np.round(np.clip(tone_map_like_67js(linear), 0, 1) * 255).astype(np.uint8)).save(png_path)
+        Image.fromarray(np.round(np.clip(tone_map_like_crucible(linear), 0, 1) * 255).astype(np.uint8)).save(png_path)
         written = load_png(png_path)
     assert np.array_equal(loaded, written), "the EEVEE array does not match what an 8-bit PNG of it reads back as"
     assert np.array_equal(np.round(loaded * 255), np.round(loaded * 255).astype(np.uint8)), "values are not whole 8-bit steps"
     assert np.array_equal(quantise_to_8_bit(loaded), loaded), "quantising twice changed the values"
-    float_display = tone_map_like_67js(linear)
+    float_display = tone_map_like_crucible(linear)
     assert 0 < np.abs(loaded - float_display).max() <= 0.5 / 255 + 1e-6, "the rounding error is outside half a step"
     print("score self-test ok")
 
@@ -108,8 +108,8 @@ def side_by_side(cycles, eevee, gpu, scores):
     panels = [
         panel(cycles, "Cycles"),
         panel(eevee, f"EEVEE (FLIP {scores['eevee-vs-cycles']})"),
-        panel(gpu, f"67js GPU (FLIP {scores['gpu-vs-cycles']})"),
-        panel(error_map, "FLIP error, 67js GPU against Cycles"),
+        panel(gpu, f"Crucible GPU (FLIP {scores['gpu-vs-cycles']})"),
+        panel(error_map, "FLIP error, Crucible GPU against Cycles"),
     ]
     sheet = Image.new("RGB", (PANEL_WIDTH * 2, (PANEL_HEIGHT + LABEL_HEIGHT) * 2))
     for index, item in enumerate(panels):
@@ -122,7 +122,7 @@ def score_path_tracer(work_directory, output_directory, backend_suffix=""):
     timings = json.loads((work_directory / f"pathtracer{backend_suffix}-timings.json").read_text(encoding="utf-8"))
     results = {}
     for scene_id in sorted(timings):
-        cycles = tone_map_like_67js(np.load(work_directory / f"{scene_id}-cycles.npy"))
+        cycles = tone_map_like_crucible(np.load(work_directory / f"{scene_id}-cycles.npy"))
         traced = load_png(work_directory / f"{scene_id}-pathtracer{backend_suffix}.png")
         results[scene_id] = {"pathtracer-vs-cycles": flip_score(cycles, traced), **timings[scene_id]}
     report = {"metric": "FLIP (LDR), mean error against Cycles, lower is better", "scores": results}
@@ -138,7 +138,7 @@ def score_baked(work_directory, output_directory, scene_ids):
     images_directory.mkdir(parents=True, exist_ok=True)
     results = {}
     for scene_id in scene_ids:
-        cycles = tone_map_like_67js(np.load(work_directory / f"{scene_id}-cycles.npy"))
+        cycles = tone_map_like_crucible(np.load(work_directory / f"{scene_id}-cycles.npy"))
         eevee = load_eevee(work_directory / f"{scene_id}-eevee.npy")
         gpu = load_png(work_directory / f"{scene_id}-gpu.png")
         scores = {
@@ -190,7 +190,7 @@ def main():
     scene_ids = sorted(path.stem for path in (work_directory / "scenes").glob("*.json"))
     results = {}
     for scene_id in scene_ids:
-        cycles = tone_map_like_67js(np.load(work_directory / f"{scene_id}-cycles.npy"))
+        cycles = tone_map_like_crucible(np.load(work_directory / f"{scene_id}-cycles.npy"))
         eevee = load_eevee(work_directory / f"{scene_id}-eevee.npy")
         gpu = load_png(work_directory / f"{scene_id}-gpu.png")
         cpu = load_png(work_directory / f"{scene_id}-cpu.png")

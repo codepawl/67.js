@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: 0 bytes. The change is in the Cook WGSL kernels and does not touch the scene bundles; the webgpu kernel string grows by about 2.5 KB of source (an 81 entry table and three small functions), which gzips to under 1 KB, for a 5.5 times lower error against Cycles on the metal scene outside the fireflies (#959).

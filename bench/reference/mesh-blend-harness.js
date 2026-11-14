@@ -3,7 +3,7 @@
 //   window.setupScene({ scene: 'nature' | 'lit-box', mode: 'plain' | 'installed' | 'blend' })
 //   window.snapshot() -> PNG data URL, window.measureFrames(count) -> milliseconds per frame, window.teardown()
 import { mat4 } from 'gl-matrix';
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { box, cylinder, sphere } from '/src/geometry.js';
 import { createNoiseHeight, createTerrain } from '/src/terrain.js';
 
@@ -62,7 +62,7 @@ function litBoxScene() {
 
 window.setupScene = async ({ scene, mode }) => {
   const built = scene === 'nature' ? natureScene(mode === 'blend') : litBoxScene();
-  renderer = new Renderer67(canvas, built.parts, {
+  renderer = new CrucibleRenderer(canvas, built.parts, {
     ground: scene === 'lit-box', hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, world: scene === 'nature',
     ...(built.shadowBounds ? { shadowBounds: built.shadowBounds } : {}),
   });

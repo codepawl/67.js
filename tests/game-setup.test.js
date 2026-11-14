@@ -20,7 +20,7 @@ const RULES = {
 
 function recipeWith(game) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box' }], materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'creature', geometry: 'block', material: 'paint' }, { id: 'coin-1', geometry: 'block', material: 'paint' }],
     ...(game ? { game } : {}),
@@ -95,7 +95,7 @@ test('scene_capabilities topic game lists the names the validator accepts', () =
 });
 
 async function fakeBuild() {
-  const build = await mkdtemp(join(tmpdir(), '67js-fake-build-'));
+  const build = await mkdtemp(join(tmpdir(), 'crucible-fake-build-'));
   await writeFile(join(build, 'game.js'), 'import { a } from "./chunk-a.js";\nconst lazy = () => import("./chunk-b.js");\n');
   await writeFile(join(build, 'chunk-a.js'), 'export const a = 1; throw new Error("add import \'./not-a-file.js\'");');
   await writeFile(join(build, 'chunk-b.js'), 'import "./chunk-a.js";');
@@ -106,7 +106,7 @@ async function fakeBuild() {
 test('the web export copies only the engine modules the entry reaches and writes a runnable folder', async () => {
   const build = await fakeBuild();
   assert.deepEqual(await engineModuleNames(build), ['chunk-a.js', 'chunk-b.js', 'game.js']);
-  const out = join(await mkdtemp(join(tmpdir(), '67js-web-out-')), 'site');
+  const out = join(await mkdtemp(join(tmpdir(), 'crucible-web-out-')), 'site');
   const summary = await writeWebBuild({ recipe: recipeWith({ player: { node: 'creature' } }), buildDirectory: build, outputDirectory: out, title: 'A <b>"game"</b>' });
   assert.deepEqual((await readdir(out)).sort(), ['engine', 'game.json', 'index.html']);
   assert.deepEqual((await readdir(join(out, 'engine'))).sort(), ['chunk-a.js', 'chunk-b.js', 'game.js']);
@@ -121,7 +121,7 @@ test('the web export copies only the engine modules the entry reaches and writes
 
 test('the web export refuses what it cannot play and says how to fix it', async () => {
   const build = await fakeBuild();
-  const out = () => mkdtemp(join(tmpdir(), '67js-web-refuse-'));
+  const out = () => mkdtemp(join(tmpdir(), 'crucible-web-refuse-'));
   const game = { player: { node: 'creature' } };
   await assert.rejects(async () => writeWebBuild({ recipe: recipeWith(), buildDirectory: build, outputDirectory: await out() }), /no game.*set-game/);
   await assert.rejects(async () => writeWebBuild({ recipe: recipeWith({ ...game, physics: true }), buildDirectory: build, outputDirectory: await out() }), /no physics section.*set game\.physics to false/s);
@@ -129,7 +129,7 @@ test('the web export refuses what it cannot play and says how to fix it', async 
   placed.nodes.push({ id: 'tree', asset: { id: 'a'.repeat(64) } });
   await assert.rejects(async () => writeWebBuild({ recipe: placed, buildDirectory: build, outputDirectory: await out() }), /needs the bytes of the catalog assets placed by tree/);
   await assert.rejects(async () => writeWebBuild({ recipe: { ...placed, nodes: [{ id: 'grove', vegetation: {} }] }, buildDirectory: build, outputDirectory: await out() }), /does not carry grown vegetation/);
-  await assert.rejects(async () => writeWebBuild({ recipe: recipeWith(game), buildDirectory: await mkdtemp(join(tmpdir(), '67js-empty-build-')), outputDirectory: await out() }), /game\.js is missing.*build:lib/);
+  await assert.rejects(async () => writeWebBuild({ recipe: recipeWith(game), buildDirectory: await mkdtemp(join(tmpdir(), 'crucible-empty-build-')), outputDirectory: await out() }), /game\.js is missing.*build:lib/);
   const big = await fakeBuild();
   await writeFile(join(big, 'chunk-a.js'), `${'/'.repeat(WEB_EXPORT_LIMITS.maxEngineBytes)}\nexport {};`);
   await assert.rejects(async () => writeWebBuild({ recipe: recipeWith(game), buildDirectory: big, outputDirectory: await out() }), /above the \d+ byte limit/);

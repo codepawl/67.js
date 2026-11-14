@@ -1,4 +1,4 @@
-// The default look report (issue #988): the FLIP scores of each variant against Cycles, who beats the 67js defaults, and the JSON shape written to
+// The default look report (issue #988): the FLIP scores of each variant against Cycles, who beats the Crucible defaults, and the JSON shape written to
 // bench/reference/default-look.json. No browser and no Blender in here, so tests/default-look-report.test.js runs it as it is.
 import { BASELINE_VARIANT, CHALLENGER_VARIANTS } from './default-look-variants.js';
 

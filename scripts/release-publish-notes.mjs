@@ -20,7 +20,7 @@ if (releaseExists()) {
 } else {
   const notesFile = join(await mkdtemp(join(tmpdir(), 'release-notes-')), 'notes.md');
   await writeFile(notesFile, releaseNotes(await readFile('CHANGELOG.md', 'utf8'), metadata.version, metadata.name));
-  const created = spawnSync('gh', ['release', 'create', tag, '--target', commit, '--title', `67js ${metadata.version}`, '--notes-file', notesFile], { stdio: 'inherit' });
+  const created = spawnSync('gh', ['release', 'create', tag, '--target', commit, '--title', `Crucible ${metadata.version}`, '--notes-file', notesFile], { stdio: 'inherit' });
   // A run that lost a race to create the same release is not a failed publish.
   if (created.status !== 0 && !releaseExists()) throw new Error(`gh release create failed with exit code ${created.status}.`);
 }

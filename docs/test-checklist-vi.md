@@ -6,9 +6,9 @@ Các recipe nằm ở cuối file (A1 đến A9). Mỗi recipe đã chạy qua `
 
 ## Bắt đầu
 
-1. Chạy MCP server từ [README](https://github.com/codepawl/67.js#readme): `npx 67js-mcp --backend gpu --memory 192`. Thêm `--assets <đường dẫn tuyệt đối tới thư mục>` cho các mục có GLB hoặc PNG. Cấu hình client nằm trong [MCP reference](https://67js.codepawl.com/mcp.md).
+1. Chạy MCP server từ [README](https://github.com/codepawl/crucible#readme): `npx crucible-mcp --backend gpu --memory 192`. Thêm `--assets <đường dẫn tuyệt đối tới thư mục>` cho các mục có GLB hoặc PNG. Cấu hình client nằm trong [MCP reference](https://crucible.codepawl.com/mcp.md).
 2. Chạy site local: `npm run dev`, rồi mở `http://127.0.0.1:5173/`. Cổng 5173 là cổng mặc định của Vite, và Vite đổi cổng nếu bị chiếm.
-3. Site live nằm ở `https://67js.codepawl.com/`. Mở `https://67js.codepawl.com/release.json` và so trường `commit` với commit mới nhất của `main`. Nếu thấy bản cũ, bấm Ctrl+Shift+R. Nếu vẫn cũ, mở DevTools, vào Application, Storage, bấm Clear site data, rồi tải lại.
+3. Site live nằm ở `https://crucible.codepawl.com/`. Mở `https://crucible.codepawl.com/release.json` và so trường `commit` với commit mới nhất của `main`. Nếu thấy bản cũ, bấm Ctrl+Shift+R. Nếu vẫn cũ, mở DevTools, vào Application, Storage, bấm Clear site data, rồi tải lại.
 4. Tạo thư mục asset cho các mục 6, 7, 8 và 9. Chạy ở thư mục gốc của repo:
 
    ```powershell
@@ -30,7 +30,7 @@ Các recipe nằm ở cuối file (A1 đến A9). Mỗi recipe đã chạy qua `
 
 ## 2. Phản chiếu nước nhám (#372)
 
-- Mở: `https://67js.codepawl.com/showcase.html?scene=port`. Cảnh Container port có mặt nước (`waterReflection: true`) và tải mất khoảng 30 giây. Đợi tới khi hết dòng "Loading", rồi kéo chuột để xoay camera.
+- Mở: `https://crucible.codepawl.com/showcase.html?scene=port`. Cảnh Container port có mặt nước (`waterReflection: true`) và tải mất khoảng 30 giây. Đợi tới khi hết dòng "Loading", rồi kéo chuột để xoay camera.
 - Nhìn: mặt biển sau con tàu, ngay dưới đường bờ, có dải phản chiếu sáng ấm và hơi nhòe của bờ và trời.
 - Đạt: còn phản chiếu mờ. Trượt: mặt nước chỉ còn màu phẳng của môi trường.
 - Chạy thêm `node --test tests/water-reflection.test.js` để kiểm tra phần tính độ nhòe.
@@ -93,7 +93,7 @@ Các recipe nằm ở cuối file (A1 đến A9). Mỗi recipe đã chạy qua `
 
 ## 12. Depth MSAA 24 bit (#387)
 
-- Mở: `https://67js.codepawl.com/object.html`, hoặc `http://127.0.0.1:5173/object.html` khi chạy local. Mở Console và chạy `__studio.renderer.renderTargets.report()`.
+- Mở: `https://crucible.codepawl.com/object.html`, hoặc `http://127.0.0.1:5173/object.html` khi chạy local. Mở Console và chạy `__studio.renderer.renderTargets.report()`.
 - Nhìn: trong `targets`, mục `multisampleDepth` có `format` `DEPTH_COMPONENT24` và `samples` 4.
 - Đạt: thấy `DEPTH_COMPONENT24` và ảnh bình thường. Trượt: `multisampleDepth` dùng `DEPTH_COMPONENT16`.
 
@@ -104,53 +104,53 @@ Dán nguyên JSON vào `scene_create`. Id asset là placeholder, thay bằng id 
 ### A1
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"bed","color":[0.55,0.45,0.3],"roughness":0.9},{"id":"post","color":[0.85,0.85,0.9],"roughness":0.6},{"id":"water","tag":"water","waterPreset":"lake","color":[0.1,0.3,0.4],"roughness":0.02,"opacity":0.7}],"nodes":[{"id":"bed","geometry":"cube","material":"bed","translation":[0,-2.1,0],"scale":[30,0.2,30]},{"id":"post","geometry":"cube","material":"post","translation":[0,-0.2,0],"scale":[0.5,3.6,0.5]},{"id":"water","geometry":"cube","material":"water","scale":[30,0.05,30]}],"camera":{"eye":[6,3,6],"target":[0,-0.8,0],"fov":40}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"bed","color":[0.55,0.45,0.3],"roughness":0.9},{"id":"post","color":[0.85,0.85,0.9],"roughness":0.6},{"id":"water","tag":"water","waterPreset":"lake","color":[0.1,0.3,0.4],"roughness":0.02,"opacity":0.7}],"nodes":[{"id":"bed","geometry":"cube","material":"bed","translation":[0,-2.1,0],"scale":[30,0.2,30]},{"id":"post","geometry":"cube","material":"post","translation":[0,-0.2,0],"scale":[0.5,3.6,0.5]},{"id":"water","geometry":"cube","material":"water","scale":[30,0.05,30]}],"camera":{"eye":[6,3,6],"target":[0,-0.8,0],"fov":40}}
 ```
 
 ### A2
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"ground","color":[0.45,0.4,0.33],"roughness":0.9},{"id":"wall","color":[0.7,0.68,0.62],"roughness":0.8}],"nodes":[{"id":"ground","geometry":"cube","material":"ground","translation":[0,-0.1,0],"scale":[60,0.2,60]},{"id":"wall","geometry":"cube","material":"wall","translation":[0,2,0],"scale":[6,4,0.6]},{"id":"block","geometry":"cube","material":"wall","translation":[-5,1,3],"scale":[2,2,2]}],"environment":{"lightDirection":[0.9,0.12,0.3]},"camera":{"eye":[-10,3,-12],"target":[0,1.5,0],"fov":45}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"ground","color":[0.45,0.4,0.33],"roughness":0.9},{"id":"wall","color":[0.7,0.68,0.62],"roughness":0.8}],"nodes":[{"id":"ground","geometry":"cube","material":"ground","translation":[0,-0.1,0],"scale":[60,0.2,60]},{"id":"wall","geometry":"cube","material":"wall","translation":[0,2,0],"scale":[6,4,0.6]},{"id":"block","geometry":"cube","material":"wall","translation":[-5,1,3],"scale":[2,2,2]}],"environment":{"lightDirection":[0.9,0.12,0.3]},"camera":{"eye":[-10,3,-12],"target":[0,1.5,0],"fov":45}}
 ```
 
 ### A3
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1},{"id":"ball","type":"sphere","segments":48,"rings":32}],"materials":[{"id":"floor","color":[0.5,0.5,0.5],"roughness":0.9},{"id":"skin-on","color":[0.8,0.5,0.4],"roughness":0.5,"subsurface":{"weight":1,"radius":[1,0.3,0.15],"scale":0.5}},{"id":"skin-off","color":[0.8,0.5,0.4],"roughness":0.5}],"nodes":[{"id":"floor","geometry":"cube","material":"floor","translation":[0,-0.05,0],"scale":[12,0.1,8]},{"id":"ball-on","geometry":"ball","material":"skin-on","translation":[-1.4,1,0],"scale":[1,1,1]},{"id":"ball-off","geometry":"ball","material":"skin-off","translation":[1.4,1,0],"scale":[1,1,1]}],"environment":{"lightDirection":[-0.5,0.55,-0.7]},"camera":{"eye":[0,2.2,7],"target":[0,0.9,0],"fov":40}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1},{"id":"ball","type":"sphere","segments":48,"rings":32}],"materials":[{"id":"floor","color":[0.5,0.5,0.5],"roughness":0.9},{"id":"skin-on","color":[0.8,0.5,0.4],"roughness":0.5,"subsurface":{"weight":1,"radius":[1,0.3,0.15],"scale":0.5}},{"id":"skin-off","color":[0.8,0.5,0.4],"roughness":0.5}],"nodes":[{"id":"floor","geometry":"cube","material":"floor","translation":[0,-0.05,0],"scale":[12,0.1,8]},{"id":"ball-on","geometry":"ball","material":"skin-on","translation":[-1.4,1,0],"scale":[1,1,1]},{"id":"ball-off","geometry":"ball","material":"skin-off","translation":[1.4,1,0],"scale":[1,1,1]}],"environment":{"lightDirection":[-0.5,0.55,-0.7]},"camera":{"eye":[0,2.2,7],"target":[0,0.9,0],"fov":40}}
 ```
 
 ### A4
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"hills","type":"terrain","size":80,"resolution":64,"seed":3,"amplitude":2}],"materials":[{"id":"soil","color":[0.3,0.38,0.2],"roughness":0.95}],"nodes":[{"id":"ground","geometry":"hills","material":"soil"},{"id":"forest","vegetation":{"mix":{"broadleaf":3,"conifer":2,"bush":2},"seed":11,"season":0.6,"scatter":{"ground":"ground","density":0.014,"slopeLimit":30}}}],"environment":{"wind":{"strength":0.5,"direction":0}},"camera":{"eye":[0,4,38],"target":[0,3,0],"fov":50,"far":400}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"hills","type":"terrain","size":80,"resolution":64,"seed":3,"amplitude":2}],"materials":[{"id":"soil","color":[0.3,0.38,0.2],"roughness":0.95}],"nodes":[{"id":"ground","geometry":"hills","material":"soil"},{"id":"forest","vegetation":{"mix":{"broadleaf":3,"conifer":2,"bush":2},"seed":11,"season":0.6,"scatter":{"ground":"ground","density":0.014,"slopeLimit":30}}}],"environment":{"wind":{"strength":0.5,"direction":0}},"camera":{"eye":[0,4,38],"target":[0,3,0],"fov":50,"far":400}}
 ```
 
 ### A5
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"ground","color":[0.4,0.42,0.38],"roughness":0.9}],"nodes":[{"id":"ground","geometry":"cube","material":"ground","translation":[0,-0.05,0],"scale":[60,0.1,60]},{"id":"people","asset":{"id":"<id của RobotExpressive.glb>","crowd":{"clip":10,"count":60,"seed":7,"spacing":2,"farDistance":12,"farRate":6}}}],"camera":{"eye":[0,7,16],"target":[0,1,0],"fov":50}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"ground","color":[0.4,0.42,0.38],"roughness":0.9}],"nodes":[{"id":"ground","geometry":"cube","material":"ground","translation":[0,-0.05,0],"scale":[60,0.1,60]},{"id":"people","asset":{"id":"<id của RobotExpressive.glb>","crowd":{"clip":10,"count":60,"seed":7,"spacing":2,"farDistance":12,"farRate":6}}}],"camera":{"eye":[0,7,16],"target":[0,1,0],"fov":50}}
 ```
 
 ### A6
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1},{"id":"hills","type":"terrain","size":30,"resolution":32,"seed":2,"amplitude":0.5}],"materials":[{"id":"soil","color":[0.35,0.4,0.25],"roughness":0.95}],"nodes":[{"id":"ground","geometry":"hills","material":"soil"},{"id":"robot-a","translation":[-1.5,0,0],"asset":{"id":"<id của RobotExpressive.glb>","clip":{"index":0,"start":0,"loop":true}}},{"id":"robot-b","translation":[1.5,0,0],"asset":{"id":"<id của RobotExpressive.glb>","materials":[{"name":"Main","color":[0.9,0.2,0.1]}]}}],"camera":{"eye":[0,2.5,8],"target":[0,1,0],"fov":45}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1},{"id":"hills","type":"terrain","size":30,"resolution":32,"seed":2,"amplitude":0.5}],"materials":[{"id":"soil","color":[0.35,0.4,0.25],"roughness":0.95}],"nodes":[{"id":"ground","geometry":"hills","material":"soil"},{"id":"robot-a","translation":[-1.5,0,0],"asset":{"id":"<id của RobotExpressive.glb>","clip":{"index":0,"start":0,"loop":true}}},{"id":"robot-b","translation":[1.5,0,0],"asset":{"id":"<id của RobotExpressive.glb>","materials":[{"name":"Main","color":[0.9,0.2,0.1]}]}}],"camera":{"eye":[0,2.5,8],"target":[0,1,0],"fov":45}}
 ```
 
 ### A7
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"road","color":[0.2,0.2,0.22],"roughness":0.9}],"nodes":[{"id":"road","geometry":"cube","material":"road","translation":[8,-0.05,12],"scale":[40,0.1,40]},{"id":"car","asset":{"id":"<id của car.glb>","drive":{"path":[[0,0,0],[0,0,12],[6,0,22],[16,0,26]],"cruiseSpeed":8}}}],"camera":{"eye":[-10,16,-10],"target":[6,0,13],"fov":50}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"road","color":[0.2,0.2,0.22],"roughness":0.9}],"nodes":[{"id":"road","geometry":"cube","material":"road","translation":[8,-0.05,12],"scale":[40,0.1,40]},{"id":"car","asset":{"id":"<id của car.glb>","drive":{"path":[[0,0,0],[0,0,12],[6,0,22],[16,0,26]],"cruiseSpeed":8}}}],"camera":{"eye":[-10,16,-10],"target":[6,0,13],"fov":50}}
 ```
 
 ### A8
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"plane","type":"grid","segments":1}],"materials":[{"id":"screen","doubleSided":true,"map":{"sequence":{"frames":["<id frame-0.png>","<id frame-1.png>","<id frame-2.png>"],"fps":10}}}],"nodes":[{"id":"screen","geometry":"plane","material":"screen","scale":[4,3,1]}],"camera":{"eye":[0,0,6],"target":[0,0,0],"fov":40}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"plane","type":"grid","segments":1}],"materials":[{"id":"screen","doubleSided":true,"map":{"sequence":{"frames":["<id frame-0.png>","<id frame-1.png>","<id frame-2.png>"],"fps":10}}}],"nodes":[{"id":"screen","geometry":"plane","material":"screen","scale":[4,3,1]}],"camera":{"eye":[0,0,6],"target":[0,0,0],"fov":40}}
 ```
 
 ### A9
 
 ```json
-{"format":"67js.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"floor","color":[0.8,0.2,0.2]},{"id":"paint","color":[0.2,0.2,0.8]}],"nodes":[{"id":"floor","geometry":"cube","material":"floor","translation":[0,-0.05,0],"scale":[40,0.1,40]},{"id":"paint","geometry":"cube","material":"paint","translation":[0,-0.05,0],"scale":[10,0.1,10]}],"camera":{"eye":[0,3,60],"target":[0,0,0],"fov":40,"far":500}}
+{"format":"crucible.scene","schemaVersion":1,"geometries":[{"id":"cube","type":"box","bevel":0,"subdivisions":1}],"materials":[{"id":"floor","color":[0.8,0.2,0.2]},{"id":"paint","color":[0.2,0.2,0.8]}],"nodes":[{"id":"floor","geometry":"cube","material":"floor","translation":[0,-0.05,0],"scale":[40,0.1,40]},{"id":"paint","geometry":"cube","material":"paint","translation":[0,-0.05,0],"scale":[10,0.1,10]}],"camera":{"eye":[0,3,60],"target":[0,0,0],"fov":40,"far":500}}
 ```

@@ -1,4 +1,4 @@
-// Draws chosen reference scenes with 67js on the GPU only, into a directory of your choice, with measurement switches. No Blender, no scoring.
+// Draws chosen reference scenes with Crucible on the GPU only, into a directory of your choice, with measurement switches. No Blender, no scoring.
 //   node bench/reference/render-gpu.mjs <output directory> <scene id>,<scene id> [--ambient <scale>] [--fill <scale>] [--key <scale>]
 //     [--bloom <strength,threshold,radius>] [--ambient-occlusion <strength>] [--ambient-occlusion-radius <units>] [--reversed-depth] [--sun-bounce <strength>] [--sun-bounce-range <k>] [--sun-bounce-gain <g>] [--cpu]
 // Files are <output directory>/<scene id>-gpu.png, the names measure-depth.py and score.py read. Used to find what makes shadows light (issue #197).

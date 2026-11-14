@@ -12,15 +12,15 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-object-blur-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-object-blur-'));
 const jobs = join(directory, 'jobs');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const backend = process.argv[3] ?? 'cpu';
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', backend, '--memory', '128', '--jobs', jobs], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-object-blur-proof', version: '1' });
+const client = new Client({ name: 'crucible-object-blur-proof', version: '1' });
 const SIZE = 160;
 const COPY_DIRECTORY = process.env.OBJECT_MOTION_BLUR_COPY_DIRECTORY;
 
@@ -57,7 +57,7 @@ async function runJob(sessionId, settings, expectedRevision) {
 
 function recipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [
       { id: 'floor', color: [0.55, 0.55, 0.6], roughness: 0.8 },

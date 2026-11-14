@@ -1,6 +1,6 @@
 # MCP scene authoring
 
-The `67js-mcp` stdio server is included in npm release `0.5.0` and later.
+The `crucible-mcp` stdio server is included in npm release `0.5.0` and later.
 It uses the maintained MCP TypeScript SDK v2 server and a local browser runtime.
 The [official SDK documentation](https://ts.sdk.modelcontextprotocol.io/v2/) describes its transport and protocol APIs.
 
@@ -10,7 +10,7 @@ Release `0.7.0` adds [procedural motion](agent-motion.md), transient preview see
 Release `0.8.0` adds [imported character motion](agent-character-motion.md) with source joints and independent clip timing.
 Release `0.9.0` adds [visual review](agent-review.md) for several labeled views or poses from one isolated snapshot.
 
-To see what changed, including changes not yet released, read `https://67js.codepawl.com/changelog.json`: `released` sections, `unreleased` entries and each entry's issue number and `breaking` flag.
+To see what changed, including changes not yet released, read `https://crucible.codepawl.com/changelog.json`: `released` sections, `unreleased` entries and each entry's issue number and `breaking` flag.
 
 It renders scenes (several can be open) and returns PNG images through MCP image content.
 Tool results also contain JSON text and structured metadata.
@@ -28,22 +28,22 @@ The MCP connection uses stdin and stdout, without an HTTP MCP listener.
 1. Install the package in your project:
 
    ```powershell
-   npm install 67js@npm:@codepawlhq/67js
+   npm install crucible@npm:@codepawlhq/crucible
    ```
 
-   Run the installed command with `npx 67js-mcp --backend gpu --memory 192`.
-   For a standalone launch, use `npx --package @codepawlhq/67js 67js-mcp --backend gpu --memory 192`. Add `@<version>` after the package name to pin one.
-   `67js-mcp --help` lists options. `67js-mcp --version` reports the installed version.
+   Run the installed command with `npx crucible-mcp --backend gpu --memory 192`.
+   For a standalone launch, use `npx --package @codepawlhq/crucible crucible-mcp --backend gpu --memory 192`. Add `@<version>` after the package name to pin one.
+   `crucible-mcp --help` lists options. `crucible-mcp --version` reports the installed version.
 
 2. Configure your MCP client with absolute paths to Node and the installed CLI:
 
    ```json
    {
      "mcpServers": {
-       "67js-scene": {
+       "crucible-scene": {
          "command": "C:/Program Files/nodejs/node.exe",
          "args": [
-           "C:/projects/my-scene/node_modules/67js/bin/67js-mcp.mjs",
+           "C:/projects/my-scene/node_modules/crucible/bin/crucible-mcp.mjs",
            "--backend", "gpu",
            "--memory", "192",
            "--browser", "C:/Program Files/Google/Chrome/Application/chrome.exe"
@@ -66,7 +66,7 @@ A GLB that points at image files (a Kenney kit ships `boat.glb` plus `Textures/c
 
 `--jobs` selects the absolute folder that holds render jobs and exports (`scene_export_glb`, `scene_export_web`). The server checks it at startup. A directory link, such as a Windows junction made with `mklink /J` to put outputs on another drive, is followed once at startup, and the job store then works on and stays inside the real folder it points at; a path that is a file stops the server with a message naming `--jobs`. Links inside the folder are still never followed, and no tool call can name a path. `scene_capabilities` works without a job store: if the store cannot open it lists no records and reports `jobs.unavailable` with the reason, and a later call tries the store again.
 
-`--addons` selects an absolute folder that holds `node_modules`, and each `--allow-addon <package name>` (repeat it, at most 16 times) allows one addon package from it ([third-party addons](addons.md#the-mcp-server-and-addons)). Only these two options choose addons, at startup. A tool call cannot load, name or change one. An addon that is not installed there, fails the addon contract, does not allow the running 67js version, declares an entry file above 2 MiB, resolves to a real path outside the folder, or registers a kind it did not declare is skipped with a one-line reason on stderr, and the server keeps running. `scene_capabilities` topic `addons` lists the loaded and skipped addons and the kinds each registered. A recipe may then use a registered controller or camera kind in `game.player.controller` and `game.camera`; the error for an unknown name lists the available ones.
+`--addons` selects an absolute folder that holds `node_modules`, and each `--allow-addon <package name>` (repeat it, at most 16 times) allows one addon package from it ([third-party addons](addons.md#the-mcp-server-and-addons)). Only these two options choose addons, at startup. A tool call cannot load, name or change one. An addon that is not installed there, fails the addon contract, does not allow the running Crucible version, declares an entry file above 2 MiB, resolves to a real path outside the folder, or registers a kind it did not declare is skipped with a one-line reason on stderr, and the server keeps running. `scene_capabilities` topic `addons` lists the loaded and skipped addons and the kinds each registered. A recipe may then use a registered controller or camera kind in `game.player.controller` and `game.camera`; the error for an unknown name lists the available ones.
 
 These launch options remain outside tool arguments.
 The process runs below normal priority to reduce interference with other work.
@@ -86,7 +86,7 @@ Every recorded agent run used Claude Code. This table says what was tried elsewh
 | JSON Schema 2020-12 validator with strict mode (Ajv 8), run in `npm test` | Every tool input schema compiles. |
 | Tool names and descriptions | Names are 9 to 24 characters from `[a-z_]`, within the 64-character limit OpenAI, Gemini and Anthropic share. No description is over 1024 characters. |
 | Cursor, Gemini CLI, Claude Desktop, VS Code, any OpenAI or Gemini model | Not run. No account or client was available. Configure them with the same `command` and `args` as above, which is unverified. |
-| Install by `npm install 67js@npm:@codepawlhq/67js`, then `npx 67js-mcp`, or `npx --package @codepawlhq/67js 67js-mcp`, or the absolute path to `bin/67js-mcp.mjs` | All four start and report the version. |
+| Install by `npm install crucible@npm:@codepawlhq/crucible`, then `npx crucible-mcp`, or `npx --package @codepawlhq/crucible crucible-mcp`, or the absolute path to `bin/crucible-mcp.mjs` | All four start and report the version. |
 
 Known gaps, checked by `npm run check:tool-schemas`:
 
@@ -129,7 +129,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `scene_capabilities` | `topic` (optional) | A short index of topics; with a topic, its limits and fields (`motion`, `environment`, `materialFields`, `meshEdit`, `meshEdit.<op>`, `physics`, `jobs`, `examples` and more; `examples.<tool>` is a complete call for `scene_create`, `scene_apply`, `scene_create_asset` or `scene_render_submit`) |
 | `scene_create` | `recipe` | Session ID, revision, inspection, and render status |
 | `scene_asset_catalog` | None | Configured catalog and content-bound GLB, image, `.hdr` (kind `environment`) and `.cube` (kind `look`) IDs; an ID goes in `environment.hdri` or `environment.look`, see [agent-look](agent-look.md#catalog-hdris-and-looks) |
-| `scene_create_asset` | `recipe` using `67js.asset` | Imported scene ID, revision, inspection and render status |
+| `scene_create_asset` | `recipe` using `crucible.asset` | Imported scene ID, revision, inspection and render status |
 | `scene_inspect` | `sessionId`, optional `ids`, `limit`, `includeBounds` | Compact node records and revision |
 | `scene_apply` | `sessionId`, `expectedRevision`, `operations` | Updated revision, render status, results and diff |
 | `scene_walkmap` | `sessionId` or `assetId` (query a big catalog GLB), `min`, `max`, optional `cellSize`, `clearance`, `keepOut`, `streetY`, `includeCells` | Grid rows of `.` walkable, `x` blocked and `#` no surface, with counts; ground height and headroom per cell with `includeCells`. See [scene-query.md](scene-query.md) |
@@ -181,7 +181,7 @@ Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs`
 
 The checks run on part bounds, material fields and that small copy of the frame, so they cost almost nothing. None of them reads an object ID pass: parts are named from the scene itself, so the findings are identical on the cpu and gpu backends. The object ID, depth and normal passes exist in every raster render job (`settings.passes`). A path traced job (`renderer.type` `pathTracer`) writes the lit image only: it has no passes, `passes` is refused with a message that says so, and the job's `metrics.diagnostics` carries the part findings of its first frame plus one `findings-unavailable` entry (severity `info`) saying that exposure findings and the passes are unavailable there and why. Check exposure with `scene_look` or a raster job before tracing. Scenes of over 256 parts get no floating or intersection findings. `src/frame-checks.js` holds them.
 
-The recipe uses `format: '67js.scene'` and `schemaVersion: 1`.
+The recipe uses `format: 'crucible.scene'` and `schemaVersion: 1`.
 Primitive sizes come from the node scale: a `box` is a unit cube, and `cylinder` and `sphere` have radius 1, so scale x and z (cylinder) or scale (sphere) is the radius, never the diameter. A 6-segment cylinder is a hexagonal prism with its corners on X (2 x scale apart) and its flats on Z (1.732 x scale apart); for a hex part W wide across the flats, scale x and z by W / 1.732.
 
 Supported geometry types are `box`, `cylinder`, `sphere`, `torus`, `lathe`, `extrude`, `tube`, `curve`, `sdf`, `text`, `grid`, `terrain`, and `mesh`. The fields of `curve` and `text` are listed by `scene_capabilities` (`curveText.details`) and not repeated in every tool schema. Text uses the bundled font only; the MCP accepts no font file or URL.
@@ -293,21 +293,21 @@ The [scene contract](agent-scene.md) defines the geometry fields, transforms, ma
 
 ## Updates
 
-`npx -y -p @codepawlhq/67js 67js-mcp` reuses the copy npx cached on the first run, so a server can stay on an old version without anyone noticing. Each start therefore asks the npm registry once whether a newer version exists:
+`npx -y -p @codepawlhq/crucible crucible-mcp` reuses the copy npx cached on the first run, so a server can stay on an old version without anyone noticing. Each start therefore asks the npm registry once whether a newer version exists:
 
-- **What is sent:** one `GET https://registry.npmjs.org/@codepawlhq/67js/latest`, the same request `npm view` makes. It has no body and no identifier of ours. The registry sees what any HTTP request shows.
-- **When:** in the background, so startup is never slower. The answer is cached in `<user cache folder>/67js/update-check.json` (`$XDG_CACHE_HOME`, else `%LOCALAPPDATA%` on Windows, else `~/.cache`), and the registry is asked at most once a day. A timeout of 2 seconds ends a slow request. Offline or a registry error is silent.
+- **What is sent:** one `GET https://registry.npmjs.org/@codepawlhq/crucible/latest`, the same request `npm view` makes. It has no body and no identifier of ours. The registry sees what any HTTP request shows.
+- **When:** in the background, so startup is never slower. The answer is cached in `<user cache folder>/crucible/update-check.json` (`$XDG_CACHE_HOME`, else `%LOCALAPPDATA%` on Windows, else `~/.cache`), and the registry is asked at most once a day. A timeout of 2 seconds ends a slow request. Offline or a registry error is silent.
 - **What the agent sees:** when a newer stable version exists, the server `instructions` gain a short notice and the first `scene_capabilities` result carries `updateAvailable` with `current`, `latest`, `releaseNotes`, and the `update` command for each install route (`plugin`, `npx`, `project`). The first start after a new release may show the notice only in `scene_capabilities`, because `instructions` are read once and the answer can arrive after that. The agent tells the user and updates only after a yes.
 - **Turn it off:** set `SIXTYSEVENJS_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`, or run with `CI` set. Nothing is requested or written then.
-- **Ask by hand:** `67js-mcp --version` prints the running version. `67js-mcp --check-update` asks the registry now, prints the current and latest versions and exits.
-- **Update:** plugin, `/plugin marketplace update 67js` then `/plugin update 67js@67js`; `npx`, run `npx -y -p @codepawlhq/67js@latest 67js-mcp --version` once; project, `npm install @codepawlhq/67js@latest`. Restart the client afterwards. The library itself makes no network request, and the plugin keeps its pinned start command.
+- **Ask by hand:** `crucible-mcp --version` prints the running version. `crucible-mcp --check-update` asks the registry now, prints the current and latest versions and exits.
+- **Update:** plugin, `/plugin marketplace update Crucible` then `/plugin update crucible@crucible`; `npx`, run `npx -y -p @codepawlhq/crucible@latest crucible-mcp --version` once; project, `npm install @codepawlhq/crucible@latest`. Restart the client afterwards. The library itself makes no network request, and the plugin keeps its pinned start command.
 
 ## Call log
 
 To see which tools agents use, set `SIXTYSEVENJS_MCP_LOG=<file path>` before starting the server. It appends one JSON line per tool call: `time`, `tool`, `durationMs`, `ok`, `error` (`tool_error` or `thrown`, only on failure) and `resultBytes`. It never writes arguments, scene content or paths. With the variable unset nothing is written.
 
 ```sh
-SIXTYSEVENJS_MCP_LOG=calls.jsonl npx 67js-mcp
+SIXTYSEVENJS_MCP_LOG=calls.jsonl npx crucible-mcp
 node scripts/summarize-mcp-log.mjs calls.jsonl other.jsonl
 ```
 

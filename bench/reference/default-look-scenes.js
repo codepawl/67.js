@@ -1,5 +1,5 @@
 // Four bare scenes for the default look bench (issue #988): geometry, a camera, one sun and a constant sky, and nothing else.
-// No recipe lighting setup, no bake, no probes, no post steps. 67js, three.js and Cycles all get exactly these numbers.
+// No recipe lighting setup, no bake, no probes, no post steps. Crucible, three.js and Cycles all get exactly these numbers.
 import { box, cylinder, sphere } from '/src/geometry.js';
 import { constantLighting, environment, part, SUN_COLOR } from './scenes.js';
 import { SKY_RADIANCE } from './default-look-variants.js';

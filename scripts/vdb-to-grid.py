@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["numpy"]
 # ///
-"""Convert an OpenVDB file of float grids (smoke, fire, explosions) to a 67js volume grid file.
+"""Convert an OpenVDB file of float grids (smoke, fire, explosions) to a Crucible volume grid file.
 
     uv run --no-project scripts/vdb-to-grid.py frame.vdb out.67vg --max-resolution 128
     uv run --no-project scripts/vdb-to-grid.py frame.vdb out.67vg --map flame=flames --map temperature=heat

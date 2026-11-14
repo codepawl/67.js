@@ -16,11 +16,11 @@ try {
   await page.route('**/lighting-smoke.html', route => route.fulfill({ contentType: 'text/html', body: '<canvas style="width:960px;height:540px;display:block"></canvas>' }));
   await page.goto('http://127.0.0.1:5173/lighting-smoke.html');
   reports.contract = await page.evaluate(async () => {
-    const { Renderer67, box } = await import('/build/67.module.js');
+    const { CrucibleRenderer, box } = await import('/build/67.module.js');
     await import('/build/fog-shader.js');
     const canvas = document.querySelector('canvas');
     const part = { geometry: box(), matrix: new Float32Array([4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 1]), material: { color: [1, 1, 1], metallic: 0, roughness: 1 } };
-    const renderer = new Renderer67(canvas, [part], { ground: false, hdr: true, pixelRatio: 1, samples: 1 });
+    const renderer = new CrucibleRenderer(canvas, [part], { ground: false, hdr: true, pixelRatio: 1, samples: 1 });
     const context = renderer.context;
     if (!renderer.hdr) throw new Error('Lighting contract requires a linear HDR target');
     const identity = renderer.lighting.positions;
@@ -89,12 +89,12 @@ try {
     await scenePage.route('**/lighting-smoke.html', route => route.fulfill({ contentType: 'text/html', body: '<canvas style="width:960px;height:540px;display:block"></canvas>' }));
     await scenePage.goto('http://127.0.0.1:5173/lighting-smoke.html');
     reports[name] = await scenePage.evaluate(async () => {
-      const { Renderer67 } = await import('/src/renderer.js');
+      const { CrucibleRenderer } = await import('/src/renderer.js');
       const { createFilmScenes, sampleFilm } = await import('/src/film.js');
       const scene = createFilmScenes().laboratory;
       scene.animate(36);
       const canvas = document.querySelector('canvas');
-      const renderer = new Renderer67(canvas, scene.parts, { ground: false, world: true, environment: { ...scene.environment, volumeFog: { density: 0 } }, shadowBounds: scene.shadowBounds, samples: 4, hdr: true, pixelRatio: 1, memoryBudgetMiB: 384 });
+      const renderer = new CrucibleRenderer(canvas, scene.parts, { ground: false, world: true, environment: { ...scene.environment, volumeFog: { density: 0 } }, shadowBounds: scene.shadowBounds, samples: 4, hdr: true, pixelRatio: 1, memoryBudgetMiB: 384 });
       const frame = { ...sampleFilm(36).camera, effects: { grain: 0 }, time: 36 };
       const context = renderer.context;
       const timer = context.getExtension('EXT_disjoint_timer_query_webgl2');

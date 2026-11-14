@@ -25,7 +25,7 @@ function loadRobot() {
 }
 
 function createScene(asset, extra = {}) {
-  return createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID, ...extra });
+  return createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID, ...extra });
 }
 
 function editOperation(geometry, edits, replace) {

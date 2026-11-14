@@ -72,7 +72,7 @@ const checkArchive = process.argv.includes('--package');
 let root = process.cwd();
 let workFolder;
 if (checkArchive) {
-  workFolder = mkdtempSync(join(tmpdir(), '67js-links-'));
+  workFolder = mkdtempSync(join(tmpdir(), 'crucible-links-'));
   root = unpackArchive(workFolder);
 }
 const { checked, broken } = findBrokenLinks(root);

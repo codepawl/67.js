@@ -1,1 +1,1 @@
-{"type":"system","subtype":"init","model":"claude-haiku-4-5","tools":["ToolSearch"],"mcp_servers":[{"name":"67js","status":"connected"}]}
+{"type":"system","subtype":"init","model":"claude-haiku-4-5","tools":["ToolSearch"],"mcp_servers":[{"name":"crucible","status":"connected"}]}

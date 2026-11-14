@@ -129,7 +129,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     records,
   });
 
-  const workingDirectory = await mkdtemp(join(tmpdir(), '67js-blender-agent-'));
+  const workingDirectory = await mkdtemp(join(tmpdir(), 'crucible-blender-agent-'));
   const configPath = join(workingDirectory, 'mcp.json');
   await writeFile(configPath, JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: { type: 'http', url: SERVER_URL } } }));
   try {

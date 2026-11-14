@@ -66,7 +66,7 @@ function renderRelease() {
   setLink('[data-release-tarball]', release ? releaseURL(release.tarball) : null, true);
   setLink('[data-release-module]', release ? releaseURL(release.module) : null, true);
   setLink('[data-release-api]', release ? releaseURL(release.api) : null);
-  setLink('[data-release-commit]', release ? `https://github.com/codepawl/67.js/commit/${release.commit}` : null);
+  setLink('[data-release-commit]', release ? `https://github.com/codepawl/crucible/commit/${release.commit}` : null);
   setText('[data-release-commit]', release ? `Commit ${release.commit.slice(0, 7)}` : 'Release commit');
 }
 

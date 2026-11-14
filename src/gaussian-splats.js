@@ -5,7 +5,7 @@ import { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSp
 
 export { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly };
 
-// Gaussian splats as an optional addon (67js/addons/gaussian-splats). A splat is an ellipsoid with a colour and an opacity;
+// Gaussian splats as an optional addon (crucible/addons/gaussian-splats). A splat is an ellipsoid with a colour and an opacity;
 // each is drawn as a screen-space quad whose shape comes from projecting its 3D covariance. The splats are drawn after
 // the opaque and translucent parts of the renderer, with the depth test against them and no depth write, back to front.
 // The renderer needs no code for this: attachGaussianSplats wraps its drawBlendBatches step, which runs once per frame
@@ -277,7 +277,7 @@ function distanceToEye(splats, eye) {
  */
 export function attachGaussianSplats(renderer, splats) {
   if (!splats?.packed) throw new Error('These splats are already attached to a renderer; create them again to attach to another');
-  if (typeof renderer?.drawBlendBatches !== 'function') throw new TypeError('attachGaussianSplats needs a Renderer67');
+  if (typeof renderer?.drawBlendBatches !== 'function') throw new TypeError('attachGaussianSplats needs a CrucibleRenderer');
   const attachment = attachments.get(renderer) ?? createAttachment(renderer);
   attachments.set(renderer, attachment);
   const entry = { splats, ...createGpuResources(renderer.context, splats) };

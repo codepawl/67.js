@@ -1,14 +1,14 @@
 # Runtime: a live game loop
 
-`67js/addons/runtime` drives a renderer live. Films do not use it: a film renders every frame as a pure function of time and stays deterministic. The runtime is for a browser game, where a player, a script or a network message changes the next frame.
+`crucible/addons/runtime` drives a renderer live. Films do not use it: a film renders every frame as a pure function of time and stays deterministic. The runtime is for a browser game, where a player, a script or a network message changes the next frame.
 
 It loads only when imported, adds no dependency, and does not touch the film path.
 
 ```js
-import { Renderer67 } from '67js';
-import { createRuntime } from '67js/addons/runtime';
+import { CrucibleRenderer } from 'crucible';
+import { createRuntime } from 'crucible/addons/runtime';
 
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const runtime = createRuntime(renderer, {
   mode: 'both',
   fixedRate: 60,
@@ -45,7 +45,7 @@ Two guards stop a slow frame from spiralling. A frame longer than `maximumFrameS
 | `pauseWhenHidden` | `true` | Stop frames while the tab is hidden |
 | `scheduler`, `clock`, `visibility` | browser | `{ request(callback), cancel(handle) }`, `() => milliseconds` and `{ hidden, subscribe(callback) }`, injected by tests and headless runs |
 
-The first argument is any object with `render(frame)`, such as `Renderer67`.
+The first argument is any object with `render(frame)`, such as `CrucibleRenderer`.
 
 ## Runtime methods
 

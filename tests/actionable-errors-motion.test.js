@@ -15,7 +15,7 @@ await loadAllAgentSceneModules();
 
 function sceneRecipe(change) {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box' }],
     materials: [{ id: 'plain', color: [0.5, 0.5, 0.5] }],
     nodes: [
@@ -41,7 +41,7 @@ async function crowdScene(crowd) {
   const parse = () => parseGltf(robotBytes.buffer.slice(robotBytes.byteOffset, robotBytes.byteOffset + robotBytes.byteLength), { maxVertices: 500000 });
   const assets = new Map([[assetCopyKey(ASSET_ID, 0), await parse()], [assetCopyKey(ASSET_ID, 1), await parse()]]);
   return createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'ground', type: 'box' }],
     materials: [{ id: 'grass', color: [0.2, 0.5, 0.2] }],
     nodes: [{ id: 'floor', geometry: 'ground', material: 'grass' }, { id: 'people', asset: { id: ASSET_ID, crowd } }],
@@ -57,7 +57,7 @@ async function layerScene(layers) {
   const clips = [{ name: 'Walk', duration: 1, tracks: walkTracks(sourceJoints) }];
   const source = await parse(humanoidGlb({ names: MIXAMO_LIKE, joints: sourceJoints, clips }));
   const asset = await parse(humanoidGlb({ names: UNREAL_LIKE, joints: humanoidJoints(), face: true }));
-  const recipe = { format: '67js.asset', schemaVersion: 1, assetId: TARGET_ID, motion: { duration: 1, layers } };
+  const recipe = { format: 'crucible.asset', schemaVersion: 1, assetId: TARGET_ID, motion: { duration: 1, layers } };
   return createAgentAssetScene(asset, recipe, { sources: { [SOURCE_ID]: source } });
 }
 
@@ -66,7 +66,7 @@ const fromSource = extra => ({ from: { asset: SOURCE_ID, clip: 0 }, ...extra });
 function inspectPath(path) {
   return () => {
     const scene = createAgentScene({
-      format: '67js.scene', schemaVersion: 1,
+      format: 'crucible.scene', schemaVersion: 1,
       geometries: [{ id: 'ground', type: 'box' }],
       materials: [{ id: 'grass', color: [0.3, 0.6, 0.2] }],
       nodes: [{ id: 'ground', geometry: 'ground', material: 'grass', scale: [40, 0.1, 40] }],

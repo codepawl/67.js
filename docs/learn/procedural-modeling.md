@@ -1,12 +1,12 @@
 # Procedural modeling
 
-Version `0.4.0` provides `lathe`, `extrude` and `tube` through `67js/addons/modeling`, and the addon also has `curve`. They generate static geometry from radius and height profiles, polygon contours and XYZ paths. Extrusion supports holes and bevels. Open tube ends remain uncapped.
+Version `0.4.0` provides `lathe`, `extrude` and `tube` through `crucible/addons/modeling`, and the addon also has `curve`. They generate static geometry from radius and height profiles, polygon contours and XYZ paths. Extrusion supports holes and bevels. Open tube ends remain uncapped.
 
 The workflow has four steps:
 
 1. Choose a profile, contour or path in local coordinates.
 2. Generate the geometry once with the matching addon function.
-3. Assign the result to a part before creating `Renderer67`.
+3. Assign the result to a part before creating `CrucibleRenderer`.
 4. Share the geometry among repeated parts.
 
 Each result has Float32 positions, normalized normals and UV channel zero, plus Uint32 triangle indices. Inputs are copied. The generators run when you build the scene, not every frame.
@@ -16,8 +16,8 @@ Each result has Float32 positions, normalized normals and UV channel zero, plus 
 `lathe(profile, options)` revolves `[radius, height]` pairs around the Y axis. The first slider changes the belly radius of the profile and the second changes the number of segments around the axis. Both rebuild the vase, and the log shows what each build costs. Drag to orbit.
 
 ```js live poster=modeling-lathe
-import { Renderer67 } from '67js';
-import { lathe } from '67js/addons/modeling';
+import { CrucibleRenderer } from 'crucible';
+import { lathe } from 'crucible/addons/modeling';
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
@@ -37,7 +37,7 @@ function build() {
     material: { color: [0.75, 0.35, 0.22], metallic: 0, roughness: 0.4 },
   };
   renderer?.dispose();
-  renderer = new Renderer67(canvas, [part], { samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, [part], { samples: 4, pixelRatio: 1.25 });
   renderer.resize();
   draw();
   console.log(`belly ${state.belly.toFixed(2)}, segments ${state.segments}: ${geometry.positions.length / 3} vertices, ${geometry.indices.length / 3} triangles, ${milliseconds.toFixed(2)} ms`);
@@ -91,8 +91,8 @@ With 3 segments the vase becomes a triangular prism, which shows what the number
 `extrude` pushes a flat outline along +Z. `tube` sweeps a circle along a path through XYZ points. `curve` does the same along cubic Bezier spans and can thin toward its end. The slider changes the bevel of the panel, so the geometry is rebuilt and the log prints the sizes.
 
 ```js live poster=modeling-shapes
-import { Renderer67 } from '67js';
-import { extrude, tube, curve } from '67js/addons/modeling';
+import { CrucibleRenderer } from 'crucible';
+import { extrude, tube, curve } from 'crucible/addons/modeling';
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
@@ -117,7 +117,7 @@ function build(bevel) {
     { name: 'Horn', geometry: horn, matrix: placeAt(2.2, 0, 0, 1), material: { color: [0.8, 0.3, 0.3], metallic: 0, roughness: 0.45 } },
   ];
   renderer?.dispose();
-  renderer = new Renderer67(canvas, parts, { samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, parts, { samples: 4, pixelRatio: 1.25 });
   renderer.resize();
   draw();
   const counts = parts.map(part => `${part.name} ${part.geometry.indices.length / 3}`);
@@ -179,4 +179,4 @@ A `curve` point is `[x, y, z]` with automatic smooth handles, or `{ position, ha
 - **A folded lathe profile.** A profile that doubles back can intersect itself.
 - **Generating inside the render loop.** Build once, then share the geometry. The renderer does not take new geometry after construction.
 
-See also the [scene graph](https://github.com/codepawl/67.js/blob/main/docs/scene-graph.md), which supports hierarchy and pivots without changing mesh topology, and the [modeling demo](https://67js.codepawl.com/modeling.html), which combines these tools in a lantern scene.
+See also the [scene graph](https://github.com/codepawl/crucible/blob/main/docs/scene-graph.md), which supports hierarchy and pivots without changing mesh topology, and the [modeling demo](https://crucible.codepawl.com/modeling.html), which combines these tools in a lantern scene.

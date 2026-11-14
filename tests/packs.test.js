@@ -30,7 +30,7 @@ function tinyGlb() {
 }
 
 function temporaryFolder(context) {
-  const folder = mkdtempSync(join(tmpdir(), '67js-packs-'));
+  const folder = mkdtempSync(join(tmpdir(), 'crucible-packs-'));
   context.after(() => rmSync(folder, { recursive: true, force: true }));
   return folder;
 }
@@ -39,7 +39,7 @@ function temporaryFolder(context) {
 function installPack(parent, name, change = () => {}) {
   const folder = join(parent, name);
   cpSync(EXAMPLE, folder, { recursive: true });
-  const manifestPath = join(folder, '67js-pack.json');
+  const manifestPath = join(folder, 'crucible-pack.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   change(manifest, folder);
   writeFileSync(manifestPath, JSON.stringify(manifest));
@@ -119,8 +119,8 @@ test('JSON over 1 MiB is refused', async context => {
 });
 
 test('an engines range that excludes this version is refused', async context => {
-  await assertRefused(context, manifest => { manifest.engines['67js'] = '>=99.0.0'; }, /engines\.67js: got ">=99\.0\.0"; expected a range that admits the installed 67js/);
-  await assertRefused(context, manifest => { manifest.engines['67js'] = 'latest'; }, /engines\.67js: got "latest"; expected a range of space-separated comparators/);
+  await assertRefused(context, manifest => { manifest.engines['crucible'] = '>=99.0.0'; }, /engines\.crucible: got ">=99\.0\.0"; expected a range that admits the installed Crucible/);
+  await assertRefused(context, manifest => { manifest.engines['crucible'] = 'latest'; }, /engines\.crucible: got "latest"; expected a range of space-separated comparators/);
 });
 
 test('paths that leave the pack are refused', async context => {
@@ -143,7 +143,7 @@ test('a symbolic link in the pack is refused', async context => {
 
 test('duplicate ids and unknown keys are refused', async context => {
   await assertRefused(context, manifest => { manifest.contents.materials[1].id = 'rusty-metal'; }, /materials\[1\]\.id: got "rusty-metal"; expected an id used once/);
-  await assertRefused(context, manifest => { manifest.scripts = { build: 'x' }; }, /67js-pack\.json\.scripts: got \{"build":"x"\}; expected no such key/);
+  await assertRefused(context, manifest => { manifest.scripts = { build: 'x' }; }, /crucible-pack\.json\.scripts: got \{"build":"x"\}; expected no such key/);
   await assertRefused(context, manifest => { manifest.contents.materials[0].url = 'x'; }, /materials\[0\]\.url: got "x"; expected no such key/);
   await assertRefused(context, manifest => { manifest.contents.recipes[0].id = 'Not Kebab'; }, /recipes\[0\]\.id: got "Not Kebab"; expected a kebab-case id/);
   await assertRefused(context, manifest => { manifest.contents.materials[0].file = 'previews/crates.png'; }, /materials\[0\]\.file: got "previews\/crates\.png"; expected a file ending in \.json/);
@@ -168,21 +168,21 @@ test('semver ranges cover >=, >, <, <=, =, ^, ~ and space-AND', () => {
 });
 
 test('manifest checks name the pack, the field and what to pass', () => {
-  const valid = JSON.parse(readFileSync(join(EXAMPLE, '67js-pack.json'), 'utf8'));
+  const valid = JSON.parse(readFileSync(join(EXAMPLE, 'crucible-pack.json'), 'utf8'));
   assert.equal(validatePackManifest(valid, { label: 'x', packageVersion }).name, 'example-starter');
-  assert.throws(() => validatePackManifest({ ...valid, version: '1.0' }, { label: 'x', packageVersion }), /pack "x" 67js-pack\.json\.version: got "1\.0"; expected a version of three numbers/);
-  assert.throws(() => validatePackManifest({ ...valid, format: 'other' }, { label: 'x', packageVersion }), /\.format: got "other"; expected "67js\.pack"/);
+  assert.throws(() => validatePackManifest({ ...valid, version: '1.0' }, { label: 'x', packageVersion }), /pack "x" crucible-pack\.json\.version: got "1\.0"; expected a version of three numbers/);
+  assert.throws(() => validatePackManifest({ ...valid, format: 'other' }, { label: 'x', packageVersion }), /\.format: got "other"; expected "crucible\.pack"/);
 });
 
 test('loadPacks skips a bad pack, reports why, and rejects a repeated name', async context => {
   const parent = temporaryFolder(context);
   installPack(parent, 'good');
   installPack(parent, 'copy-of-good');
-  installPack(parent, 'broken', manifest => { manifest.engines['67js'] = '>=99'; });
+  installPack(parent, 'broken', manifest => { manifest.engines['crucible'] = '>=99'; });
   const { packs, rejected } = await loadPacks(parent, { packageVersion });
   assert.deepEqual(packs.map(pack => pack.folder), ['copy-of-good']);
   assert.equal(rejected.length, 2);
-  assert.match(rejected.find(entry => entry.folder === 'broken').error, /engines\.67js/);
+  assert.match(rejected.find(entry => entry.folder === 'broken').error, /engines\.crucible/);
   assert.match(rejected.find(entry => entry.folder === 'good').error, /another installed pack already uses the name "example-starter"/);
 });
 
@@ -206,7 +206,7 @@ test('scene_asset_catalog lists installed packs and reads a recipe and a materia
     writeFileSync(join(root, 'models/crate.glb'), tinyGlb());
     manifest.contents.assets = [{ id: 'crate', file: 'models/crate.glb' }];
   });
-  installPack(parent, 'old-pack', manifest => { manifest.engines['67js'] = '<0.1.0'; });
+  installPack(parent, 'old-pack', manifest => { manifest.engines['crucible'] = '<0.1.0'; });
   const runtime = createAgentRuntime({ packs: parent, previewUrl: new URL('file:///unused.js') });
   context.after(() => runtime.close());
   const client = await connect(context, runtime);
@@ -220,7 +220,7 @@ test('scene_asset_catalog lists installed packs and reads a recipe and a materia
   const crateId = pack.items.assets[0].assetId;
   assert.ok(listing.assets.some(asset => asset.assetId === crateId && asset.kind === 'glb'), 'pack GLBs join the catalog under the same IDs');
   const recipe = JSON.parse((await client.callTool({ name: 'scene_asset_catalog', arguments: { pack: 'example-starter', recipe: 'crates' } })).content[0].text);
-  assert.equal(recipe.json.format, '67js.scene');
+  assert.equal(recipe.json.format, 'crucible.scene');
   const material = JSON.parse((await client.callTool({ name: 'scene_asset_catalog', arguments: { pack: 'example-starter', material: 'rusty-metal' } })).content[0].text);
   assert.equal(material.json.metallic, 0.85);
   for (const argumentsValue of [{ recipe: 'crates' }, { pack: 'example-starter' }, { pack: 'example-starter', recipe: 'crates', material: 'rusty-metal' }, { pack: 'example-starter', recipe: 'nope' }, { pack: '../x', recipe: 'crates' }, { path: '/etc' }, { url: 'https://example.test/pack.zip' }]) {
@@ -228,5 +228,5 @@ test('scene_asset_catalog lists installed packs and reads a recipe and a materia
     assert.equal(rejected.isError, true, JSON.stringify(argumentsValue));
   }
   const topic = JSON.parse((await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'packs' } })).content[0].text);
-  assert.equal(JSON.stringify(topic).includes('67js.pack'), true);
+  assert.equal(JSON.stringify(topic).includes('crucible.pack'), true);
 });

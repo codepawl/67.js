@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mat3 } from 'gl-matrix';
 import { materialLayerState } from '../src/material-layers.js';
-import { groupParts, isMirroredMatrix, Renderer67 } from '../src/renderer.js';
+import { groupParts, isMirroredMatrix, CrucibleRenderer } from '../src/renderer.js';
 
 const quad = {
   positions: new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]),
@@ -36,7 +36,7 @@ test('parts that share a geometry and material batch apart by the sign of their 
 });
 
 test('a mirrored batch draws with clockwise front faces and restores the default winding', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.benchmark = true;
   const calls = [];
   renderer.context = {
@@ -51,7 +51,7 @@ test('a mirrored batch draws with clockwise front faces and restores the default
 });
 
 test('updateParts regroups once when a part crosses a mirror instead of throwing', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const part = quadPart('card', 1);
   const batch = { mirrored: false, castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false, instanceData: new Float32Array(42), instanceBuffer: {} };
   renderer.partLocations = new Map([[part, { batch, index: 0, geometry: quad, skin: null, morph: null, map: null, layerState: materialLayerState({}), mapState: [null, null, null, null, null, 1, 1, 1, 0, 0.05, 0.085, 0.02], normalMatrix: mat3.create() }]]);

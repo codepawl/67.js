@@ -16,7 +16,7 @@ const STEP_MILLISECONDS = 1000 / 60;
 // A crate dropped on a floor, and a pocket zone the crate must land in. The player stands off to one side.
 function physicsRecipe(overrides = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
     nodes: [
@@ -150,7 +150,7 @@ test('the page may only load the physics engine from its own origin', async () =
 });
 
 async function physicsBuild() {
-  const build = await mkdtemp(join(tmpdir(), '67js-physics-build-'));
+  const build = await mkdtemp(join(tmpdir(), 'crucible-physics-build-'));
   await writeFile(join(build, 'game.js'), 'import { a } from "./chunk-a.js";\nconst physics = () => import("./game-physics-abc123.js");\nconst swap = () => import("./replace-textured-parts.js");\n');
   await writeFile(join(build, 'chunk-a.js'), 'export const a = 1;');
   await writeFile(join(build, 'game-physics-abc123.js'), 'import "./physics-runtime.js";');
@@ -164,12 +164,12 @@ test('the web export bundles the physics engine and its wasm beside the page onl
   assert.deepEqual(await engineModuleNames(build), ['chunk-a.js', 'game.js']);
   assert.deepEqual(await engineModuleNames(build, { physics: true, textured: true }), ['chunk-a.js', 'game-physics-abc123.js', 'game.js', 'physics-runtime.js', 'replace-textured-parts.js']);
 
-  const plain = join(await mkdtemp(join(tmpdir(), '67js-web-plain-')), 'site');
+  const plain = join(await mkdtemp(join(tmpdir(), 'crucible-web-plain-')), 'site');
   await writeWebBuild({ recipe: physicsRecipe({ game: { ...physicsRecipe().game, physics: false } }), buildDirectory: build, outputDirectory: plain });
   assert.deepEqual((await readdir(join(plain, 'engine'))).sort(), ['chunk-a.js', 'game.js']);
   await assert.rejects(access(join(plain, 'engine', 'physics')));
 
-  const withPhysics = join(await mkdtemp(join(tmpdir(), '67js-web-physics-')), 'site');
+  const withPhysics = join(await mkdtemp(join(tmpdir(), 'crucible-web-physics-')), 'site');
   const summary = await writeWebBuild({ recipe: physicsRecipe(), buildDirectory: build, outputDirectory: withPhysics });
   assert.deepEqual((await readdir(join(withPhysics, 'engine', 'physics'))).sort(), ['jolt-physics.wasm.js', 'jolt-physics.wasm.wasm']);
   assert.ok(summary.bytes > 1024 * 1024 && summary.bytes < WEB_EXPORT_LIMITS.maxEngineBytes, `physics export bytes ${summary.bytes}`);
@@ -183,7 +183,7 @@ test('the web export bundles the physics engine and its wasm beside the page onl
 test('the web export refuses physics it cannot play before it writes anything', async () => {
   const build = await physicsBuild();
   const recipe = physicsRecipe({ physics: { duration: 1, bodies: [{ node: 'crate', shape: 'box' }], joints: [{ type: 'fixed', bodyA: 'crate', bodyB: 'floor' }] } });
-  await assert.rejects(writeWebBuild({ recipe, buildDirectory: build, outputDirectory: join(await mkdtemp(join(tmpdir(), '67js-web-refuse-')), 'site') }), /no joints or ragdolls/);
+  await assert.rejects(writeWebBuild({ recipe, buildDirectory: build, outputDirectory: join(await mkdtemp(join(tmpdir(), 'crucible-web-refuse-')), 'site') }), /no joints or ragdolls/);
 });
 
 test('only a recipe with a pattern or a map is textured', () => {

@@ -1,2 +1,0 @@
-- tool-total: the `quality` enum of scene_render_submit settings lets an agent choose a render by intent instead of renderer, samples and size; detail sits in scene_capabilities jobs
-- tool:scene_render_submit: the same `quality` field, one enum and one short description

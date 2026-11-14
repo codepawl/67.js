@@ -12,7 +12,7 @@
 
 ## Where the goal scenes stand
 
-Measured 2026-11-03 with three.js 0.186.1. Sizes are bytes gzip. `npm run size` prints this table's 67js column and its distance to the goal on every run.
+Measured 2026-11-03 with three.js 0.186.1. Sizes are bytes gzip. `npm run size` prints this table's Crucible column and its distance to the goal on every run.
 
 | Scene | Before (base at 2026-11-03) | Now | three.js | Goal |
 | --- | --- | --- | --- | --- |
@@ -24,7 +24,7 @@ The values on 2026-10-30 (issue 23) were 48,758, 159,422 and 185,422. `bench/siz
 
 ## What is in the lit box
 
-A box drawn by `Renderer67` with no addon, minified, before gzip (module sizes from the esbuild metafile; the sum is 177 KB, 49.9 KB gzip). The numbers are what the module adds to the bundle, not what it gzips to alone.
+A box drawn by `CrucibleRenderer` with no addon, minified, before gzip (module sizes from the esbuild metafile; the sum is 177 KB, 49.9 KB gzip). The numbers are what the module adds to the bundle, not what it gzips to alone.
 
 | Module | Bytes minified | What it is |
 | --- | --- | --- |

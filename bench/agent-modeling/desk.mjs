@@ -94,7 +94,7 @@ export function deskRecipe(topSize, drawerDepth, withRelations) {
     ...topParts(topSize, withRelations),
   ];
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.55, 0.5] }],
     nodes: parts.map(part => ({ material: 'paint', ...part })),

@@ -1,14 +1,14 @@
 # Recorded physics
 
-`67js/addons/physics` bakes rigid-body motion into a timeline with the Rapier 3D solver. Playback samples that recording at an absolute time and never runs the solver again, so you can seek forward and backward and get the same pose. It is available from version `0.4.0`, and the main renderer does not need Rapier for playback.
+`crucible/addons/physics` bakes rigid-body motion into a timeline with the Rapier 3D solver. Playback samples that recording at an absolute time and never runs the solver again, so you can seek forward and backward and get the same pose. It is available from version `0.4.0`, and the main renderer does not need Rapier for playback.
 
 ## Bake once, seek anywhere
 
 The example bakes a real Rapier recording in the page: a floor, a bouncing ball that gets a kick at tick 120, and a crate that slides across the floor. `planPhysicsScene` sizes the timeline first, `createPhysicsScene` bakes it, and `physics.bindParts` ties the two parts to their bodies. After that playback never runs the solver again. Drag the slider back and forth, or let it play, and a seek backward gives the same pose. The console prints the plan, the bake time, the contact events, the tick where each body came to rest and the lowest height of the ball between frames.
 
 ```js live poster=physics-recording
-import { Renderer67, sphere, box } from '67js';
-import { createPhysicsScene, planPhysicsScene } from '67js/addons/physics';
+import { CrucibleRenderer, sphere, box } from 'crucible';
+import { createPhysicsScene, planPhysicsScene } from 'crucible/addons/physics';
 
 const radius = 0.4;
 const definition = {
@@ -53,7 +53,7 @@ for (let time = 0; time <= duration; time += options.timestep / 10) lowest = Mat
 console.log(`lowest ball underside while sampling at 10x the step: ${lowest.toFixed(4)} m`);
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 function applyAnimation(time) {
   bindings.apply(time);
   renderer.updateParts(parts);

@@ -13,7 +13,7 @@ It fills omitted fields without mutating the input.
 The helpers do not create geometry, render targets, or GPU resources.
 
 ```js
-import { normalizeAgentLook, resolveAgentShadow } from '67js/addons/agent-scene';
+import { normalizeAgentLook, resolveAgentShadow } from 'crucible/addons/agent-scene';
 
 const look = normalizeAgentLook({
   environment: {
@@ -38,7 +38,7 @@ Look normalization always supplies the authored key color, including in world mo
 The MCP adapter applies the canonical look on every draw. A custom browser adapter must pass it explicitly:
 
 ```js
-const renderer = new Renderer67(canvas, scene.parts, {
+const renderer = new CrucibleRenderer(canvas, scene.parts, {
   ground: false, hdr: true, depth: true,
   world: scene.environment.world,
   environment: scene.environment,
@@ -69,7 +69,7 @@ A recipe names a file; it never carries a path or a URL, and nothing is download
 | --- | --- | --- |
 | `sky-clouds` | `environment.hdri` | Poly Haven `kloofendal_48d_partly_cloudy_puresky`, CC0, shrunk to 128 x 64 |
 | `studio-softbox` | `environment.hdri` | Poly Haven `studio_small_03`, CC0, shrunk to 128 x 64 |
-| `teal-orange`, `noir` | `environment.look` | made for 67js, CC0, 9 points per side |
+| `teal-orange`, `noir` | `environment.look` | made for Crucible, CC0, 9 points per side |
 | 64-character ID | either | a `.hdr` or `.cube` file (4 MiB at most) in the MCP `--assets` directory, listed by `scene_asset_catalog` as kind `environment` or `look` |
 
 The four shipped files total about 100 KB. For a bigger HDRI, put a 1k or 2k `.hdr` (for example from Poly Haven) in the assets directory and use its ID. Outside MCP, decode with `parseRadianceHdr` or `parseCube` and register with `registerCatalogEnvironment(name, data)` or `registerCatalogLook(name, look)` from `src/look-catalog.js` before building the scene. The look needs the `view-transform-shader` module (`loadAgentSceneModules` loads it). Render jobs light the scene with the same entries.
@@ -142,7 +142,7 @@ Sky colors use display RGB, matching the renderer's existing environment contrac
 | `fogColor` | `[0.35, 0.43, 0.43]` | Components from `0` to `1` |
 | `fogDensity` | `null` | `0` to `10`. `null` fits the density to the scene: `0.006`, or `1.2` divided by the scene diagonal in metres when that is smaller, so a 900 m scene keeps 30 percent of its contrast at the far side. Set `0` for no fog |
 | `volumeFog` | Complete defaults below | One bounded world volume |
-| `localVolumes` | Absent | Up to 8 box, sphere or mesh (a part) volumes that absorb and emit light; see [volume fog](https://67js.codepawl.com/volumetric.md#local-volumes) |
+| `localVolumes` | Absent | Up to 8 box, sphere or mesh (a part) volumes that absorb and emit light; see [volume fog](https://crucible.codepawl.com/volumetric.md#local-volumes) |
 
 Directional key radiance equals `keyColor * keyIntensity`.
 Zero intensity disables that lighting contribution.
@@ -155,9 +155,9 @@ High radiance can clip at the renderer's half-float HDR target limit of `65504` 
 Every intensity is a linear scene value, not a photometric unit with its own scale.
 For a white diffuse surface facing a light, the outgoing radiance is `intensity * color / PI`, the same as three.js r155 and later (`useLegacyLights` removed, physical units).
 So a three.js light copies over with the factor below, and a scene lit by one light matches without tuning.
-Compare at the same `exposure` (three.js `toneMappingExposure`), and note that 67js tone maps with an ACES-style curve only when `hdr` is off.
+Compare at the same `exposure` (three.js `toneMappingExposure`), and note that Crucible tone maps with an ACES-style curve only when `hdr` is off.
 
-| 67js field | Unit | three.js light | Value to use |
+| Crucible field | Unit | three.js light | Value to use |
 | --- | --- | --- | --- |
 | `keyColor * keyIntensity` | Irradiance on a surface facing the light, lux-like | `DirectionalLight.color * intensity` | Same value. Put the intensity in `keyIntensity` and keep `keyColor` in `0` to `1` |
 | `pointLights[].intensity` | Candela-like: irradiance at distance `d` is `intensity / d^2` | `PointLight.intensity` | Same value. `range` is `distance` (the same smooth cutoff). Set `radius: 0.1` to match three.js's clamp of `d^2` at `0.01` |
@@ -165,7 +165,7 @@ Compare at the same `exposure` (three.js `toneMappingExposure`), and note that 6
 | `areaLights[].intensity` | Candela-like: on axis, far from the light, irradiance is `intensity / d^2`, and `intensity / (d^2 + width * height / PI)` in general | `RectAreaLight.intensity` (nits) | `nits * width * height` |
 | `fillIntensity`, `ambientIntensity`, `environmentIntensity` | Unitless multipliers on the fill rig, the sky ambient and the setup's environment map | `AmbientLight`, `HemisphereLight`, `scene.environmentIntensity` | No exact equivalent. |
 
-A three.js scene built before r155 with the legacy light model multiplies each of those intensities by `PI` to get the 67js value.
+A three.js scene built before r155 with the legacy light model multiplies each of those intensities by `PI` to get the Crucible value.
 `tests/light-units.test.js` ports a directional, point, spot and area light this way and checks the irradiance each produces against the three.js formula within 2 percent.
 
 ## Lighting setups
@@ -176,7 +176,7 @@ Setting `setup` through `set-environment` resets `lightDirection`, `keyColor`, `
 Remote URLs and HDRI files are not accepted from tool input.
 This changes the look of every recipe that sets no lighting: before, the default had no environment map, a key color of `[5.2, 4.7, 4.1]` and a fill intensity of `1`.
 To get the earlier flat look, set `keyColor`, `fillIntensity` and `environmentIntensity: 0` yourself.
-The MCP preview adds an automatic floor: a light grey disc under the scene's lowest geometry, at that height, which catches the key light's shadow. It is not a recipe node and is not exported. A part that already forms a floor (spans at least 90 percent of the scene's width and depth, is thinner than a quarter of its width and is the lowest geometry) switches it off, and `environment.ground: false` removes it. While a motion time is sampled (a render job, or `scene_look` at a time) the floor is decided and sized once from the pose at time 0, so flying or falling parts never resize it or move the horizon. Code that builds its own `Renderer67` gets it by passing `createAgentGround(agentGroundPlacement(parts, environment))` as the `ground` option (`src/agent-ground.js`).
+The MCP preview adds an automatic floor: a light grey disc under the scene's lowest geometry, at that height, which catches the key light's shadow. It is not a recipe node and is not exported. A part that already forms a floor (spans at least 90 percent of the scene's width and depth, is thinner than a quarter of its width and is the lowest geometry) switches it off, and `environment.ground: false` removes it. While a motion time is sampled (a render job, or `scene_look` at a time) the floor is decided and sized once from the pose at time 0, so flying or falling parts never resize it or move the horizon. Code that builds its own `CrucibleRenderer` gets it by passing `createAgentGround(agentGroundPlacement(parts, environment))` as the `ground` option (`src/agent-ground.js`).
 
 ## Point lights
 
@@ -228,13 +228,13 @@ These controls reuse `resolveVolumeFog` and its existing domain rules.
 | `noiseScale` | `0.3` | `0.001` to `100` |
 | `maxDistance` | `100` | `0.01` to `10000` |
 | `shadowAmbient` | derived from the scene: 0.15 in a closed room, 1 under open sky | `0` to `1` |
-| `scatterOctaves`, `multiScatter`, `multiExtinction`, `multiAnisotropy`, `keyTransmittance`, `surfaceTransmittance` | `1`, `0.5`, `0.5`, `0.5`, `0`, `0` | Integer `1` to `4`, then `0` to `1` each; off by default, see [volume fog](https://67js.codepawl.com/volumetric.md) |
-| `detailOctaves`, `detailAmount`, `warp`, `contrast`, `profileSoftness`, `keyScattering` | `1`, `0.5`, `0`, `1`, `0.5`, `1` | Integer `1` to `3`, `0` to `1`, `0` to `4`, `0` to `4`, `0` to `0.95`, `0` to `10`; see [volume fog](https://67js.codepawl.com/volumetric.md) |
+| `scatterOctaves`, `multiScatter`, `multiExtinction`, `multiAnisotropy`, `keyTransmittance`, `surfaceTransmittance` | `1`, `0.5`, `0.5`, `0.5`, `0`, `0` | Integer `1` to `4`, then `0` to `1` each; off by default, see [volume fog](https://crucible.codepawl.com/volumetric.md) |
+| `detailOctaves`, `detailAmount`, `warp`, `contrast`, `profileSoftness`, `keyScattering` | `1`, `0.5`, `0`, `1`, `0.5`, `1` | Integer `1` to `3`, `0` to `1`, `0` to `4`, `0` to `4`, `0` to `0.95`, `0` to `10`; see [volume fog](https://crucible.codepawl.com/volumetric.md) |
 
 Fog bounds reject dimensions that collapse after Float32 rounding.
 The current volume supports one directional scattering source.
 Local point scattering, transparent depth, multiple scattering, and multiple volumes remain outside this contract.
-See [volume fog](https://67js.codepawl.com/volumetric.md) for renderer requirements and frame-time limits.
+See [volume fog](https://crucible.codepawl.com/volumetric.md) for renderer requirements and frame-time limits.
 
 ## Effects
 
@@ -293,7 +293,7 @@ The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `d
 
 ### Air distortion and flash
 
-![A street before and after the shock ring and heat haze: the ring bends the building edges, the haze shimmers around the fire, and the cars in front stay put.](https://raw.githubusercontent.com/codepawl/67.js/main/docs/post-distortion-comparison.jpg)
+![A street before and after the shock ring and heat haze: the ring bends the building edges, the haze shimmers around the fire, and the cars in front stay put.](https://raw.githubusercontent.com/codepawl/crucible/main/docs/post-distortion-comparison.jpg)
 
 A blast sells itself in its first frames: a flash, a ring that bends the air, and shimmer above the fire. `effects.distortion` bends the picture behind it, and `effects.flash` lifts the light around a point for a moment. Both are steps you place in the scene, like a light, and both follow the scene clock, so any frame renders the same.
 

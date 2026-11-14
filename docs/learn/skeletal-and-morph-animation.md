@@ -1,13 +1,13 @@
 # Skeletal and morph animation
 
-A skinned mesh follows a skeleton, and a morph target moves its vertices by stored changes. 67js blends the morph targets first, then deforms the result with the joint palette, all on the GPU. Both poses are small retained arrays that you write each frame and upload with `renderer.updateParts(parts)`.
+A skinned mesh follows a skeleton, and a morph target moves its vertices by stored changes. Crucible blends the morph targets first, then deforms the result with the joint palette, all on the GPU. Both poses are small retained arrays that you write each frame and upload with `renderer.updateParts(parts)`.
 
 ## A bending column with a bulge
 
 The column has two joints. The upper joint bends it at the middle. A morph target makes it bulge. Drag the sliders for the bend angle and the bulge weight. The console prints the retained palette size and the weights.
 
 ```js live poster=skeletal-morph
-import { Renderer67, box, createSkinPose, updateSkinPose, createMorphPose } from '67js';
+import { CrucibleRenderer, box, createSkinPose, updateSkinPose, createMorphPose } from 'crucible';
 
 
 function translation(x, y, z) {
@@ -58,7 +58,7 @@ console.log('skin palette floats:', skin.jointMatrices.length, '(2 joints x 16)'
 console.log('vertices:', vertexCount, 'morph targets:', morph.weights.length);
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const state = { bend: 0.6, swell: 0.5 };
 function draw() {
   const joints = new Float32Array(jointRest);
@@ -108,7 +108,7 @@ Changing topology, influences or pose identities needs a new renderer. Parts tha
 
 ## Import from glTF
 
-The glTF addon imports supported skins and relative targets, including joint and weight animation. `asset.applyAnimation(time, clipIndex)` updates the retained parts and poses, and you then call `renderer.updateParts`. The [glTF morph contract](https://github.com/codepawl/67.js/blob/main/docs/gltf-morph.md) and the [asset contract](/gltf.md) define the supported subset. The [skinning contract](https://github.com/codepawl/67.js/blob/main/docs/skinning.md) defines supported transforms, four influences and identity requirements. The [morph contract](https://github.com/codepawl/67.js/blob/main/docs/morph-targets.md) defines channel shapes, weight bounds and resource estimates.
+The glTF addon imports supported skins and relative targets, including joint and weight animation. `asset.applyAnimation(time, clipIndex)` updates the retained parts and poses, and you then call `renderer.updateParts`. The [glTF morph contract](https://github.com/codepawl/crucible/blob/main/docs/gltf-morph.md) and the [asset contract](/gltf.md) define the supported subset. The [skinning contract](https://github.com/codepawl/crucible/blob/main/docs/skinning.md) defines supported transforms, four influences and identity requirements. The [morph contract](https://github.com/codepawl/crucible/blob/main/docs/morph-targets.md) defines channel shapes, weight bounds and resource estimates.
 
 ## Options
 

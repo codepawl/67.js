@@ -1,3 +1,0 @@
-- entry:fog-shader: the flattened sun direction and the sky share in the lit local volume step, a few dozen bytes for a gradient across a smoke that reads as form instead of an edge glow.
-- scene:agent-scene+lazy: the same flattened direction and sky share in the CPU path tracer's lit volume step, counted in the lazy bundle.
-- entry:path-tracer: the flattened direction vector and the sky gain in the CPU path tracer's lit volume step, a few hundred bytes.

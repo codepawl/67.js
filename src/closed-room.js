@@ -105,7 +105,7 @@ export const SKY_OPENNESS_RAYS = 32;
 
 /**
  * The share of upward rays from `point` that leave the parts without hitting a part's underside, or null when the scene is
- * empty or too large to test. 1 is open ground under the sky, 0 is a closed room. Pass it to `Renderer67` as the
+ * empty or too large to test. 1 is open ground under the sky, 0 is a closed room. Pass it to `CrucibleRenderer` as the
  * `skyOpenness` option and an unset `volumeFog.shadowAmbient` follows it. The rays are the upper half of the same fixed
  * spiral, so the same scene gives the same share.
  */

@@ -3,7 +3,7 @@
 export function closedRoom(extra = {}) {
   const box = (id, translation, scale, material) => ({ id, geometry: 'box', material, translation, scale });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [
       { id: 'white', color: [0.8, 0.8, 0.8], roughness: 0.9 },

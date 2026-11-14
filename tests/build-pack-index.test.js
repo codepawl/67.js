@@ -10,7 +10,7 @@ import { buildPackIndex, createZip } from '../scripts/build-pack-index.mjs';
 const EXAMPLE = new URL('../packs/example-starter', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
 function packsFolderWithExample(context) {
-  const folder = mkdtempSync(join(tmpdir(), '67js-pack-index-'));
+  const folder = mkdtempSync(join(tmpdir(), 'crucible-pack-index-'));
   context.after(() => rmSync(folder, { recursive: true, force: true }));
   cpSync(EXAMPLE, join(folder, 'packs/example-starter'), { recursive: true });
   return { packsDirectory: join(folder, 'packs'), outputDirectory: join(folder, 'out') };

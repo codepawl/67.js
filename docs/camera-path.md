@@ -6,7 +6,7 @@ Available from version `0.4.0`.
 The trailer uses this API for every shot. Its atom and gadget shots use curved camera moves.
 
 ```js
-import { createCameraPath, fovFromFocalLength } from '67js';
+import { createCameraPath, fovFromFocalLength } from 'crucible';
 
 const path = createCameraPath({
   duration: 6,
@@ -72,7 +72,7 @@ A parallel up vector fails explicitly. This API does not choose a replacement or
 `fitPerspectiveDistance(bounds, view, aspect, padding = 1.15)` returns an eye-to-target distance that contains all eight corners of a world-space axis-aligned box. It preserves the camera direction, up vector and vertical field of view. The caller chooses the target. The bounds center provides a target for framing a subject.
 
 ```js
-import { fitPerspectiveDistance } from '67js';
+import { fitPerspectiveDistance } from 'crucible';
 
 const bounds = { minimum: [-0.4, 0, -0.2], maximum: [0.4, 2, 0.25] };
 const view = { eye: [0, 1, 4], target: [0, 1, 0], fov: 30, near: 0.1, far: 100 };

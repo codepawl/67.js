@@ -11,7 +11,7 @@ const STATUE_CENTRE = [0, 1.1, 0];
 
 function stageRecipe(extra = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0.01 }],
     materials: [{ id: 'stone', color: [0.7, 0.68, 0.64] }, { id: 'bronze', color: [0.45, 0.3, 0.2] }],
     nodes: structuredClone(SCENE_NODES),
@@ -22,7 +22,7 @@ function stageRecipe(extra = {}) {
 
 const STAGE = 'The stage scene below has a floor, a plinth and a statue (node "statue", centred at [0, 1.1, 0], about 1 m tall).';
 const FINISH = 'When it is finished, call scene_export_recipe once: the exported recipe is what gets graded.';
-const PLAIN_PREAMBLE = 'You are working with the 67js MCP tools. Units are metres and Y is up.';
+const PLAIN_PREAMBLE = 'You are working with the Crucible MCP tools. Units are metres and Y is up.';
 
 const CLOSEUP_CHECKS = [
   { kind: 'lint' },

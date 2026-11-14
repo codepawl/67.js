@@ -214,7 +214,7 @@ test('contours flatten with implied points and group into outlines with holes', 
 });
 
 const signRecipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [
     { id: 'board', type: 'box', bevel: 0 },
     { id: 'letters', type: 'text', text: 'OPEN', size: 0.5, depth: 0.05, align: 'center' },

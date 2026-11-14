@@ -7,7 +7,7 @@ await loadPhysicsEngine({ buoyancy: true });
 
 function seaRecipe(physics, oceanNode = { op: 'ocean', windSpeed: 0.5, size: 50, seed: 4 }) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'cube', type: 'box' },
       { id: 'sea', type: 'mesh', base: { type: 'grid', segments: 8 }, stack: [oceanNode] },

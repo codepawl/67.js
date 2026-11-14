@@ -1,4 +1,4 @@
-// A two-player sample for 67js/addons/netcode. One page hosts (it owns the truth and plays "alice"), the other is a client
+// A two-player sample for crucible/addons/netcode. One page hosts (it owns the truth and plays "alice"), the other is a client
 // that predicts "bob". Each player moves a square with the arrow keys or WASD; both pages draw both squares.
 // Open scripts/netcode-sample.html?role=host and scripts/netcode-sample.html?role=client in two tabs; see docs/netcode.md.
 import { createRuntime } from '../src/runtime.js';
@@ -52,7 +52,7 @@ export function withInjectedLatency(transport, delayMilliseconds) {
 
 async function createSampleTransport(options, playerId, remoteId) {
   if (options.transport === 'broadcast') {
-    return createBroadcastChannelTransport(new BroadcastChannel('67js-netcode-sample'), { id: playerId });
+    return createBroadcastChannelTransport(new BroadcastChannel('crucible-netcode-sample'), { id: playerId });
   }
   if (options.transport === 'websocket') {
     const socket = await openWebSocket(options.relayUrl, playerId);

@@ -5,14 +5,14 @@ import { previewHarness } from './preview-harness.mjs';
 import { skinnedStripAsset } from '../fixtures/skinned-strip.js';
 
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'block', type: 'mesh', base: { type: 'box', bevel: 0 }, stack: [{ op: 'subdivide', levels: 1 }] }],
   materials: [{ id: 'paint', color: [0.4, 0.5, 0.6] }],
   nodes: [{ id: 'part', geometry: 'block', material: 'paint' }],
   motion: { duration: 1, loop: true, tracks: [{ kind: 'node', id: 'part', property: 'translation',
     keyframes: [{ time: 0, value: [0, 0, 0] }, { time: 1, value: [1, 0, 0] }] }] },
 };
-const assetRecipe = { format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) };
+const assetRecipe = { format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) };
 
 async function walk(label, createSession) {
   const harness = previewHarness();

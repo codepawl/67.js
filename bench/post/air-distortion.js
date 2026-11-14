@@ -1,5 +1,5 @@
 // Runs in the page: a night street with a blast at the far end, drawn at any time with the air distortion and flash steps off or on.
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { box } from '/src/geometry.js';
 import { installCameraEffects } from '/src/camera-effects.js';
 import { installPostSteps } from '/src/post-steps.js';
@@ -70,7 +70,7 @@ let renderer = null;
 function drawAt(time, withAir) {
   const canvas = document.querySelector('canvas');
   if (!renderer) {
-    renderer = installCameraEffects(new Renderer67(canvas, streetParts(), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment }));
+    renderer = installCameraEffects(new CrucibleRenderer(canvas, streetParts(), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment }));
     installPostSteps(renderer);
     renderer.resize();
   }

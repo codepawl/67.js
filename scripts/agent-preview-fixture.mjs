@@ -1,6 +1,6 @@
 export function createAgentPreviewFixture() {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'pedestal', type: 'lathe', profile: [[0,0],[0.8,0],[0.9,0.07],[0.9,0.16],[0.74,0.22],[0.48,0.28],[0.42,0.34],[0,0.34]], segments: 64 },
       { id: 'bulb', type: 'sphere', segments: 48, rings: 32 },

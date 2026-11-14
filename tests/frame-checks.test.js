@@ -7,7 +7,7 @@ import { closedRoom, closedRoomWithoutBake } from './support/agent-bake-rooms.mj
 
 function sceneWithCamera(camera) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'red', color: [0.8, 0.2, 0.2] }],
     nodes: [{ id: 'cube', geometry: 'box', material: 'red' }],
@@ -114,7 +114,7 @@ test('job metrics keep one entry per warning across frames', () => {
 
 function boxScene(nodes) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'red', color: [0.8, 0.2, 0.2] }],
     nodes: nodes.map(node => ({ geometry: 'box', material: 'red', ...node })),

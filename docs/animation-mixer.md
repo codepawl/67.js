@@ -6,7 +6,7 @@ Repeated calls with the same clip object return the same action.
 `apply(time)` evaluates the complete scene at an absolute time in seconds and returns `parts`.
 
 ```js
-import { createAnimationMixer } from '67js';
+import { createAnimationMixer } from 'crucible';
 
 const mixer = createAnimationMixer(parts);
 const walk = mixer.clipAction(walkClip).play({ at: 0 });

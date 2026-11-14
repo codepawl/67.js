@@ -1,4 +1,4 @@
-// The default look bench (issue #988): bare scenes drawn by 67js and by three.js, each at its own defaults, scored against Cycles with FLIP.
+// The default look bench (issue #988): bare scenes drawn by Crucible and by three.js, each at its own defaults, scored against Cycles with FLIP.
 //   npm run reference -- --default-look [--skip-blender] [--scene <id>,<id>]
 // --skip-blender scores against the Cycles images already committed in bench/reference/default-look/ instead of rendering them again.
 // Writes bench/reference/default-look.json, bench/reference/default-look/<scene>-cycles.png (the reference) and <scene>-sheet.jpg (all looks side by side).
@@ -91,7 +91,7 @@ export async function runDefaultLook(argumentsGiven) {
     scores,
     variants: DEFAULT_LOOK_VARIANTS,
     generatedBy: 'npm run reference -- --default-look',
-    settings: { width: IMAGE_WIDTH, height: IMAGE_HEIGHT, cyclesSamples: CYCLES_SAMPLES, pixelRatio: 1, reference: 'Blender Cycles, view transform applied as 67js applies it (ACES fit, gamma 2.2), 8 bit' },
+    settings: { width: IMAGE_WIDTH, height: IMAGE_HEIGHT, cyclesSamples: CYCLES_SAMPLES, pixelRatio: 1, reference: 'Blender Cycles, view transform applied as Crucible applies it (ACES fit, gamma 2.2), 8 bit' },
   });
   const isFullRun = sceneIds.length === SCENE_IDS.length && SCENE_IDS.every((sceneId) => sceneIds.includes(sceneId));
   // A --scene subset must not replace the committed four-scene report, so it goes to the work directory.

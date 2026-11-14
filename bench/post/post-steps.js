@@ -1,5 +1,5 @@
 // Runs in the page: a lit pillar, a bright emissive strip and a row of posts over a floor, drawn with each named post step off and on.
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { box } from '/src/geometry.js';
 import { installCameraEffects } from '/src/camera-effects.js';
 import { installRenderPasses } from '/src/render-passes.js';
@@ -84,7 +84,7 @@ function regionMean(context, x, y) {
 
 async function drawCase(name, { warmupFrames = 4, measuredFrames = 20 } = {}) {
   const canvas = document.querySelector('canvas');
-  const renderer = installRenderPasses(installCameraEffects(new Renderer67(canvas, sceneParts(GREEN_CASES.includes(name)), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment })));
+  const renderer = installRenderPasses(installCameraEffects(new CrucibleRenderer(canvas, sceneParts(GREEN_CASES.includes(name)), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment })));
   if (postSteps) postSteps.installPostSteps(renderer);
   if (USER_PASS_CASES[name] && userPassModule) {
     userPassModule.installUserPasses(renderer);

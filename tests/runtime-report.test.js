@@ -11,7 +11,7 @@ test('the runtime report covers every scene in both engines on both backends', (
   for (const backend of ['gpu', 'cpu']) {
     assert.deepEqual(Object.keys(report.results[backend]).sort(), EXPECTED_SCENES);
     for (const [scene, engines] of Object.entries(report.results[backend])) {
-      for (const engine of ['67js', 'three']) {
+      for (const engine of ['crucible', 'three']) {
         for (const measure of REQUIRED_MEASURES) {
           assert.ok(Number.isFinite(engines[engine][measure]), `${backend} ${scene} ${engine} ${measure}`);
         }
@@ -25,11 +25,11 @@ test('each picture difference is recorded, and the three.js version matches the 
   for (const scene of EXPECTED_SCENES) assert.ok(report.pictureDifference[`gpu-${scene}`] >= 0, scene);
 });
 
-test('each 67js result lists its render targets, and they fit in the GPU memory the counter saw', () => {
+test('each Crucible result lists its render targets, and they fit in the GPU memory the counter saw', () => {
   for (const backend of ['gpu', 'cpu']) {
     for (const [scene, engines] of Object.entries(report.results[backend])) {
-      const targetMegabytes = engines['67js'].renderTargets.reduce((total, target) => total + target.bytes, 0) / 1048576;
-      assert.ok(targetMegabytes > 0 && targetMegabytes <= engines['67js'].gpuMegabytes, `${backend} ${scene}`);
+      const targetMegabytes = engines['crucible'].renderTargets.reduce((total, target) => total + target.bytes, 0) / 1048576;
+      assert.ok(targetMegabytes > 0 && targetMegabytes <= engines['crucible'].gpuMegabytes, `${backend} ${scene}`);
     }
   }
 });

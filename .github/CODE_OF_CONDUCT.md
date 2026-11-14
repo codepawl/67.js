@@ -1,6 +1,6 @@
 # Code of conduct
 
-67js is built by people and by the agents they run. Both are welcome here, and the same rules hold for both.
+Crucible is built by people and by the agents they run. Both are welcome here, and the same rules hold for both.
 
 ## Expected
 

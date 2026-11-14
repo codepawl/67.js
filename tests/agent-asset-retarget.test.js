@@ -20,7 +20,7 @@ async function sourceAsset() {
 
 async function createTarget(motion, { names = UNREAL_LIKE } = {}) {
   const asset = await parse(humanoidGlb({ names, joints: TARGET_JOINTS, face: true }));
-  const recipe = { format: '67js.asset', schemaVersion: 1, assetId: TARGET_ID, ...(motion ? { motion } : {}) };
+  const recipe = { format: 'crucible.asset', schemaVersion: 1, assetId: TARGET_ID, ...(motion ? { motion } : {}) };
   const scene = createAgentAssetScene(asset, recipe,{ sources: { [SOURCE_ID]: await sourceAsset() } });
   const part = name => {
     const index = asset.parts.findIndex(candidate => candidate.name === name);

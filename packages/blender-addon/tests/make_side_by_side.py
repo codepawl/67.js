@@ -21,7 +21,7 @@ def load_tone_map():
     specification = importlib.util.spec_from_file_location("compare", path)
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
-    return module.tone_map_like_67js
+    return module.tone_map_like_crucible
 
 
 def labelled_tile(tone_map, directory, engine_name, label):

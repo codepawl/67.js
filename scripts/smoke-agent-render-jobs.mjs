@@ -9,13 +9,13 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createTexturedRigFixture } from './agent-asset-fixture.mjs';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-jobs-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-jobs-'));
 const assets = join(directory, 'assets');
 const jobs = join(directory, 'jobs');
 await mkdir(assets);
 const assetBytes = await createTexturedRigFixture();
 await writeFile(join(assets, 'rig.glb'), assetBytes);
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 let client;
 let transport;
 let diagnostics = '';
@@ -24,7 +24,7 @@ async function connect() {
     args: [cli, '--backend', 'cpu', '--memory', '96', '--assets', assets, '--jobs', jobs],
     cwd: directory, stderr: 'pipe' });
   transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-  client = new Client({ name: '67js-job-proof', version: '1' });
+  client = new Client({ name: 'crucible-job-proof', version: '1' });
   await client.connect(transport);
 }
 async function call(name, argumentsValue = {}) {
@@ -60,7 +60,7 @@ try {
   assert.equal((await client.listTools()).tools.length, 25);
   const catalog = (await call('scene_asset_catalog')).structuredContent;
   const created = (await call('scene_create_asset', { recipe: {
-    format: '67js.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
+    format: 'crucible.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
     camera: { eye: [1, 3, 7], target: [1, 3, 0], fov: 35, near: 0.1, far: 40 },
   } })).structuredContent;
   const sessionId = created.sessionId;

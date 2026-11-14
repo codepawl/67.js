@@ -14,7 +14,7 @@ const PAN_STEPS = [0, 0.25, 0.5];
 
 function seaRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{
       id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0.002 },
       edits: [
@@ -46,10 +46,10 @@ async function printMedianLookTime(client, sessionId, view) {
 }
 
 await mkdir(outputDirectory, { recursive: true });
-const workDirectory = await mkdtemp(join(tmpdir(), '67js-water-aliasing-'));
+const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-water-aliasing-'));
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [join(repositoryRoot, 'bin/67js-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs')],
+  args: [join(repositoryRoot, 'bin/crucible-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs')],
   cwd: workDirectory, stderr: 'pipe',
 });
 const client = new Client({ name: 'water-aliasing', version: '1' });

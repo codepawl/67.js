@@ -5,7 +5,7 @@ import { createAgentScene } from '../src/agent-scene.js';
 
 function recipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'finish', color: [0.2, 0.4, 0.6], emission: 0 }],
     nodes: [

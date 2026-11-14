@@ -1,8 +1,8 @@
 # Splits a hall into light components on both sides and prints one table per hall (issue #543).
 #   uv run --no-project --with openexr --with numpy --with pillow python -I bench/reference/light-components.py <passes directory>... -- <variants directory> <out.md>
-# Cycles side: <id>-passes.exr from render-blender.py --passes, in linear radiance. 67js side: <variants>/<label>/<id>.png, drawn by
+# Cycles side: <id>-passes.exr from render-blender.py --passes, in linear radiance. Crucible side: <variants>/<label>/<id>.png, drawn by
 # artifacts/543/variants.sh, turned back into linear radiance by inverting the display fit (tone map and gamma 2.2).
-# Components are mean linear luminance over the frame. 67js has no light passes, so its components are differences between renders:
+# Components are mean linear luminance over the frame. Crucible has no light passes, so its components are differences between renders:
 # haze = vE - vE-nofog, sun = vE - vE-nosun, and what is left with sun and haze off is the sky and the bounced light.
 import json
 import sys
@@ -104,7 +104,7 @@ def main():
     pass_directories = [Path(item) for item in sys.argv[1:separator]]
     variants = Path(sys.argv[separator + 1])
     output = Path(sys.argv[separator + 2])
-    lines = ["# Light components, Cycles vs 67js (issue #543)", "", "Cycles components from render-blender.py (--passes, --no-fog, --sun-strength 0); 67js from the renders of artifacts/543/variants.sh.", ""]
+    lines = ["# Light components, Cycles vs Crucible (issue #543)", "", "Cycles components from render-blender.py (--passes, --no-fog, --sun-strength 0); Crucible from the renders of artifacts/543/variants.sh.", ""]
     for hall, passes_name in HALLS.items():
         path = next((directory / f"{passes_name}-passes.exr" for directory in pass_directories if (directory / f"{passes_name}-passes.exr").exists()), None)
         if path is None:
@@ -141,7 +141,7 @@ def main():
         cycles_split = split(cycles_variant)
         vE_split = split(js_variant["vE"])
         main_split = split(js_variant["main"])
-        lines += [f"## {hall}", "", "Mean linear luminance. Each row is a difference between renders, on both sides.", "", "| component | Cycles | 67js main | 67js vE | main / Cycles | vE / Cycles |", "|---|---|---|---|---|---|"]
+        lines += [f"## {hall}", "", "Mean linear luminance. Each row is a difference between renders, on both sides.", "", "| component | Cycles | Crucible main | Crucible vE | main / Cycles | vE / Cycles |", "|---|---|---|---|---|---|"]
         for name in cycles_split:
             cycles_value = luminance_mean(cycles_split[name])
             main_value = luminance_mean(main_split[name]) if main_split else float("nan")
@@ -151,7 +151,7 @@ def main():
         for name, image in cycles.items():
             lines.append(f"| {name} | {luminance_mean(image):.4f} |")
         masks = regions(cycles)
-        lines += ["", "Regions (masks from Cycles; the same pixels on both sides), mean linear luminance:", "", "| region | pixels | Cycles | 67js main | 67js vE | vE / Cycles | main / Cycles |", "|---|---|---|---|---|---|---|"]
+        lines += ["", "Regions (masks from Cycles; the same pixels on both sides), mean linear luminance:", "", "| region | pixels | Cycles | Crucible main | Crucible vE | vE / Cycles | main / Cycles |", "|---|---|---|---|---|---|---|"]
         for name, mask in masks.items():
             cycles_value = luminance_mean(cycles["combined"], mask)
             main_value = luminance_mean(label["main"], mask) if "main" in label else float("nan")

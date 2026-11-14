@@ -9,15 +9,15 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createAgentMotionFixture } from './agent-motion-fixture.mjs';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-motion-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-motion-'));
 const jobs = join(directory, 'jobs');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '96', '--jobs', jobs],
   cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-motion-proof', version: '1' });
+const client = new Client({ name: 'crucible-motion-proof', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 30000) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout });

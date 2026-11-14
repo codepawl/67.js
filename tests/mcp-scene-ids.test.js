@@ -6,12 +6,12 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 import { AGENT_SCENE_DEFAULT_LIMITS } from '../src/agent-scene-capabilities.js';
 
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
 
 function recipeWithNode(nodeId) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
     materials: [{ id: 'blue', color: [0.1, 0.3, 0.8] }],
     nodes: [{ id: nodeId, geometry: 'cube', material: 'blue' }],

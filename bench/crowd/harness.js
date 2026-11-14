@@ -3,7 +3,7 @@ import { mat4 } from 'gl-matrix';
 import { parseGltf } from '../../src/gltf.js';
 import { clipFromGltfAnimation, createAssetPose } from '../../src/skeleton-pose.js';
 import { createCrowd } from '../../src/retarget.js';
-import { Renderer67 } from '../../src/renderer.js';
+import { CrucibleRenderer } from '../../src/renderer.js';
 import { bakeCrowdPalette, createCrowdParts, createCrowdRig } from '../../src/crowd-skinning.js';
 
 const ROBOT_URL = '/tests/fixtures/RobotExpressive.glb';
@@ -77,7 +77,7 @@ async function buildCrowd(canvas, { count, spacing, wide = true, lods = true, cu
   const set = createCrowdParts({ rig, palette, instances: crowd.instances, lods });
   const columns = Math.ceil(Math.sqrt(count));
   const camera = cameraFor(columns, spacing, palette.bounds.radius, wide);
-  const renderer = new Renderer67(canvas, set.parts, { ground: true, hdr: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 2048, culling });
+  const renderer = new CrucibleRenderer(canvas, set.parts, { ground: true, hdr: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 2048, culling });
   renderer.resize();
   const frame = { ...camera, time: 0, exposure: 1, effects: {} };
   return {
@@ -130,7 +130,7 @@ async function measureInstances(canvas, { count, frames, spacing }) {
     }
   }
   const walking = assets[0].animations.findIndex(animation => animation.name === 'Walking');
-  const renderer = new Renderer67(canvas, parts, { ground: true, hdr: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 4096 });
+  const renderer = new CrucibleRenderer(canvas, parts, { ground: true, hdr: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 4096 });
   renderer.resize();
   const frame = { ...cameraFor(Math.ceil(Math.sqrt(count)), spacing, 4, true), time: 0, exposure: 1, effects: {} };
   const run = (seconds) => {
@@ -162,7 +162,7 @@ async function checkPictures(canvas, dump = false) {
   const walking = reference.animations.findIndex(animation => animation.name === 'Walking');
   const seconds = 0.4;
   reference.applyAnimation(seconds, walking);
-  const referenceRenderer = new Renderer67(canvas, reference.parts, { ground: true, hdr: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 512 });
+  const referenceRenderer = new CrucibleRenderer(canvas, reference.parts, { ground: true, hdr: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 512 });
   referenceRenderer.resize();
   const crowdScene = await buildCrowd(canvas, { count: 1, spacing: 3, wide: false, lods: false, culling: !globalThis.CROWD_NO_CULL });
   const frame = { ...crowdScene.frame, time: 0 };

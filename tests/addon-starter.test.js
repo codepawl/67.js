@@ -6,12 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { checkAddon, parseRange, rangeAllows } from '../bin/67js-addon-check.mjs';
+import { checkAddon, parseRange, rangeAllows } from '../bin/crucible-addon-check.mjs';
 import { VERSION } from '../src/version.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const starterFolder = join(root, 'templates', 'addon-starter');
-const PEER_PREFIX = '@codepawlhq/67js/addons/';
+const PEER_PREFIX = '@codepawlhq/crucible/addons/';
 
 // Resolves the peer package's addon subpaths to this checkout's source, as the built package would.
 const resolveHooks = `
@@ -45,13 +45,13 @@ function errorsFor(change, options) {
   }
 }
 
-test('the starter template passes the contract for the current 67js version', () => {
+test('the starter template passes the contract for the current Crucible version', () => {
   const { errors, warnings } = checkAddon(starterFolder, { version: VERSION });
   assert.deepEqual(errors, []);
   assert.deepEqual(warnings, []);
 });
 
-test('the starter registers its controller kind against the local 67js source', async () => {
+test('the starter registers its controller kind against the local Crucible source', async () => {
   const { registerHoverController } = await import(pathToFileURL(join(starterFolder, 'src', 'index.js')).href);
   const { createController } = await import('../src/player.js');
   assert.equal(registerHoverController('starter-hover'), 'starter-hover');
@@ -59,36 +59,36 @@ test('the starter registers its controller kind against the local 67js source', 
   assert.deepEqual(controller.state.position, [0, 3, 0]);
 });
 
-test('the starter own tests pass against the local 67js source', () => {
+test('the starter own tests pass against the local Crucible source', () => {
   const result = spawnSync(process.execPath, ['--import', hooksUrl, '--test', join(starterFolder, 'tests', 'starter.spec.js')], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
 test('a missing keyword is refused with the fix', () => {
   const errors = errorsFor(pack => { pack.keywords = ['three-d']; });
-  assert.match(errors.join('\n'), /must include "67js-addon".*Add it/);
+  assert.match(errors.join('\n'), /must include "crucible-addon".*Add it/);
 });
 
 test('a missing peer dependency is refused with the fix', () => {
   const errors = errorsFor(pack => { delete pack.peerDependencies; });
-  assert.match(errors.join('\n'), /peerDependencies" must list @codepawlhq\/67js/);
+  assert.match(errors.join('\n'), /peerDependencies" must list @codepawlhq\/crucible/);
 });
 
 test('a bad range, unknown point and missing manifest are refused', () => {
-  assert.match(errorsFor(pack => { pack['67js'].range = 'latest'; }).join('\n'), /"67js".range must be a version range/);
-  assert.match(errorsFor(pack => { pack['67js'].extensionPoints = ['hackTheGibson']; }).join('\n'), /unknown point "hackTheGibson"/);
-  assert.match(errorsFor(pack => { delete pack['67js']; }).join('\n'), /no "67js" field/);
+  assert.match(errorsFor(pack => { pack['crucible'].range = 'latest'; }).join('\n'), /"crucible".range must be a version range/);
+  assert.match(errorsFor(pack => { pack['crucible'].extensionPoints = ['hackTheGibson']; }).join('\n'), /unknown point "hackTheGibson"/);
+  assert.match(errorsFor(pack => { delete pack['crucible']; }).join('\n'), /no "crucible" field/);
 });
 
 test('a range that excludes the running version and an oversized entry are refused', () => {
-  assert.match(errorsFor(pack => { pack['67js'].range = '>=9.0.0'; }, { version: VERSION }).join('\n'), /does not allow 67js/);
-  assert.match(errorsFor(pack => { pack['67js'].bundleBytes = 10; }).join('\n'), /raise bundleBytes|Raise bundleBytes/i);
+  assert.match(errorsFor(pack => { pack['crucible'].range = '>=9.0.0'; }, { version: VERSION }).join('\n'), /does not allow Crucible/);
+  assert.match(errorsFor(pack => { pack['crucible'].bundleBytes = 10; }).join('\n'), /raise bundleBytes|Raise bundleBytes/i);
 });
 
 test('the command line exits non-zero for a folder that breaks the contract', () => {
   const folder = copyStarter(pack => { pack.keywords = []; });
   try {
-    const result = spawnSync(process.execPath, [join(root, 'bin', '67js-addon-check.mjs'), folder], { encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [join(root, 'bin', 'crucible-addon-check.mjs'), folder], { encoding: 'utf8' });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /error: /);
   } finally {

@@ -10,7 +10,7 @@ const DEGREES = Math.PI / 180;
 
 function rigRecipe(motion, nodes = []) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'box', type: 'box', bevel: 0 },
       { id: 'face', type: 'mesh', base: { type: 'box', bevel: 0, subdivisions: 2 }, shapeKeys: [{ name: 'lift', offsets: [{ select: { tag: 'top' }, offset: [0, 0.5, 0] }] }] },

@@ -140,10 +140,10 @@ With `clip` (imported assets) it writes that source clip, translation, rotation,
 Both take the same `parts` as `exportGlb`, apply each part matrix so every vertex is in world space, and write the same bytes for the same input.
 Save the OBJ and MTL side by side; the OBJ names the MTL by `mtlFilename` (default `model.mtl`, a plain file name ending in `.mtl`).
 
-They live in the `@codepawlhq/67js/addons/export-mesh` addon, so the core bundle does not grow.
+They live in the `@codepawlhq/crucible/addons/export-mesh` addon, so the core bundle does not grow.
 
 ```js
-import { exportObj, exportStl } from '@codepawlhq/67js/addons/export-mesh';
+import { exportObj, exportStl } from '@codepawlhq/crucible/addons/export-mesh';
 
 const { obj, mtl } = exportObj(parts);
 const stl = exportStl(parts);
@@ -155,7 +155,7 @@ const stl = exportStl(parts);
 | MTL | One material per distinct base color, emission, roughness and metallic: `Kd`, `Ke` (when emission is positive), `Pr`, `Pm`, and `d` (opacity) for mask, blend and add materials | Texture maps, alpha cutoff, layers, patterns |
 | STL | Triangles with face normals, 80 byte header, no color | Everything but shape |
 
-Y stays up and units stay as authored (67js uses meters); set the axis and unit in the importer or slicer.
+Y stays up and units stay as authored (Crucible uses meters); set the axis and unit in the importer or slicer.
 A mirrored part (negative scale) has its winding swapped so faces still point outward.
 A skinned part exports its bind shape.
 Export stops with an error past `MAX_MESH_EXPORT_TRIANGLES` (1,000,000), and names the field it rejected: positions, indices, `part.matrix`, and for OBJ also `geometry.uvs`, `geometry.normals` and the `material` fields.

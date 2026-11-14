@@ -8,18 +8,18 @@ const REFERENCE_DIRECTORY = new URL('../bench/reference/', import.meta.url);
 const SCENES = ['shapes', 'corner', 'material-row', 'colonnade'];
 
 function scoresWhere(challengerValues) {
-  return Object.fromEntries(SCENES.map((sceneId, index) => [sceneId, { '67js-default': 0.1, '67js-ao': challengerValues[index], 'three-default': 0.2 }]));
+  return Object.fromEntries(SCENES.map((sceneId, index) => [sceneId, { 'crucible-default': 0.1, 'crucible-ao': challengerValues[index], 'three-default': 0.2 }]));
 }
 
-test('a challenger wins the scenes where it is lower than the 67js defaults by more than the margin', () => {
+test('a challenger wins the scenes where it is lower than the Crucible defaults by more than the margin', () => {
   const scores = scoresWhere([0.05, 0.1005, 0.2, 0.09]);
-  assert.deepEqual(winningScenes(scores, '67js-ao'), ['shapes', 'colonnade']);
+  assert.deepEqual(winningScenes(scores, 'crucible-ao'), ['shapes', 'colonnade']);
 });
 
 test('a default change is proposed only with a win on at least three scenes', () => {
   assert.deepEqual(proposeDefaultChanges(scoresWhere([0.05, 0.05, 0.2, 0.2])), []);
   const proposals = proposeDefaultChanges(scoresWhere([0.05, 0.05, 0.05, 0.2]));
-  assert.deepEqual(proposals, [{ challenger: '67js-ao', wins: ['shapes', 'corner', 'material-row'] }]);
+  assert.deepEqual(proposals, [{ challenger: 'crucible-ao', wins: ['shapes', 'corner', 'material-row'] }]);
 });
 
 test('the mean skips scenes that have no score for the variant', () => {
@@ -33,19 +33,19 @@ test('the report holds the scores, means, image paths and proposals', () => {
   assert.equal(report.issue, 988);
   assert.deepEqual(Object.keys(report.images), SCENES);
   assert.equal(report.images.shapes.cycles, 'default-look/shapes-cycles.png');
-  assert.equal(report.means['67js-default'], 0.1);
+  assert.equal(report.means['crucible-default'], 0.1);
   assert.equal(report.proposals.length, 1);
-  assert.match(scoreTable(report), /^\| scene \| 67js-default \|/);
+  assert.match(scoreTable(report), /^\| scene \| crucible-default \|/);
   assert.match(scoreTable(report), /\| mean \|/);
 });
 
-test('every variant says its engine, and a 67js variant leaves the renderer defaults alone unless it names an option', () => {
+test('every variant says its engine, and a Crucible variant leaves the renderer defaults alone unless it names an option', () => {
   for (const [name, variant] of Object.entries(DEFAULT_LOOK_VARIANTS)) {
-    assert.ok(['67js', 'three'].includes(variant.engine), name);
+    assert.ok(['crucible', 'three'].includes(variant.engine), name);
     assert.ok(variant.label, name);
   }
-  assert.deepEqual(DEFAULT_LOOK_VARIANTS['67js-default'].rendererOptions, {});
-  assert.equal(DEFAULT_LOOK_VARIANTS['67js-default'].effects.ambientOcclusion, 0);
+  assert.deepEqual(DEFAULT_LOOK_VARIANTS['crucible-default'].rendererOptions, {});
+  assert.equal(DEFAULT_LOOK_VARIANTS['crucible-default'].effects.ambientOcclusion, 0);
 });
 
 test('the committed default look report covers four scenes, both engines and a committed Cycles image for each', () => {

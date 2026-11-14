@@ -1,18 +1,18 @@
 {
-  "name": "@codepawlhq/67js",
-  "version": "0.19.0",
+  "name": "@codepawlhq/crucible",
+  "version": "0.20.0",
   "private": false,
   "type": "module",
   "description": "3D engine that AI agents drive: a WebGL2 rasterizer, a path tracer on CPU and WebGL2 (Vulkan with an optional package, WebGPU opt-in), an MCP server, and PNG, MP4 and GLB export",
   "keywords": ["webgl2", "webgpu", "path-tracing", "mcp", "ai-agents", "3d"],
   "license": "MIT",
-  "homepage": "https://67js.codepawl.com",
+  "homepage": "https://crucible.codepawl.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/codepawl/67.js.git"
+    "url": "git+https://github.com/codepawl/crucible.git"
   },
   "bugs": {
-    "url": "https://github.com/codepawl/67.js/issues"
+    "url": "https://github.com/codepawl/crucible/issues"
   },
   "files": [
     "build",
@@ -63,6 +63,8 @@
   "main": "./build/67.module.js",
   "module": "./build/67.module.js",
   "bin": {
+    "crucible-mcp": "./bin/crucible-mcp.mjs",
+    "crucible-addon-check": "./bin/crucible-addon-check.mjs",
     "67js-mcp": "./bin/67js-mcp.mjs",
     "67js-addon-check": "./bin/67js-addon-check.mjs"
   },
@@ -176,7 +178,7 @@
     "score": "node scripts/score.mjs",
     "export:model": "node scripts/export-model.mjs",
     "smoke:package": "node scripts/smoke-package.mjs",
-    "mcp": "node bin/67js-mcp.mjs",
+    "mcp": "node bin/crucible-mcp.mjs",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "smoke:mcp-package": "node scripts/smoke-mcp-package.mjs",
     "smoke:mcp-clients": "node scripts/smoke-mcp-clients.mjs",
@@ -259,7 +261,7 @@
     }
   },
   "devDependencies": {
-    "@codepawlhq/67js-denoise-oidn": "file:packages/denoise-oidn",
+    "@codepawlhq/crucible-denoise-oidn": "file:packages/denoise-oidn",
     "@codepawlhq/cook": "git+https://github.com/codepawl/cook.git#5d9eda89d3a931ace15f1a743a7ca1fd0462030a",
     "@dimforge/rapier3d-compat": "0.21.0",
     "@modelcontextprotocol/client": "2.4.0",

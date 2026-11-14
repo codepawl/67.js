@@ -1,10 +1,10 @@
 # Connect the MCP server
 
-This page connects the 67js MCP server to an AI agent harness. A harness is the program that runs the agent, such as Claude Code or Cursor. At the end, the agent can build a scene and show you a picture of it.
+This page connects the Crucible MCP server to an AI agent harness. A harness is the program that runs the agent, such as Claude Code or Cursor. At the end, the agent can build a scene and show you a picture of it.
 
 ## What the server is
 
-`67js-mcp` is a local program. The harness starts it and talks to it over stdin and stdout. It has no network listener for MCP.
+`crucible-mcp` is a local program. The harness starts it and talks to it over stdin and stdout. It has no network listener for MCP.
 
 The server holds a few open scenes and uses the last one you used when a call has no `sessionId`. When the agent calls `scene_create`, the server starts your installed Chrome in the background and renders the scene there. It gives the agent 24 tools to build, look at and export the scene. The tools take JSON, and they never run code that the agent writes.
 
@@ -16,17 +16,17 @@ You need two things:
 Check that the server starts. This command downloads the package and prints its version:
 
 ```sh
-npx -y --package @codepawlhq/67js 67js-mcp --version
+npx -y --package @codepawlhq/crucible crucible-mcp --version
 ```
 
-The command prints the version, for example `0.15.0`. The package on npm is `@codepawlhq/67js` and its command is `67js-mcp`.
+The command prints the version, for example `0.15.0`. The package on npm is `@codepawlhq/crucible` and its command is `crucible-mcp`.
 
 ## The launch command
 
 Every harness below runs the same command. These are the parts of it:
 
 ```text
-npx -y --package @codepawlhq/67js 67js-mcp --backend gpu --memory 192
+npx -y --package @codepawlhq/crucible crucible-mcp --backend gpu --memory 192
 ```
 
 `--backend` is `gpu` or `cpu`. Use `cpu` on a machine with no graphics card or on a remote machine. `--memory` is the render budget in MiB, from 32 to 384. The default is 192. These options are optional too:
@@ -39,14 +39,14 @@ npx -y --package @codepawlhq/67js 67js-mcp --backend gpu --memory 192
 | `--ffmpeg` | Absolute path to FFmpeg | Sets the encoder for MP4 jobs. FFmpeg on `PATH` works without it. |
 | `--audio` | Absolute path to a folder of sound files | Lets video jobs add sound. |
 
-`67js-mcp --help` prints the same list. Add `@0.15.0` after the package name to pin a version, as in `@codepawlhq/67js@0.15.0`.
+`crucible-mcp --help` prints the same list. Add `@0.15.0` after the package name to pin a version, as in `@codepawlhq/crucible@0.15.0`.
 
 ### The node form
 
 The first `npx` run downloads the package, which can take longer than a harness waits for a server to start. A harness on Windows can also fail to start `npx`. In both cases, install the package once and start Node directly:
 
 ```sh
-npm install 67js@npm:@codepawlhq/67js
+npm install crucible@npm:@codepawlhq/crucible
 ```
 
 Then replace `command` and `args` in any snippet below with the absolute path of Node and of the installed script. This example is for Windows:
@@ -54,7 +54,7 @@ Then replace `command` and `args` in any snippet below with the absolute path of
 ```json
 {
   "command": "C:/Program Files/nodejs/node.exe",
-  "args": ["C:/projects/my-scene/node_modules/67js/bin/67js-mcp.mjs", "--backend", "gpu", "--memory", "192"]
+  "args": ["C:/projects/my-scene/node_modules/crucible/bin/crucible-mcp.mjs", "--backend", "gpu", "--memory", "192"]
 }
 ```
 
@@ -62,17 +62,17 @@ On macOS and Linux, use the output of `which node` as the command. Use forward s
 
 ## Claude Code
 
-The plugin is the shortest route. It adds the server and the `build-67js-scene` and `render-67js-media` skills:
+The plugin is the shortest route. It adds the server and the `build-crucible-scene` and `render-crucible-media` skills:
 
 ```text
-/plugin marketplace add codepawl/67.js
-/plugin install 67js@67js
+/plugin marketplace add codepawl/crucible
+/plugin install crucible@crucible
 ```
 
 The plugin starts the server with `npx` from the published npm package. For a manual setup, Claude Code can add the server with one command. Everything after `--` is the launch command:
 
 ```sh
-claude mcp add --transport stdio 67js-scene -- npx -y --package @codepawlhq/67js 67js-mcp --backend gpu --memory 192
+claude mcp add --transport stdio crucible-scene -- npx -y --package @codepawlhq/crucible crucible-mcp --backend gpu --memory 192
 ```
 
 The command writes to your local scope. Add `--scope project` to write a `.mcp.json` file in the project root that you can commit, or `--scope user` to use the server in every project. You can also write `.mcp.json` yourself:
@@ -80,15 +80,15 @@ The command writes to your local scope. Add `--scope project` to write a `.mcp.j
 ```json
 {
   "mcpServers": {
-    "67js-scene": {
+    "crucible-scene": {
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"]
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"]
     }
   }
 }
 ```
 
-Claude Code asks you to approve a server from `.mcp.json` the first time you run `claude` in that folder. Run `claude mcp get 67js-scene` to see its status. Inside a session, `/mcp` shows the same list.
+Claude Code asks you to approve a server from `.mcp.json` the first time you run `claude` in that folder. Run `claude mcp get crucible-scene` to see its status. Inside a session, `/mcp` shows the same list.
 
 If the server needs more than the default time to start, set `MCP_TIMEOUT` in milliseconds, as in `MCP_TIMEOUT=60000 claude`. Source: [Claude Code MCP docs](https://code.claude.com/docs/en/mcp).
 
@@ -105,9 +105,9 @@ Add the server under `mcpServers`:
 ```json
 {
   "mcpServers": {
-    "67js-scene": {
+    "crucible-scene": {
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"]
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"]
     }
   }
 }
@@ -122,9 +122,9 @@ Cursor reads `.cursor/mcp.json` in a project and `~/.cursor/mcp.json` for every 
 ```json
 {
   "mcpServers": {
-    "67js-scene": {
+    "crucible-scene": {
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"]
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"]
     }
   }
 }
@@ -139,10 +139,10 @@ VS Code runs MCP servers for GitHub Copilot chat. It reads `.vscode/mcp.json` in
 ```json
 {
   "servers": {
-    "67js-scene": {
+    "crucible-scene": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"]
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"]
     }
   }
 }
@@ -155,9 +155,9 @@ To see the server's tools, open Chat, then Customizations, then Tools. In a loca
 Codex stores MCP servers in `~/.codex/config.toml`. A project can have its own `.codex/config.toml`. Add a table for the server:
 
 ```toml
-[mcp_servers.67js-scene]
+[mcp_servers.crucible-scene]
 command = "npx"
-args = ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"]
+args = ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"]
 startup_timeout_sec = 60
 tool_timeout_sec = 120
 ```
@@ -165,7 +165,7 @@ tool_timeout_sec = 120
 The default start timeout is 10 seconds, so the first `npx` download can fail without `startup_timeout_sec`. The default tool timeout is 60 seconds. You can also add the server from the shell:
 
 ```sh
-codex mcp add 67js-scene -- npx -y --package @codepawlhq/67js 67js-mcp --backend gpu --memory 192
+codex mcp add crucible-scene -- npx -y --package @codepawlhq/crucible crucible-mcp --backend gpu --memory 192
 ```
 
 Source: [Codex MCP docs](https://developers.openai.com/codex/mcp).
@@ -177,9 +177,9 @@ Gemini CLI reads `~/.gemini/settings.json` for every project and `.gemini/settin
 ```json
 {
   "mcpServers": {
-    "67js-scene": {
+    "crucible-scene": {
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"],
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"],
       "timeout": 120000
     }
   }
@@ -195,9 +195,9 @@ Antigravity reads `~/.gemini/config/mcp_config.json` for every project and `<wor
 ```json
 {
   "mcpServers": {
-    "67js-scene": {
+    "crucible-scene": {
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"]
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"]
     }
   }
 }
@@ -212,9 +212,9 @@ Cline stores its servers in a JSON file. In the IDE extension, open the MCP Serv
 ```json
 {
   "mcpServers": {
-    "67js-scene": {
+    "crucible-scene": {
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"],
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"],
       "disabled": false,
       "autoApprove": []
     }
@@ -222,7 +222,7 @@ Cline stores its servers in a JSON file. In the IDE extension, open the MCP Serv
 }
 ```
 
-An empty `autoApprove` list makes Cline ask before each tool call. The Cline CLI can also add the server: `cline mcp add 67js-scene --yes -- npx -y --package @codepawlhq/67js 67js-mcp --backend gpu --memory 192`. Source: [Cline MCP docs](https://docs.cline.bot/mcp/mcp-overview).
+An empty `autoApprove` list makes Cline ask before each tool call. The Cline CLI can also add the server: `cline mcp add crucible-scene --yes -- npx -y --package @codepawlhq/crucible crucible-mcp --backend gpu --memory 192`. Source: [Cline MCP docs](https://docs.cline.bot/mcp/mcp-overview).
 
 ## Zed
 
@@ -231,9 +231,9 @@ Zed calls MCP servers context servers. Open the settings file with the `zed: ope
 ```json
 {
   "context_servers": {
-    "67js-scene": {
+    "crucible-scene": {
       "command": "npx",
-      "args": ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu", "--memory", "192"],
+      "args": ["-y", "--package", "@codepawlhq/crucible", "crucible-mcp", "--backend", "gpu", "--memory", "192"],
       "env": {}
     }
   }
@@ -248,12 +248,12 @@ The Windsurf documentation pages now redirect to Devin Desktop, which names `.de
 
 ## Check that it works
 
-First, ask the harness to list its MCP tools. You must see 25 tools whose names start with `scene_`, `mesh_` or `scene_render_`. Some harnesses add the server name in front, for example `mcp__67js-scene__scene_look` in Claude Code.
+First, ask the harness to list its MCP tools. You must see 25 tools whose names start with `scene_`, `mesh_` or `scene_render_`. Some harnesses add the server name in front, for example `mcp__crucible-scene__scene_look` in Claude Code.
 
 Then give the agent this prompt:
 
 ```text
-Use 67js to build a small wooden table with a top and four legs. Show me a picture of it.
+Use Crucible to build a small wooden table with a top and four legs. Show me a picture of it.
 ```
 
 The agent calls these tools in this order. [Working with agents](#agent-workflows) shows the real result of each call.
@@ -267,7 +267,7 @@ If the agent answers with JavaScript instead of tool calls, the server is not co
 ## Troubleshooting
 
 - **The server never appears.** Run the launch command in a terminal. If it works there and not in the harness, the harness uses another `PATH` or another Node. Use the node form with absolute paths.
-- **The server times out on first start.** The first `npx` run downloads the package. Install it once with `npm install 67js@npm:@codepawlhq/67js`, or raise the harness start timeout as shown above.
+- **The server times out on first start.** The first `npx` run downloads the package. Install it once with `npm install crucible@npm:@codepawlhq/crucible`, or raise the harness start timeout as shown above.
 - **Node is too old.** The package needs Node 20.19 or later. Run `node --version`, and use the Node that the harness starts, not only the one in your terminal.
 - **`scene_create` fails.** The server could not start Chrome or the preview page. Install Google Chrome, or pass `--browser` with the path of a Chromium executable. The server writes the cause to stderr, which the harness shows in its MCP log.
 - **A sandbox blocks the tool.** The server starts a browser and serves its preview page on the loopback interface. A sandbox that blocks either one makes `scene_create` fail. Allow both for this server, or run the harness without that sandbox.

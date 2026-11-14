@@ -1,5 +1,5 @@
 // Runs in the page: a pillar and a floating cube over a floor, drawn with each soft-light feature off and on.
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { box } from '/src/geometry.js';
 
 // The light-shapes and cascade modules are optional: this harness loads them only when the source tree has them,
@@ -39,7 +39,7 @@ async function drawCase(name, { warmupFrames = 10, measuredFrames = 60 } = {}) {
   const canvas = document.querySelector('canvas');
   const options = { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment: definition.environment };
   if (definition.cascadeCount > 0) options.shadowCascades = cascades.createCascadedShadows({ count: definition.cascadeCount });
-  const renderer = new Renderer67(canvas, sceneParts(), options);
+  const renderer = new CrucibleRenderer(canvas, sceneParts(), options);
   renderer.resize();
   const frame = { ...camera, environment: definition.environment, time: 0, exposure: 1, effects: { ambientOcclusion: 0 } };
   const pixel = new Uint8Array(4);

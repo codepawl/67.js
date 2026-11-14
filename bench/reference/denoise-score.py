@@ -1,6 +1,6 @@
 # Scores every denoiser output of denoise-compare.mjs against the Cycles render of the same scene with FLIP, and writes denoise.json:
 #   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/denoise-score.py <capture directory> <cycles directory> <output json>
-# Each <capture directory>/<scene>/<samples>/<method>.f32 is linear RGB, 960 by 540. Like score.py, the image is tone mapped as 67js does
+# Each <capture directory>/<scene>/<samples>/<method>.f32 is linear RGB, 960 by 540. Like score.py, the image is tone mapped as Crucible does
 # and rounded to 8 bits before FLIP, because a path traced still is written as an 8-bit PNG.
 import json
 import sys
@@ -15,7 +15,7 @@ GAMMA = 2.2
 MIN_SCENES_BETTER = 4
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
@@ -46,12 +46,12 @@ def main():
             truth_path = truth_directory / scene_directory.name / "512" / "color.f32"
             if not truth_path.exists():
                 continue
-            cycles = quantise_to_8_bit(tone_map_like_67js(np.fromfile(truth_path, dtype=np.float32).reshape(HEIGHT, WIDTH, 3)))
+            cycles = quantise_to_8_bit(tone_map_like_crucible(np.fromfile(truth_path, dtype=np.float32).reshape(HEIGHT, WIDTH, 3)))
         else:
             cycles_path = cycles_directory / f"{scene_directory.name}-cycles.npy"
             if not cycles_path.exists():
                 continue
-            cycles = tone_map_like_67js(np.load(cycles_path))
+            cycles = tone_map_like_crucible(np.load(cycles_path))
         scores[scene_directory.name] = {}
         for sample_directory in sorted((path for path in scene_directory.iterdir() if path.is_dir()), key=lambda path: int(path.name)):
             entry = {}
@@ -59,7 +59,7 @@ def main():
                 if method_path.stem in ("color", "albedo", "normal", "depth", "variance"):
                     continue
                 linear = np.fromfile(method_path, dtype=np.float32).reshape(HEIGHT, WIDTH, 3)
-                entry[method_path.stem] = flip_score(cycles, quantise_to_8_bit(tone_map_like_67js(linear)))
+                entry[method_path.stem] = flip_score(cycles, quantise_to_8_bit(tone_map_like_crucible(linear)))
             scores[scene_directory.name][sample_directory.name] = entry
     verdict = {}
     for scene_id, by_samples in scores.items():

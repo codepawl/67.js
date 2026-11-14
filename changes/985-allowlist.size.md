@@ -1,2 +1,0 @@
-- entry:player: unregister and list functions let the host take back a kind an addon did not declare (#985)
-- scene:agent-scene+lazy: the game setup accepts controller and camera kinds an allowlisted addon registered (#985)

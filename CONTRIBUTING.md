@@ -1,8 +1,8 @@
-# Contributing to 67js
+# Contributing to Crucible
 
 This file covers setup, how to send a change, the checks it must pass, the code style and the release flow.
 Coding agents can start with [AGENTS.md](AGENTS.md), the short version. Everyone follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
-To ask a question or report a bug, see [SUPPORT.md](.github/SUPPORT.md). Questions, ideas and finished work go in [Discussions](https://github.com/codepawl/67.js/discussions); a bug or a planned change goes in an issue.
+To ask a question or report a bug, see [SUPPORT.md](.github/SUPPORT.md). Questions, ideas and finished work go in [Discussions](https://github.com/codepawl/crucible/discussions); a bug or a planned change goes in an issue.
 A maintainer gives a first answer to every issue and pull request within about 7 days.
 Coding agents are welcome to open pull requests. There is no disclosure box: the person who opens the pull request answers for it.
 
@@ -20,7 +20,7 @@ The tests are in `tests/` and the guides are in `docs/`.
 
 1. Pick an issue. Issues labelled `good first issue` or `help wanted` are good places to start. For a large feature with no issue, open one with the feature form first. We then agree on the design before you write it.
 2. Comment on the issue that you take it, so that two people do not build the same thing.
-3. Fork the repository (`gh repo fork codepawl/67.js --clone`) and create a branch from `main` named `<issue>-<short-slug>`, such as `412-mesh-bevel`.
+3. Fork the repository (`gh repo fork codepawl/crucible --clone`) and create a branch from `main` named `<issue>-<short-slug>`, such as `412-mesh-bevel`.
 4. Write the change and its tests in the same commit, and update the guide in `docs/` that describes the feature.
 5. Add a change note (see [Change notes](#change-notes)). Do not edit `CHANGELOG.md`: two pull requests that edit it conflict on GitHub.
 6. Run `npm run preflight`, then push and open a pull request. The template asks what changed and how you checked it.
@@ -45,7 +45,7 @@ Under **How I checked it** (or **Ran**, **Checks**, **Checked**, **Tests**, **Ve
 
 Under **Evidence**, show what changed from old to new. This applies to every pull request that changes shipped code, from maintainers, outside contributors and agents alike.
 
-- For a change people can see, add a before and an after picture or a short clip rendered by 67js.
+- For a change people can see, add a before and an after picture or a short clip rendered by Crucible.
 - For a change that can be measured, give the numbers before and after: frame time, load time, bundle bytes, memory, a quality score or the bench table.
 - If nothing can be seen or measured, write one line that says so, such as "Nothing to see or measure: an internal rename."
 
@@ -152,7 +152,7 @@ To test a change to the rules, run `node --test tests/pr-metadata-check.test.js`
 - Use descriptive full names. Write `positionCount`, not `n` or `cnt`. Short names are fine for small loop indices.
 - Write one statement on each line. Keep functions small.
 - Add a comment only where the reason is not clear from the code.
-- Keep the core renderer free of new runtime dependencies. Put optional features in an addon under `src/` and export it as `67js/addons/<name>`.
+- Keep the core renderer free of new runtime dependencies. Put optional features in an addon under `src/` and export it as `crucible/addons/<name>`.
 - Make every scene builder deterministic for the same seed. Tests compare geometry byte for byte.
 - Validate input at the public boundary and throw an error that says what failed and what to pass instead.
 - Measure a performance claim on matching scenes before you write it in the docs.
@@ -178,7 +178,7 @@ waiting for the week.
 2. Run `npm run size:release` and `npm run tool-cost:release`. They reset the size budgets, the baseline and the tool cost ceilings to the release numbers. Read the diffs of `bench/size/budgets.json` and `bench/tool-cost-budgets.json`.
 3. Run `npm test`, `npm run build` and `npm run smoke:package`.
 4. Commit and push to `main`.
-5. Wait for the `Publish 67js` workflow. It tests the package and publishes the new version through the npm trusted publisher.
+5. Wait for the `Publish Crucible` workflow. It tests the package and publishes the new version through the npm trusted publisher.
 6. Run `npm run deploy`. It checks that the tree is clean and pushed, builds the site and verifies the live `/release.json`.
 
 ## License

@@ -6,13 +6,13 @@ import { chromium } from 'playwright';
 
 // Renders a quad textured with four coloured quadrants, pushes new pixels into one quadrant, renders again and reads the pixels back.
 // The region update must match uploading the finished picture whole. Runs on SwiftShader unless "gpu" is given;
-// start a GPU run through `bash ~/.agents/tools/gpu-lock.sh`.
+// start a GPU run through a GPU lock when the card is shared.
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const backend = process.argv[2] ?? 'cpu';
 assert.ok(['cpu', 'gpu'].includes(backend));
 await mkdir('artifacts', { recursive: true });
 const harness = `<!doctype html><html><head><style>html,body{margin:0}</style></head><body><script type="module">
-import {Renderer67} from '/src/renderer.js';
+import {CrucibleRenderer} from '/src/renderer.js';
 import '/src/texture-update.js';
 const SIZE = 64;
 const HALF = SIZE / 2;
@@ -47,7 +47,7 @@ function create(descriptor) {
   document.body.append(canvas);
   const part = { name: 'quad', geometry: quad, material: { tag: 'gltf', color: [1, 1, 1], metallic: 0, roughness: 1, emission: 0, emissiveColor: [0, 0, 0], map: descriptor },
     matrix: new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]) };
-  const renderer = new Renderer67(canvas, [part], { ground: false, shadows: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 64 });
+  const renderer = new CrucibleRenderer(canvas, [part], { ground: false, shadows: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 64 });
   const camera = { eye: [0, 0, 6], target: [0, 0, 0] };
   const context = renderer.context;
   const read = () => {

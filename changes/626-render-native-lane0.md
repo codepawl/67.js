@@ -1,1 +1,0 @@
-- `@codepawlhq/67js-render-native` takes a `kernel` option (`"legacy"` or `"cycles"`, with `JS67_NATIVE_KERNEL` fallback) and splits the native host and Cycles v2 ABI modules (#626)

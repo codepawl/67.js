@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 
 const LINEAR = 'LINEAR';
 const LINEAR_MIPMAP_LINEAR = 'LINEAR_MIPMAP_LINEAR';
@@ -43,9 +43,9 @@ test('stages and bloom never read a texture left on a mipmapped filter by the pr
         throw stageReached;
       },
     }],
-    restoreSingleLevelFiltering: Renderer67.prototype.restoreSingleLevelFiltering,
+    restoreSingleLevelFiltering: CrucibleRenderer.prototype.restoreSingleLevelFiltering,
   };
-  assert.throws(() => Renderer67.prototype.resolveFrame.call(renderer, {}, {}, {}, {}), stageReached);
+  assert.throws(() => CrucibleRenderer.prototype.resolveFrame.call(renderer, {}, {}, {}, {}), stageReached);
   assert.equal(filterSeenByStage, LINEAR);
   assert.equal(renderer.mipmappedTexture, null);
 });

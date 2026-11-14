@@ -7,7 +7,7 @@ A track decides how a value moves between two keyframes. A mixer decides how sev
 Four balls travel the same distance in two seconds. From the back: `LINEAR`, `STEP`, `SMOOTH` and `CUBICSPLINE` with tangents that overshoot, then `LINEAR` with an `easeOutBack` easing. Drag the slider to scrub.
 
 ```js live poster=animation-curves
-import { Renderer67, sphere, createAnimationClip, createAnimationPlayer, sampleAnimationClip } from '67js';
+import { CrucibleRenderer, sphere, createAnimationClip, createAnimationPlayer, sampleAnimationClip } from 'crucible';
 
 
 const modes = [
@@ -42,7 +42,7 @@ const tracks = modes.map((mode, index) => {
 const clip = createAnimationClip({ duration: 2, loop: true, tracks });
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const player = createAnimationPlayer(clip, parts);
 function draw(seconds) {
   player.apply(seconds);
@@ -92,14 +92,14 @@ addEventListener('pagehide', () => renderer.dispose());
 
 `CUBICSPLINE` tracks need `inTangent` and `outTangent` on every keyframe, with at least two keyframes. Tangents are component changes per second, and quaternion tangents are component derivatives. Overshoot clamps emission to zero or more, metallic to `[0, 1]`, roughness to `[1e-8, 1]` and scale to `1e-8` or more. Translation keeps its overshoot.
 
-A keyframe on a `LINEAR` or `SMOOTH` track can carry `easing`. The value is `linear`, `cubic-bezier(x1, y1, x2, y2)` or `ease<In|Out|InOut><Family>`, where Family is Sine, Quad, Cubic, Quart, Quint, Expo, Circ, Back, Bounce or Elastic. `easeOutBack(3)` takes an overshoot and `easeOutElastic(1.5, 0.4)` an amplitude and period. An unknown name throws a `RangeError` that lists the valid forms. The [curve contract](https://github.com/codepawl/67.js/blob/main/docs/animation-curves.md) defines interpolation, overshoot constraints and retained player buffers.
+A keyframe on a `LINEAR` or `SMOOTH` track can carry `easing`. The value is `linear`, `cubic-bezier(x1, y1, x2, y2)` or `ease<In|Out|InOut><Family>`, where Family is Sine, Quad, Cubic, Quart, Quint, Expo, Circ, Back, Bounce or Elastic. `easeOutBack(3)` takes an overshoot and `easeOutElastic(1.5, 0.4)` an amplitude and period. An unknown name throws a `RangeError` that lists the valid forms. The [curve contract](https://github.com/codepawl/crucible/blob/main/docs/animation-curves.md) defines interpolation, overshoot constraints and retained player buffers.
 
 ## Mix clips with fades
 
 `createAnimationMixer(parts)` captures the base pose of the named parts. Each clip becomes an action with `clipAction(clip)`. Press the buttons to schedule a crossfade between a slow wobble and a fast spin. The mixer is applied at absolute time, so the fade is the same when you seek.
 
 ```js live poster=animation-mixer
-import { Renderer67, box, createAnimationClip, createAnimationMixer } from '67js';
+import { CrucibleRenderer, box, createAnimationClip, createAnimationMixer } from 'crucible';
 
 
 const rotation = angle => [0, Math.sin(angle / 2), 0, Math.cos(angle / 2)];
@@ -118,7 +118,7 @@ const spin = createAnimationClip({ duration: 1, loop: true, tracks: [
 ] });
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const mixer = createAnimationMixer(parts);
 const wobbleAction = mixer.clipAction(wobble).play({ at: 0 });
 const spinAction = mixer.clipAction(spin);
@@ -165,7 +165,7 @@ requestAnimationFrame(frame);
 addEventListener('pagehide', () => renderer.dispose());
 ```
 
-The [mixer contract](https://github.com/codepawl/67.js/blob/main/docs/animation-mixer.md) defines blending, ownership and control ordering.
+The [mixer contract](https://github.com/codepawl/crucible/blob/main/docs/animation-mixer.md) defines blending, ownership and control ordering.
 
 1. Create clips and bind their actions through `mixer.clipAction(clip)`.
 2. Author `play`, `fadeTo` or `crossFade` controls in nondecreasing time order.

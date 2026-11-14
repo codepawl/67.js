@@ -10,13 +10,13 @@ function pngOf(canvas) {
 //   firstFrameMilliseconds: the first render, with the shader compile and the environment prefilter, until the pixels are back.
 //   frameMilliseconds: the next `frameCount` renders, each until a pixel read waits for the GPU (finish() returns early on a hardware GPU).
 window.renderTierScene = async function renderTierScene(sceneId, tier, frameCount = 10) {
-  const { SCENES, Renderer67, applyLightLinks, withDerivedGroundBounce, withFloorSky, skyOpenness, fogSkyVisibility } = window.referenceInternals;
+  const { SCENES, CrucibleRenderer, applyLightLinks, withDerivedGroundBounce, withFloorSky, skyOpenness, fogSkyVisibility } = window.referenceInternals;
   const setupStarted = performance.now();
   const scene = await SCENES[sceneId]();
   scene.environment = withDerivedGroundBounce(scene, scene.parts);
   const parts = withFloorSky(sceneId, scene.parts, scene);
   const canvas = document.querySelector('canvas');
-  const renderer = new Renderer67(canvas, applyLightLinks(parts, scene.environment), {
+  const renderer = new CrucibleRenderer(canvas, applyLightLinks(parts, scene.environment), {
     ground: false, world: true, memoryBudgetMiB: 1024,
     environment: scene.environment, shadowBounds: scene.shadow, skyOpenness, fogSkyVisibility,
     ...tier.rendererOptions,

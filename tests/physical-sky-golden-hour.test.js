@@ -54,7 +54,7 @@ test('sky presets set the sun, are deterministic, and fields beside them win', (
 });
 
 test('a preset in set-environment replaces the earlier sky, and a bad preset names the field', () => {
-  const session = createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
+  const session = createAgentScene({ format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
     environment: { sky: { type: 'physical', sunElevation: 60, turbidity: 8 } } });
   session.apply([{ type: 'set-environment', environment: { sky: { preset: 'golden-hour' } } }], { expectedRevision: 0 });
   assert.equal(session.environment.sky.sunElevation, 4);

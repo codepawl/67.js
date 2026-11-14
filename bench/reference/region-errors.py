@@ -1,8 +1,8 @@
-"""FLIP error of one scene split by what each pixel shows (a part, the open floor, the sky), for 67js, EEVEE and Cycles.
+"""FLIP error of one scene split by what each pixel shows (a part, the open floor, the sky), for Crucible, EEVEE and Cycles.
 
 Usage: uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/region-errors.py <scene> [gpu|cpu]
 
-Reads the work directory of run.mjs (artifacts/reference): the scene description, the Cycles and EEVEE arrays and the 67js render.
+Reads the work directory of run.mjs (artifacts/reference): the scene description, the Cycles and EEVEE arrays and the Crucible render.
 Each part's triangles are drawn back to front into a label image with the scene's camera, so a pixel belongs to the nearest part.
 The floor is drawn only as the pixels below the horizon that no other part covers, because its quad reaches behind the camera.
 `share` is the part of the frame a region covers, `error` its mean FLIP, and `contribution` how much of the frame's mean FLIP it holds."""
@@ -23,7 +23,7 @@ LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 MINIMUM_DEPTH = 0.1
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
@@ -88,15 +88,15 @@ def main():
     description = json.loads((WORK_DIRECTORY / "scenes" / f"{scene}.json").read_text(encoding="utf-8"))
     names = ["sky"] + [part["name"] for part in description["parts"]]
     labels = label_image(description)
-    cycles = tone_map_like_67js(np.load(WORK_DIRECTORY / f"{scene}-cycles.npy")).astype(np.float32)
-    eevee = tone_map_like_67js(np.load(WORK_DIRECTORY / f"{scene}-eevee.npy")).astype(np.float32)
+    cycles = tone_map_like_crucible(np.load(WORK_DIRECTORY / f"{scene}-cycles.npy")).astype(np.float32)
+    eevee = tone_map_like_crucible(np.load(WORK_DIRECTORY / f"{scene}-eevee.npy")).astype(np.float32)
     render = load_png(WORK_DIRECTORY / f"{scene}-{backend}.png")
     render_map, render_mean, _ = flip_evaluator.evaluate(cycles, render.astype(np.float32), "LDR", inputsRGB=True)
     eevee_map, eevee_mean, _ = flip_evaluator.evaluate(cycles, eevee, "LDR", inputsRGB=True)
     render_error = render_map.mean(axis=-1) if render_map.ndim == 3 else render_map
     eevee_error = eevee_map.mean(axis=-1) if eevee_map.ndim == 3 else eevee_map
-    print(f"{scene} ({backend}): 67js {render_mean:.4f}, EEVEE {eevee_mean:.4f}, against Cycles")
-    print("region        share  error 67js/EEVEE  contribution 67js/EEVEE  luminance 67js/Cycles/EEVEE")
+    print(f"{scene} ({backend}): Crucible {render_mean:.4f}, EEVEE {eevee_mean:.4f}, against Cycles")
+    print("region        share  error crucible/EEVEE  contribution crucible/EEVEE  luminance crucible/Cycles/EEVEE")
     for label in list(range(len(names))) + [OPEN_FLOOR_LABEL]:
         mask = labels == label
         if not mask.any():

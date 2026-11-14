@@ -1,1 +1,0 @@
-- The flicker probe reads the trap scenes with the exact per-triangle ground truth (`facets=2`), `--assert` judges true flips instead of swaps the flush pass asked for, and the committed trap results show 0 flips on every trap with the flush pass on (#751)

@@ -17,7 +17,7 @@ def load_png(path):
     return np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
@@ -48,7 +48,7 @@ def main():
         if not cycles_path.exists():
             continue
         if scene_id not in cycles_cache:
-            cycles_cache[scene_id] = tone_map_like_67js(np.load(cycles_path))
+            cycles_cache[scene_id] = tone_map_like_crucible(np.load(cycles_path))
         score = flip_score(cycles_cache[scene_id], load_png(path))
         scores[f"{scene_id}:{label}"] = score
         print(f"{scene_id:<20}{label:<16}{score:.4f}")

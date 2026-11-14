@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { previewHarness } from './support/preview-harness.mjs';
 
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'cube', type: 'box' }],
   materials: [{ id: 'blue', color: [0.1, 0.3, 0.8] }],
   nodes: [{ id: 'mesh', geometry: 'cube', material: 'blue' }],

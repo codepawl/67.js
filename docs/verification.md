@@ -1,6 +1,6 @@
 # Verification
 
-These figures are from the 0.3.x site and export work, measured around 2026-10-09 and not repeated since. Per-release checks from 0.4.0 on are in [release-verification.md](https://github.com/codepawl/67.js/blob/main/docs/release-verification.md). Run `npm test` for the current test count.
+These figures are from the 0.3.x site and export work, measured around 2026-10-09 and not repeated since. Per-release checks from 0.4.0 on are in [release-verification.md](https://github.com/codepawl/crucible/blob/main/docs/release-verification.md). Run `npm test` for the current test count.
 
 The checks used Windows Chrome 154 through Playwright, an RTX 3060 through ANGLE D3D11 and CPU rendering through SwiftShader.
 

@@ -6,7 +6,7 @@ import { normalizeRelations, solveRelations } from '../src/agent-relations.js';
 
 function recipeWith(nodes, geometries = []) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box' }, ...geometries],
     materials: [{ id: 'grey', color: [0.6, 0.6, 0.6] }],
     nodes: nodes.map(node => ({ geometry: 'cube', material: 'grey', ...node })),

@@ -25,9 +25,9 @@ For each pixel of a blend part, the pass looks at 24 taps on a spiral within `ra
 ## Code
 
 ```js
-import { installMeshBlend } from '@codepawlhq/67js/addons/mesh-blend';
+import { installMeshBlend } from '@codepawlhq/crucible/addons/mesh-blend';
 
-const renderer = installMeshBlend(new Renderer67(canvas, parts, { depth: true, hdr: true }));
+const renderer = installMeshBlend(new CrucibleRenderer(canvas, parts, { depth: true, hdr: true }));
 // parts: [{ name, geometry, material, matrix, blend: { radius: 0.15 } }, ...]
 ```
 

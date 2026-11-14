@@ -22,12 +22,12 @@ const recipePath = valueAfter('--recipe', 'tests/fixtures/demo-room.recipe.json'
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 await mkdir(outputDirectory, { recursive: true });
-const workDirectory = await mkdtemp(join(tmpdir(), '67js-native-bake-'));
+const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-native-bake-'));
 const transport = new StdioClientTransport({ command: process.execPath,
-  args: [resolve('bin/67js-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs')], cwd: workDirectory, stderr: 'pipe' });
+  args: [resolve('bin/crucible-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs')], cwd: workDirectory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
-const client = new Client({ name: '67js-native-bake-bench', version: '1' });
+const client = new Client({ name: 'crucible-native-bake-bench', version: '1' });
 
 try {
   await client.connect(transport);

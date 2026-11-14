@@ -1,11 +1,11 @@
 # Live physics
 
-`67js/addons/physics-runtime` steps a physics world inside the [game loop](runtime.md). The recorded bake in [physics.md](physics.md) renders a film; this is for a browser game, where code pushes bodies, reads contacts and casts rays every frame. Both paths build the world with the same function, so a scene behaves the same on either.
+`crucible/addons/physics-runtime` steps a physics world inside the [game loop](runtime.md). The recorded bake in [physics.md](physics.md) renders a film; this is for a browser game, where code pushes bodies, reads contacts and casts rays every frame. Both paths build the world with the same function, so a scene behaves the same on either.
 
 ```js
-import { Renderer67 } from '67js';
-import { createRuntime } from '67js/addons/runtime';
-import { createPhysicsSystem } from '67js/addons/physics-runtime';
+import { CrucibleRenderer } from 'crucible';
+import { createRuntime } from 'crucible/addons/runtime';
+import { createPhysicsSystem } from 'crucible/addons/physics-runtime';
 
 const physics = await createPhysicsSystem({
   bodies: [
@@ -84,8 +84,8 @@ Bodies and colliders are addressed by their index in the definition; the system 
 ### Jolt
 
 ```js
-import { createPhysicsSystem } from '67js/addons/physics-runtime';
-import { joltAdapter } from '67js/addons/physics-jolt';
+import { createPhysicsSystem } from 'crucible/addons/physics-runtime';
+import { joltAdapter } from 'crucible/addons/physics-jolt';
 
 const physics = await createPhysicsSystem(definition, { adapter: joltAdapter });
 ```

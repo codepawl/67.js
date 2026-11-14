@@ -79,11 +79,11 @@ test('links to plain-text contracts point at files the site publishes', () => {
 test('the API reference finds the declaration of the core exports', async () => {
   const { buildApiReference } = await import('../scripts/api-reference.mjs');
   const reference = await buildApiReference();
-  const core = reference.modules.find(module => module.module === '67js');
-  for (const name of ['Renderer67', 'box', 'cameraView', 'exportGlb']) {
+  const core = reference.modules.find(module => module.module === 'crucible');
+  for (const name of ['CrucibleRenderer', 'box', 'cameraView', 'exportGlb']) {
     const entry = core.exports.find(item => item.name === name);
     assert.ok(entry?.source.includes(':'), `${name} has no source line`);
   }
-  assert.match(core.exports.find(item => item.name === 'Renderer67').signature, /^new Renderer67\(canvas/);
-  assert.ok(reference.modules.some(module => module.module === '67js/addons/gltf'));
+  assert.match(core.exports.find(item => item.name === 'CrucibleRenderer').signature, /^new CrucibleRenderer\(canvas/);
+  assert.ok(reference.modules.some(module => module.module === 'crucible/addons/gltf'));
 });

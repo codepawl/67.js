@@ -1,1 +1,0 @@
-- `buildTraceScene` takes `{ instancing: true }` to keep copies of one geometry as instances for the native "cycles" kernel, counting triangles once per shared geometry and allowing more parts than the flattened limit (#896)

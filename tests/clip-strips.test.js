@@ -18,7 +18,7 @@ function clipIndex(asset, name) {
 }
 
 function assetScene(asset, layers, duration = 8) {
-  return createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID, motion: { duration, loop: false, layers } });
+  return createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID, motion: { duration, loop: false, layers } });
 }
 
 function poseAt(asset, layers, time) {

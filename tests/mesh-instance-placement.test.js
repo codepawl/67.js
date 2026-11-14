@@ -167,7 +167,7 @@ test('realize merges instances into one mesh per material in expandInstancedNode
   assert.throws(() => expand({ grid: { counts: [2, 1, 1], spacing: [1, 1, 1] }, place: { realize: 'yes' } }), /realize must be boolean/);
 
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'post', type: 'box', bevel: 0, subdivisions: 1 }],
     materials: [{ id: 'wood', color: [0.5, 0.3, 0.1] }],
     nodes: [{

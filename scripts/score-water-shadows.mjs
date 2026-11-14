@@ -1,7 +1,7 @@
 // Scores the water shadow pool against a Cycles reference (issue #349):
 //   node scripts/score-water-shadows.mjs [work directory]
-// Draws the pool from above in 67js, renders the same pool in Blender Cycles (volume absorption and scatter, CPU, 6 threads) with the sun and sky
-// taken from the dry bed 67js measured, then FLIP-scores each pair with bench/reference/water-shadows-score.py. Results land in <work directory>/scores.json.
+// Draws the pool from above in Crucible, renders the same pool in Blender Cycles (volume absorption and scatter, CPU, 6 threads) with the sun and sky
+// taken from the dry bed Crucible measured, then FLIP-scores each pair with bench/reference/water-shadows-score.py. Results land in <work directory>/scores.json.
 import { spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';

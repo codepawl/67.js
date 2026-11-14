@@ -26,10 +26,10 @@ const VARIANTS = [
 function harness(hdr) {
   return `<!doctype html><html><body style="margin:0"><canvas style="width:384px;height:256px;display:block"></canvas><script type="module">
 import {createAgentScene,loadAllAgentSceneModules} from '/src/agent-scene.js';
-import {Renderer67} from '/src/renderer.js';
+import {CrucibleRenderer} from '/src/renderer.js';
 await loadAllAgentSceneModules();
 const session=createAgentScene(${JSON.stringify(recipe)});
-const renderer=new Renderer67(document.querySelector('canvas'),session.parts,{ground:false,hdr:${hdr},samples:1,pixelRatio:1});
+const renderer=new CrucibleRenderer(document.querySelector('canvas'),session.parts,{ground:false,hdr:${hdr},samples:1,pixelRatio:1});
 renderer.resize();
 const context=renderer.context;
 function draw(){

@@ -1,6 +1,6 @@
 # Renderer reference
 
-`new Renderer67(canvas, parts, options)` owns GPU geometry, texture and target allocations. Construct a new renderer for a new graph, and call `dispose()` to release the resources it owns.
+`new CrucibleRenderer(canvas, parts, options)` owns GPU geometry, texture and target allocations. Construct a new renderer for a new graph, and call `dispose()` to release the resources it owns.
 
 ## Constructor options
 
@@ -13,7 +13,7 @@
 | `samples` | 4 | Requested MSAA count. Negotiated against hardware |
 | `hdr` | false | Request floating-point color targets |
 | `depth` | false | Keep a resolved depth texture across frames. [Volume fog](#local-lights-and-volume-fog) needs it |
-| (compact colour) | off | `useCompactColor(renderer)` from `@codepawlhq/67js/addons/compact-color` stores the HDR frame and its multisample colour as R11F_G11F_B10F instead of RGBA16F: 39.55 MB less at 1920 x 1080 with 4 samples (110.92 to 71.37 MB). The format has no alpha, so it needs `hdr: true` and an opaque canvas and throws otherwise; it also throws when the device does not support the renderer's sample count in that format. Mean FLIP against the default is 0.002 to 0.030 (median 0.021) over the 26 reference scenes. Without the call nothing changes. `renderer.memoryReport()` lists the formats |
+| (compact colour) | off | `useCompactColor(renderer)` from `@codepawlhq/crucible/addons/compact-color` stores the HDR frame and its multisample colour as R11F_G11F_B10F instead of RGBA16F: 39.55 MB less at 1920 x 1080 with 4 samples (110.92 to 71.37 MB). The format has no alpha, so it needs `hdr: true` and an opaque canvas and throws otherwise; it also throws when the device does not support the renderer's sample count in that format. Mean FLIP against the default is 0.002 to 0.030 (median 0.021) over the 26 reference scenes. Without the call nothing changes. `renderer.memoryReport()` lists the formats |
 | `memoryBudgetMiB` | sized to the scene | Estimated render allocation budget. Without it the renderer takes room for the scene and one full frame: at least 256 MiB, at most 1024 MiB on a device reporting 8 GiB of memory or more (512 MiB otherwise). A scene over the budget fails with an error that names the bytes and the `memoryBudgetMiB` that fits. |
 | `environment` | {} | Sky, light and fog settings |
 | `shadowBounds` | {} | Custom extent, eye and target for shadow framing |
@@ -25,7 +25,7 @@
 Change an option and the example builds a new renderer with it, then prints what the renderer reports: the render size it planned, the estimated memory, the negotiated MSAA count and whether HDR was granted. This is the information to read before you trust a frame.
 
 ```js live poster=renderer-options
-import { Renderer67, box, sphere, torus } from '67js';
+import { CrucibleRenderer, box, sphere, torus } from 'crucible';
 
 function placeAt(x, y, z, size) {
   return new Float32Array([size, 0, 0, 0, 0, size, 0, 0, 0, 0, size, 0, x, y, z, 1]);
@@ -43,7 +43,7 @@ let renderer = null;
 
 function build() {
   renderer?.dispose();
-  renderer = new Renderer67(canvas, parts, { ...settings });
+  renderer = new CrucibleRenderer(canvas, parts, { ...settings });
   renderer.resize();
   renderer.render({ eye: [0, 2.6, 6], target: [0, 0.4, 0], fov: 38 });
   const plan = renderer.memoryPlan;
@@ -102,7 +102,7 @@ Turn `ground` off and the studio floor and its shadows disappear. Lower `pixelRa
 `memoryBudgetMiB` caps the estimate of the render allocation. When the frame at the requested size would pass the budget, the planner reduces the render width and height instead, and the plan says `reduced: true`. Drag the slider to see it happen.
 
 ```js live poster=renderer-budget
-import { Renderer67, sphere } from '67js';
+import { CrucibleRenderer, sphere } from 'crucible';
 
 const parts = [{
   name: 'Ball',
@@ -118,7 +118,7 @@ const draw = () => renderer.render({ eye: [0, 1, 3.5], target: [0, 0, 0], fov: 3
 function build(budget) {
   renderer?.dispose();
   try {
-    renderer = new Renderer67(canvas, parts, { ground: false, hdr: true, pixelRatio: 2, samples: 4, memoryBudgetMiB: budget });
+    renderer = new CrucibleRenderer(canvas, parts, { ground: false, hdr: true, pixelRatio: 2, samples: 4, memoryBudgetMiB: budget });
   } catch (error) {
     console.log(`budget ${budget} MiB: ${error.message}`);
     return;
@@ -150,7 +150,7 @@ With a small budget the picture gets softer because the render targets are small
 
 `render(frame)` draws synchronously. `resize()` replans targets after CSS size or `pixelRatio` changes. `updateParts(parts, { shadows: true })` uploads changed matrices and materials using retained buffers. It does not add new part, geometry or texture identities.
 
-`updateTexture(descriptor, { image?, region? })` pushes new pixels into a texture the renderer already uploaded, such as a live canvas or a simulation. Import `@codepawlhq/67js/addons/texture-update` first. `docs/material-maps.md` has the options.
+`updateTexture(descriptor, { image?, region? })` pushes new pixels into a texture the renderer already uploaded, such as a live canvas or a simulation. Import `@codepawlhq/crucible/addons/texture-update` first. `docs/material-maps.md` has the options.
 
 Read these fields for diagnostics:
 

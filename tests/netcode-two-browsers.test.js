@@ -77,7 +77,7 @@ async function measureBaseline(sender, receiver) {
   const samples = [];
   for (let ping = 0; ping < BASELINE_PINGS; ping += 1) {
     const arriving = receiver.evaluateHandle(() => new Promise(resolve => {
-      const channel = new BroadcastChannel('67js-netcode-baseline');
+      const channel = new BroadcastChannel('crucible-netcode-baseline');
       channel.onmessage = event => requestAnimationFrame(() => {
         channel.close();
         resolve(Date.now() - event.data);
@@ -85,7 +85,7 @@ async function measureBaseline(sender, receiver) {
     }));
     await pause(30);
     await sender.evaluate(() => {
-      const channel = new BroadcastChannel('67js-netcode-baseline');
+      const channel = new BroadcastChannel('crucible-netcode-baseline');
       channel.postMessage(Date.now());
       setTimeout(() => channel.close(), 100);
     });

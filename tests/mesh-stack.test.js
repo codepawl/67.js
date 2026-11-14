@@ -110,7 +110,7 @@ test('stack evaluation caches each prefix and recomputes only changed nodes', ()
 
 test('recipe meshes evaluate stacks, reuse cached prefixes and apply nodes into the edit log', () => {
   const recipe = stack => ({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'wing', type: 'mesh', base: { type: 'box', bevel: 0 },
       edits: [{ op: 'translate', offset: [0.5, 0, 0] }, { op: 'inset_individual', select: { tag: 'front' }, thickness: 0.1, name: 'panel' }],
       stack }],

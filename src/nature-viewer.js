@@ -1,7 +1,7 @@
 import './nature-style.css';
 import './brand.js';
 import { vec4 } from 'gl-matrix';
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import { createNatureWorld } from './nature.js';
 import { installMeshBlend } from './mesh-blend.js';
 import { createFlagAnimation } from './nature-flag.js';
@@ -104,7 +104,7 @@ function initializeRenderer() {
   // ?softening=0 draws the valley without the seam blend, the flagpole and the flag, to compare frames and frame time.
   const softening = renderParameters.get('softening') !== '0';
   const parts = softening ? world.parts : world.parts.filter(part => part !== world.flag && part.name !== 'Flagpole').map(({ blend, ...part }) => part);
-  renderer = new Renderer67(canvas, parts, {
+  renderer = new CrucibleRenderer(canvas, parts, {
     world: true, ground: false, hdr: true, depth: softening, environment: world.environment,
     pixelRatio: renderParameters.get('export') === '1' ? 1 : 1.25, memoryBudgetMiB: Number(renderParameters.get('memory') ?? 256), samples: Number(renderParameters.get('samples') ?? 4),
   });
@@ -271,7 +271,7 @@ document.querySelector('#save-image').addEventListener('click', event => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = '67js-silverwater-valley.png';
+      link.download = 'crucible-silverwater-valley.png';
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       notify('Landscape saved.');

@@ -1,4 +1,4 @@
-"""Render an exported 67js scene JSON in Blender Cycles OptiX with matched parity settings."""
+"""Render an exported Crucible scene JSON in Blender Cycles OptiX with matched parity settings."""
 import base64
 import json
 import math
@@ -32,7 +32,7 @@ SOFT_FALLOFF_FROM_SCENE = "scene"
 soft_falloff_setting = SOFT_FALLOFF_FROM_SCENE
 # Set by --light-mis off: lights stop being hit by BSDF rays and are sampled by next event estimation only (a diagnostic).
 light_mis_enabled = True
-# Set by --radiance-cap. Cook and the 67js runtime limit the texels of a sky map before they are interpolated (before-lookup, the default);
+# Set by --radiance-cap. Cook and the Crucible runtime limit the texels of a sky map before they are interpolated (before-lookup, the default);
 # the Blender world used to limit the interpolated value instead (after-lookup), which lets the texels beside a very bright spot add energy.
 radiance_cap_before_lookup = True
 # Set by --cycles-property name=value (repeatable): diagnostic overrides of scene.cycles properties, such as light_sampling_threshold=0.

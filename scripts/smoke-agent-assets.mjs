@@ -16,7 +16,7 @@ const transport = new StdioClientTransport({ command: process.execPath,
 });
 let diagnostics = '';
 transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
-const client = new Client({ name: '67js-asset-proof', version: '1' }, {
+const client = new Client({ name: 'crucible-asset-proof', version: '1' }, {
   versionNegotiation: { mode: { pin: '2026-07-28' }, probe: { timeoutMs: 180000 } },
 });
 async function call(name, argumentsValue = {}) {
@@ -40,7 +40,7 @@ try {
   assert.equal(catalog.configured, true);
   assert.equal(catalog.assets.length, 2);
   const robot = catalog.assets.find(asset => asset.name === 'wall-e.glb');
-  const created = (await call('scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId: robot.assetId } })).structuredContent;
+  const created = (await call('scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: robot.assetId } })).structuredContent;
   const sessionId = created.sessionId;
   const before = await look(sessionId, 'wall-e-before');
   const checkpoint = (await call('scene_checkpoint', { sessionId })).structuredContent;
@@ -60,7 +60,7 @@ try {
   assert.equal(rig.skins, 1);
   assert.equal(rig.images, 1);
   assert.equal(rig.animations.length, 2);
-  const rigCreated = (await call('scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId: rig.assetId,
+  const rigCreated = (await call('scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: rig.assetId,
     camera: { eye: [1, 3, 7], target: [1, 3, 0], near: 0.1, far: 40, fov: 35 },
   } })).structuredContent;
   const rigId = rigCreated.sessionId;

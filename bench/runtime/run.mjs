@@ -1,4 +1,4 @@
-// Compares 67js and three.js on matching scenes: npm run benchmark:runtime
+// Compares Crucible and three.js on matching scenes: npm run benchmark:runtime
 // Use --gpu-only to skip SwiftShader, or --cpu-only to run only SwiftShader. --scene <id>, --engine <name> and --frames <count> run a part, and do not rewrite
 // the report.
 import { spawnSync } from 'node:child_process';
@@ -16,14 +16,14 @@ const BACKENDS = {
   gpu: { arguments: SHARED_ARGUMENTS, frames: 120 },
   cpu: { arguments: [...SHARED_ARGUMENTS, '--use-angle=swiftshader', '--enable-unsafe-swiftshader'], frames: 15 },
 };
-const ENGINES = ['67js', 'three', 'three-instanced', '67js-no-lod', '67js-no-culling', '67js-ldr', '67js-one-sample', '67js-ldr-one-sample', 'three-one-sample', '67js-light', '67js-trusted'];
+const ENGINES = ['crucible', 'three', 'three-instanced', 'crucible-no-lod', 'crucible-no-culling', 'crucible-ldr', 'crucible-one-sample', 'crucible-ldr-one-sample', 'three-one-sample', 'crucible-light', 'crucible-trusted'];
 // Ablations of the HDR target and MSAA, which cost something in every scene. They run only when named with --engine.
-// 67js-trusted animates characters with checks off (applyAnimation and updateParts { checks: false }).
-const FEATURE_ENGINES = new Set(['67js-trusted', '67js-light', '67js-ldr', '67js-one-sample', '67js-ldr-one-sample', 'three-one-sample']);
+// crucible-trusted animates characters with checks off (applyAnimation and updateParts { checks: false }).
+const FEATURE_ENGINES = new Set(['crucible-trusted', 'crucible-light', 'crucible-ldr', 'crucible-one-sample', 'crucible-ldr-one-sample', 'three-one-sample']);
 const INSTANCED_SCENES = new Set(['instanced-objects']);
 // Ablations of this renderer's own culling and level selection, which only a scene that has them can show.
 const ABLATION_SCENES = new Set(['large-outdoor']);
-const ABLATION_ENGINES = new Set(['67js-no-lod', '67js-no-culling']);
+const ABLATION_ENGINES = new Set(['crucible-no-lod', 'crucible-no-culling']);
 
 const flags = process.argv.slice(2);
 const gpuOnly = flags.includes('--gpu-only');
@@ -57,7 +57,7 @@ async function runOne(backend, serverUrl, sceneId, engine, frames) {
     const result = await page.evaluate(([scene, name, count]) => window.runBenchmark(scene, name, count), [sceneId, engine, frames]);
     if (errors.length) throw new Error(errors.join('\n'));
     // Blended scenes already differ between their first and later frames before culling existed, so only the scene that tests culling is held to this.
-    if (!result.repeatable && ABLATION_SCENES.has(sceneId) && engine.startsWith('67js')) throw new Error(`${sceneId} on ${engine} drew a different picture for the same time.`);
+    if (!result.repeatable && ABLATION_SCENES.has(sceneId) && engine.startsWith('crucible')) throw new Error(`${sceneId} on ${engine} drew a different picture for the same time.`);
     if (result.glError !== 0) throw new Error(`${sceneId} on ${engine} gave WebGL error ${result.glError}.`);
     return result;
   } finally {

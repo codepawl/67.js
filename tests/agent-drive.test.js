@@ -15,7 +15,7 @@ const ASSET_ID = 'ca'.repeat(32);
 const REAR_WHEEL_PARTS = [4, 5];
 const TAIL_LAMP_MATERIAL = 'material-1';
 
-const assetRecipe = drive => ({ format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID, motion: { drive } });
+const assetRecipe = drive => ({ format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID, motion: { drive } });
 const motionDrive = scene => scene.inspect({ kind: 'hierarchy', limit: 1 }).motionDrive;
 
 async function withCar(run) {
@@ -157,7 +157,7 @@ test('a bad drive names the problem', async () => {
 });
 
 const sceneRecipe = (drive, translation = [10, 0, 0]) => ({
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'ground', type: 'box' }],
   materials: [{ id: 'grass', color: [0.2, 0.5, 0.2] }],
   nodes: [

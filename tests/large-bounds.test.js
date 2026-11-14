@@ -29,7 +29,7 @@ async function startServer(port) {
 async function drawnPixelCounts(page, sizes) {
   const task = async (options) => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const canvas = document.createElement('canvas');
     canvas.width = 128;
     canvas.height = 128;
@@ -42,7 +42,7 @@ async function drawnPixelCounts(page, sizes) {
     for (const size of options.sizes) {
       const matrix = new Float32Array([size, 0, 0, 0, 0, size, 0, 0, 0, 0, size, 0, -size * 0.1, size * 0.2, size * 0.3, 1]);
       const part = { name: 'model', geometry: box(0, 1), matrix, material: { tag: 'surface', color: [0.8, 0.3, 0.2], metallic: 0, roughness: 0.6, emission: 0 } };
-      const renderer = new Renderer67(canvas, [part], { ground: false, samples: 1, pixelRatio: 1 });
+      const renderer = new CrucibleRenderer(canvas, [part], { ground: false, samples: 1, pixelRatio: 1 });
       const distance = size * 3;
       renderer.render({ eye: [distance, distance * 0.6, distance], target: [-size * 0.1, size * 0.2, size * 0.3], near: distance / 100, far: distance * 10 });
       copyContext.drawImage(canvas, 0, 0);

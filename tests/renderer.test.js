@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4, mat3 } from 'gl-matrix';
-import { Renderer67, groupParts, shaderFeatureRepresentatives, textureDescriptorInfo } from '../src/renderer.js';
+import { CrucibleRenderer, groupParts, shaderFeatureRepresentatives, textureDescriptorInfo } from '../src/renderer.js';
 import { resolveLiquidOptics } from '../src/liquid-optics.js';
 import { createSkinPose } from '../src/skinning.js';
 import { materialLayerState } from '../src/material-layers.js';
@@ -12,7 +12,7 @@ function part(name, geometry = {}, map) {
 
 function retainedRenderer(parts) {
   const writes = [];
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42).fill(7), castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false };
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData(target, offset, data) { writes.push({ target, offset, data: Array.from(data) }); } };
   renderer.partLocations = new Map(parts.map((item, index) => [item, {
@@ -27,7 +27,7 @@ function retainedRenderer(parts) {
 }
 
 test('sample reporting uses the negotiated allocation count and cannot diverge through assignment', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.multisampleSamples = 4;
   assert.equal(renderer.samples, 4);
   assert.throws(() => { renderer.samples = 1; }, TypeError);
@@ -195,7 +195,7 @@ test('opaque and mask parts keep an instance opacity of one', () => {
 
 test('blend instances upload back to front by distance to the eye', () => {
   const uploads = [];
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData(target, offset, data) { uploads.push(Array.from(data)); } };
   const instanceData = new Float32Array(3 * 42);
   [1, 9, 4].forEach((distance, index) => { instanceData[index * 42 + 14] = -distance; instanceData[index * 42] = index; });
@@ -345,23 +345,23 @@ test('texture budgets count every channel and charge shared descriptors once bef
   for (const field of ['map', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap']) {
     const item = part('large map', geometry);
     item.material[field] = { image: { width: 4096, height: 4096 }, colorSpace: field === 'map' || field === 'emissiveMap' ? 'srgb' : 'linear' };
-    assert.throws(() => new Renderer67(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 32 }), /Memory budget/);
+    assert.throws(() => new CrucibleRenderer(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 32 }), /Memory budget/);
   }
   const shared = { image: { width: 1024, height: 1024 }, colorSpace: 'linear' };
   const item = part('shared map', geometry);
   item.material.normalMap = shared;
   item.material.metallicRoughnessMap = shared;
   item.material.occlusionMap = shared;
-  assert.throws(() => new Renderer67(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 24 }), /Reached GPU allocation/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 24 }), /Reached GPU allocation/);
   item.material.occlusionMap = { ...shared };
-  assert.throws(() => new Renderer67(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 24 }), /Memory budget/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 24 }), /Memory budget/);
   item.material.normalMap = { ...shared, colorSpace: 'srgb' };
-  assert.throws(() => new Renderer67(preflightCanvas(), [item], { ground: false }), /requires a linear/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas(), [item], { ground: false }), /requires a linear/);
   assert.throws(() => textureDescriptorInfo({ ...shared, rotation: 1 }), /transforms/);
 });
 
 test('GPU uploads use descriptor color spaces, filter anisotropically, cache shared maps, and dispose every cached texture', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const uploaded = [];
   const deleted = [];
   const anisotropyLevels = [];
@@ -397,7 +397,7 @@ test('GPU uploads use descriptor color spaces, filter anisotropically, cache sha
 });
 
 test('draw batches bind all channels with their flags and scalar uniforms', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const bindings = [];
   const uniforms = [];
   renderer.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'baseMap', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap', 'hasBaseMap', 'hasNormalMap', 'hasMetallicRoughnessMap', 'hasOcclusionMap', 'hasEmissiveMap', 'normalScale', 'occlusionStrength', 'materialMoss'].map(name => [name, name]));
@@ -451,15 +451,15 @@ test('pose identity partitions batches while shared poses retain instancing and 
 test('GPU skin preflight checks capabilities, texture capacity and retained texture budgets', () => {
   const item = part('skin', skinGeometry());
   item.skin = createSkinPose(2);
-  assert.throws(() => new Renderer67(preflightCanvas({ vertexUnits: 1 }), [item], { ground: false }), /vertex texture units/);
-  assert.throws(() => new Renderer67(preflightCanvas({ combinedUnits: 7 }), [item], { ground: false }), /combined texture units/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas({ vertexUnits: 1 }), [item], { ground: false }), /vertex texture units/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas({ combinedUnits: 7 }), [item], { ground: false }), /combined texture units/);
   item.skin = createSkinPose(17);
-  assert.throws(() => new Renderer67(preflightCanvas({ maximumSize: 8 }), [item], { ground: false }), /MAX_TEXTURE_SIZE/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas({ maximumSize: 8 }), [item], { ground: false }), /MAX_TEXTURE_SIZE/);
   item.geometry = skinGeometry(1000);
   item.skin = createSkinPose(2);
-  assert.throws(() => new Renderer67(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 16.16 }), /Memory budget/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas(), [item], { ground: false, memoryBudgetMiB: 16.16 }), /Memory budget/);
   const rigid = part('rigid', { positions: item.geometry.positions, normals: item.geometry.normals, indices: item.geometry.indices });
-  assert.throws(() => new Renderer67(preflightCanvas(), [rigid], { ground: false, memoryBudgetMiB: 16.16 }), /Reached GPU allocation/);
+  assert.throws(() => new CrucibleRenderer(preflightCanvas(), [rigid], { ground: false, memoryBudgetMiB: 16.16 }), /Reached GPU allocation/);
 });
 
 test('skin updates retain palette upload data, deduplicate shared poses and reject mixed invalid updates atomically', () => {
@@ -499,7 +499,7 @@ test('skin updates retain palette upload data, deduplicate shared poses and reje
 });
 
 test('skin palette and influence textures cache by pose and geometry identity and dispose fully', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const allocations = [];
   const deleted = [];
   renderer.context = {
@@ -559,7 +559,7 @@ test('a shared palette validates consumers outside the submitted update list bef
 });
 
 test('color, benchmark and shadow passes bind the same skin textures and disable skinning for rigid batches', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.hasSkins = true;
   renderer.benchmark = true;
   renderer.uniforms = { skinEnabled: 'color enabled', skinInfluences: 'color influences', jointPalette: 'color palette' };
@@ -581,7 +581,7 @@ test('color, benchmark and shadow passes bind the same skin textures and disable
 });
 
 test('the shadow depth pass draws both faces of a single-sided batch, so the sun cannot pass through an open surface seen from behind', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const culling = [];
   renderer.depthAlphaUniforms = {};
   renderer.uniforms = {};
@@ -614,7 +614,7 @@ test('blend batches draw their opaque texels with depth writes before the blende
   });
   const blendFunctions = [];
   context.blendFuncSeparate = (...functions) => blendFunctions.push(functions.join());
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.context = context;
   renderer.uniforms = { shadowMap: 'shadowMap' };
   renderer.canvas = { width: 4, height: 4 };
@@ -638,7 +638,7 @@ test('blend batches draw their opaque texels with depth writes before the blende
 });
 
 test('resize keeps the projection centered at 699 px and 1440 px', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.context = { getParameter: () => 8192 };
   renderer.projection = new Float32Array(16);
   renderer.pixelRatio = 1;
@@ -659,7 +659,7 @@ test('resize keeps the projection centered at 699 px and 1440 px', () => {
 
 test('drawAmbientOcclusion unprojects in view space so far camera coordinates do not quantize distant normals', () => {
   const uploaded = {};
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.canvas = { width: 540, height: 960 };
   renderer.depthTexture = 'depth';
   renderer.projection = mat4.perspective(mat4.create(), (52 * Math.PI) / 180, 540 / 960, 0.05, 400);
