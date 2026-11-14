@@ -110,7 +110,7 @@ Four optional settings, off unless set, so defaults write the same bytes as befo
 Offline Cook path tracing: glass refraction, soft multi-bounce light, subsurface, many lights. Slow and bounded. Judge
 a still first; `stills` and `video` jobs take the same `renderer`, each frame may run for `maxSeconds` and the whole job
 stops at 30 minutes, so keep a traced video short and small. It writes no passes. Read `scene_capabilities`
-(`pathTracer`) for limits and what it skips.
+(topic `jobs`, key `pathTracer`) for limits and what it skips.
 
 ```json
 { "expectedRevision": 3, "settings": {

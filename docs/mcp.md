@@ -68,6 +68,12 @@ A GLB that points at image files (a Kenney kit ships `boat.glb` plus `Textures/c
 
 `--jobs` selects the absolute folder that holds render jobs and exports (`scene_export_glb`, `scene_export_web`). The server checks it at startup. A directory link, such as a Windows junction made with `mklink /J` to put outputs on another drive, is followed once at startup, and the job store then works on and stays inside the real folder it points at; a path that is a file stops the server with a message naming `--jobs`. Links inside the folder are still never followed, and no tool call can name a path. `scene_capabilities` works without a job store: if the store cannot open it lists no records and reports `jobs.unavailable` with the reason, and a later call tries the store again.
 
+`--audio` selects an absolute folder of `.wav`, `.mp3`, `.ogg` or `.flac` files that video jobs may use as a score.
+
+`--branches`, `--relations` and `--findings` each take `on` or `off` and default to `on`. `off` hides that feature from the tools: the `branch` field from `scene_apply`, the `relations` field from node records, and the findings from `scene_look`. They exist for benchmark control arms; any other value stops the server at startup.
+
+The server checks `--browser`, `--assets`, `--packs`, `--ffmpeg` and `--jobs` before it serves. A relative path, a missing executable or a bad flag value prints the reason and exits with code 1, instead of failing every request later.
+
 `--addons` selects an absolute folder that holds `node_modules`, and each `--allow-addon <package name>` (repeat it, at most 16 times) allows one addon package from it ([third-party addons](addons.md#the-mcp-server-and-addons)). Only these two options choose addons, at startup. A tool call cannot load, name or change one. An addon that is not installed there, fails the addon contract, does not allow the running Crucible version, declares an entry file above 2 MiB, resolves to a real path outside the folder, or registers a kind it did not declare is skipped with a one-line reason on stderr, and the server keeps running. `scene_capabilities` topic `addons` lists the loaded and skipped addons and the kinds each registered. A recipe may then use a registered controller or camera kind in `game.player.controller` and `game.camera`; the error for an unknown name lists the available ones.
 
 These launch options remain outside tool arguments.

@@ -117,7 +117,6 @@ const RAW_THROWS_LEFT = {
     "'Retained render matrices must not be de",
     "'Motion camera matrices exceed the suppo",
     "'Motion scale must remain positive at Fl",
-    "'Geometry preflight exceeds peak maxVert",
     "`Mesh ${plan.definition.id} has ${vertic",
     "'Generated geometry exceeds its conserva",
   ],
