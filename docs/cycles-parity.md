@@ -1688,3 +1688,16 @@ The script now caps the image's texels before the lookup (`--radiance-cap before
 The same `metal` scene with direct light only, whole picture: 0.99931 / 0.99938 / 0.99951, +- 0.0009 / 0.0008 / 0.0006 (fireflies on the chrome set the error), copper 1.0000 / 0.9999 / 0.9999. The earlier 0.9991 / 0.9992 / 0.9994 floor became 0.9998.
 
 Not isolated: the `metal` floor keeps a 0.02 percent deficit with the metal objects in the scene and its own material (roughness 0.8, not the Lambert override), which the floor-only Lambert scenes do not show. What it comes from (the objects' shadows and occlusion edges, or the floor's specular lobe) was not split. The #959 tables above were measured before the script change and were not repeated.
+
+## The environment limit of 16 (#1172)
+
+Cook's packer capped every environment texel at 16 unless `hdriRadianceLimit` said otherwise. Blender Cycles has no such cap, so a scene lit by an HDRI with a real sun came out dark. Pavilion against Cycles, same camera and samples, on a Modal A10G `[measured]`:
+
+| Cook | FLIP | Mean brightness over Cycles |
+| --- | --- | --- |
+| limit 16 (the old default) | 0.3023 | 0.768 |
+| no limit | 0.0383 | 1.012 |
+
+The whole Pavilion gap was the cap. Since Cook `5d9eda8` the default is no limit; `hdriRadianceLimit` (a number above 0) still caps for a caller that asks, and the `--hdri-radiance-limit` flag of `trace-native.mjs` passes it. The parity scenes above that carry `radianceLimit: 16` in their scene file are unchanged: the bench bridge applies that cap to both Cook and Cycles before either reads the map.
+
+Not measured: noise. A sun texel in the tens of thousands gives more fireflies at low sample counts than the capped map did; the pictures above were compared at their converged sample counts only.

@@ -159,7 +159,7 @@ try {
 } finally {
   await client.close();
 }
-assert.match(errors, /crucible preview resources closed\./);
+assert.match(errors, /Crucible preview resources closed\./);
 assert.doesNotMatch(errors, /cleanup failed|shutdown failed/);
 assert.throws(() => process.kill(processId, 0), /ESRCH/);
 await writeFile(`artifacts/mcp-${backend}-${era}.json`, JSON.stringify(report, null, 2));

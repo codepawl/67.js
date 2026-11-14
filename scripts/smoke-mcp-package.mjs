@@ -163,7 +163,7 @@ for (const era of ['modern', 'legacy']) {
   } finally {
     await client.close();
   }
-  assert.match(diagnostics, /crucible preview resources closed\./);
+  assert.match(diagnostics, /Crucible preview resources closed\./);
   assert.doesNotMatch(diagnostics, /cleanup failed|shutdown failed/);
   assert.throws(() => process.kill(processId, 0), /ESRCH/);
 }

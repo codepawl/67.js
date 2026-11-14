@@ -1,0 +1,1 @@
+- Cook reads an environment map as it is, as Cycles does: the default limit of 16 on HDRI texels is gone, so a scene lit by an HDRI with a real sun is no longer too dark (#1172)

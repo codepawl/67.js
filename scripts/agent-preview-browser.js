@@ -1,4 +1,7 @@
-import { exportNativeSceneTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
+import { exportNativeSceneTables, nativeTexelTracerIfAvailable, readExportChunk, splitExportForChunks } from './native-bake-page.js';
+
+// The byte tables of the last chunked native export, held until the job runner has read them (releaseNativeExport).
+let heldNativeExportTables = null;
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
 import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, needsBuoyancy, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { CrucibleRenderer } from '../src/renderer.js';
@@ -1048,8 +1051,9 @@ window.__agentPreview = {
     return { data: encodeTracedPng(result.rgba, result.width, result.height), report: result.report };
   },
   // The scene at one instant packed into the tables the native ray query tracer reads (renderer.backend "native"). The job
-  // runner traces them outside the page; each table comes back as base64 bytes.
-  async exportNativeScene({ sessionId, animation, motionTime, options }) {
+  // runner traces them outside the page; each table comes back as base64 bytes. With `chunked` the answer holds a `chunks`
+  // manifest instead of the tables, which stay here for readNativeExportChunk, so no one message bounds the scene.
+  async exportNativeScene({ sessionId, animation, motionTime, options, chunked = false }) {
     const record = requireSession(sessionId);
     if (record.asset && (animation !== undefined || motionTime !== undefined)) {
       record.scene.sampleFrame({ ...(animation === undefined ? {} : { animation }),
@@ -1065,9 +1069,25 @@ window.__agentPreview = {
     const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
     // The "cycles" kernel gets FORMAT-v2 tables with whole materials, and copies of one geometry stay instances; the legacy kernel reads flattened v1 triangles.
     const camera = createCamera(record.scene.camera, options.width, options.height);
-    const exported = exportNativeSceneTables({ parts: record.scene.parts, environment, camera, options: packOptions, kernel, instancing: instancing === true,
+    heldNativeExportTables = null;
+    const packed = exportNativeSceneTables({ parts: record.scene.parts, environment, camera, options: packOptions, kernel, instancing: instancing === true,
+      transport: chunked ? 'chunks' : 'message',
       modules: { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } });
+    let exported = packed;
+    if (chunked) {
+      const split = splitExportForChunks(packed);
+      heldNativeExportTables = split.tables;
+      exported = split.manifest;
+    }
     return { ...exported, ignored: describeIgnoredFeatures(record.scene.parts, environment, 'cpu', { kernelMaterials: exported.wholeMaterials }) };
+  },
+  // One chunk (base64) of a table of the chunked export that exportNativeScene holds.
+  readNativeExportChunk({ name, offset }) {
+    return readExportChunk(heldNativeExportTables, name, offset);
+  },
+  // Lets go of the held export once the job runner has every table.
+  releaseNativeExport() {
+    heldNativeExportTables = null;
   },
   // The PNG of linear pixels (three floats each, base64) that a denoiser outside the page returned, or of the wavelet
   // filter over the kept features when none came back.

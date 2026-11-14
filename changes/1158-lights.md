@@ -1,0 +1,1 @@
+- `render:file-cook` traces up to 256 point, spot and area lights together instead of stopping at 7 area lights (#1158)
