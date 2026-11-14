@@ -433,14 +433,15 @@ function manifestCases() {
   accept('64 recipes with previews', manifest => { manifest.contents.recipes = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND }, (_, index) => ({ id: `r-${index}`, file: 'recipes/crates.json', preview: 'previews/crates.png' })); });
   refuse('65 recipes', manifest => { manifest.contents.recipes = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND + 1 }, (_, index) => ({ id: `r-${index}`, file: 'recipes/crates.json' })); });
   refuse('items is a huge sparse array', manifest => { manifest.contents.looks = { length: 4294967295 }; });
+  const majorMinor = packageVersion.split('.').slice(0, 2).join('.');
   const engines = [
-    ['', false], [' ', false], ['>=', false], ['>= 0.19.0', false], ['>=0.19.0.1', false], ['>=0.19.0||>=1', false], ['>=0.19.0 || >=1', false], ['^', false],
-    ['latest', false], ['*', false], ['x', false], ['1.x', false], ['v0.19.0', false], ['>=0.19.0-beta', false], ['>=-1', false], ['>=\u0660', false],
-    ['>=0.19.0,<1', false], ['>=99.0.0', false], ['<0.0.1', false], ['>0.19.0', false], ['='.repeat(64), false], ['9'.repeat(65), false], ['9'.repeat(10000), false],
-    ['>=1 '.repeat(9), false], ['>=0 '.repeat(100), false], [' '.repeat(65) + '>=0', false], ['\u0000', false], ['>=0.19.0\u0000', false],
+    ['', false], [' ', false], ['>=', false], [`>= ${packageVersion}`, false], [`>=${packageVersion}.1`, false], [`>=${packageVersion}||>=1`, false], [`>=${packageVersion} || >=1`, false], ['^', false],
+    ['latest', false], ['*', false], ['x', false], ['1.x', false], [`v${packageVersion}`, false], [`>=${packageVersion}-beta`, false], ['>=-1', false], ['>=\u0660', false],
+    [`>=${packageVersion},<1`, false], ['>=99.0.0', false], ['<0.0.1', false], [`>${packageVersion}`, false], ['='.repeat(64), false], ['9'.repeat(65), false], ['9'.repeat(10000), false],
+    ['>=1 '.repeat(9), false], ['>=0 '.repeat(100), false], [' '.repeat(65) + '>=0', false], ['\u0000', false], [`>=${packageVersion}\u0000`, false],
     [null, false], [5, false], [true, false], [[], false], [['>=0'], false], [{}, false], [{ toString: '>=0' }, false],
-    ['>=0.19.0', true], ['>=0', true], ['^0.19', true], ['~0.19.0', true], ['>=0.0.0 <99', true], ['0.19', true], ['=0.19.0', true], ['  >=0.19.0  ', true], ['>=0.19.0\n<1', true],
-    ['>=0 '.repeat(8).trim(), true], [`${'>=0.0.0 '.repeat(7)}>=0.19.0`, true], ['>=0 <99999999999999999999999999999', true], ['<=99999999999999999999999999999', true],
+    [`>=${packageVersion}`, true], ['>=0', true], [`^${majorMinor}`, true], [`~${packageVersion}`, true], ['>=0.0.0 <99', true], [majorMinor, true], [`=${packageVersion}`, true], [`  >=${packageVersion}  `, true], [`>=${packageVersion}\n<1`, true],
+    ['>=0 '.repeat(8).trim(), true], [`${'>=0.0.0 '.repeat(7)}>=${packageVersion}`, true], ['>=0 <99999999999999999999999999999', true], ['<=99999999999999999999999999999', true],
   ];
   for (const [range, accepted] of engines) {
     (accepted ? accept : refuse)(`engines ${JSON.stringify(range)?.slice(0, 30)}`, manifest => { manifest.engines['crucible'] = range; });
