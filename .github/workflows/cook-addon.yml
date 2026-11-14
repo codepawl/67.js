@@ -1,0 +1,79 @@
+name: Cook addon
+
+# The path tracer tests skip when the native addon is not built, so the required `test` check goes green without running them (#1146).
+# This job builds the addon from the pinned @codepawlhq/cook with a cached cargo target, runs those tests on a software Vulkan
+# adapter (lavapipe) and writes what ran and what was skipped to the job summary. It is not required by branch protection and
+# not part of the `test` job's needs, so a slow cold build never holds a merge.
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/summarize-addon-tests.mjs'
+      - '.github/workflows/cook-addon.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'package-lock.json'
+      - '.github/workflows/cook-addon.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cook-addon-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  addon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      # Cached by the cargo.lock of the installed Cook, so a Cook bump rebuilds and every other run reuses the target folder.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: node_modules/@codepawlhq/cook
+          cache-on-failure: true
+      - name: Build the Cook addon
+        run: |
+          start=$(date +%s)
+          npm run cook:build
+          echo "build_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: Install lavapipe and report what it supports
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mesa-vulkan-drivers vulkan-tools
+          {
+            echo '### Vulkan adapter'
+            echo '```'
+            vulkaninfo --summary 2>&1 | grep -E 'deviceName|driverInfo|apiVersion|deviceType' || true
+            echo
+            vulkaninfo 2>&1 | grep -E 'VK_KHR_(ray_query|acceleration_structure)' | sort -u || echo 'no VK_KHR_ray_query or VK_KHR_acceleration_structure'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Run the addon tests
+        run: |
+          start=$(date +%s)
+          set +e
+          node --test --test-reporter=tap --test-reporter-destination=addon-tests.tap $(git grep -l "support/cook.js" -- tests)
+          status=$?
+          echo "test_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          exit $status
+      - name: Write ran and skipped counts to the job summary
+        if: always()
+        run: |
+          {
+            node scripts/summarize-addon-tests.mjs addon-tests.tap --title 'Tests that load Cook, addon built, lavapipe adapter'
+            echo "Cargo build ${build_seconds:-?} s, tests ${test_seconds:-?} s."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: addon-tests-tap
+          path: addon-tests.tap
+          if-no-files-found: ignore
