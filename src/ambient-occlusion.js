@@ -4,6 +4,8 @@ export const AMBIENT_OCCLUSION_SAMPLES = 12;
  * Screen-space ambient occlusion from the resolved depth texture alone.
  * The surface normal comes from screen derivatives of the position, so the pass needs no normal buffer.
  * It writes one visibility factor per pixel; the post pass blurs and applies it.
+ * The depth texture is read without filtering, so `texelPosition` rebuilds a position at the centre of the texel it read. Rebuilding
+ * it at the requested uv puts it up to half a texel off its surface, and on a flat wall seen at a slant that reads as a bump (issue #1126).
  */
 export const ambientOcclusionFragment = `#version 300 es
 precision highp float;
@@ -16,9 +18,12 @@ uniform float aspect;
 uniform float orthographic;
 out vec4 occlusion;
 
-vec3 worldPosition(vec2 uv, float depth) {
-  vec4 point = inverseViewProjection * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-  return point.xyz / point.w;
+vec4 texelPosition(vec2 uv) {
+  vec2 size = vec2(textureSize(sceneDepth, 0));
+  ivec2 texel = ivec2(clamp(uv, 0.0, 0.9999) * size);
+  float depth = texelFetch(sceneDepth, texel, 0).r;
+  vec4 point = inverseViewProjection * vec4((vec2(texel) + 0.5) / size * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+  return vec4(point.xyz / point.w, depth);
 }
 
 float interleavedNoise(vec2 pixel) {
@@ -26,12 +31,12 @@ float interleavedNoise(vec2 pixel) {
 }
 
 void main() {
-  float depth = texture(sceneDepth, textureCoordinate).r;
-  if (depth >= 1.0) {
+  vec4 center = texelPosition(textureCoordinate);
+  vec3 position = center.xyz;
+  if (center.w >= 1.0) {
     occlusion = vec4(1.0);
     return;
   }
-  vec3 position = worldPosition(textureCoordinate, depth);
   vec3 normal = normalize(cross(dFdx(position), dFdy(position)));
   if (orthographic < 0.5 && dot(normal, position) > 0.0) normal = -normal;
   float screenRadius = min(radius * projectionScale / (orthographic > 0.5 ? 1.0 : length(position)), 0.25);
@@ -42,9 +47,9 @@ void main() {
     float angle = rotation + float(index) * 2.3999632;
     vec2 offset = vec2(cos(angle), sin(angle)) * sqrt(fraction) * screenRadius;
     vec2 sampleUv = textureCoordinate + vec2(offset.x / aspect, offset.y);
-    float sampleDepth = texture(sceneDepth, sampleUv).r;
-    if (sampleDepth >= 1.0) continue;
-    vec3 toSample = worldPosition(sampleUv, sampleDepth) - position;
+    vec4 neighbour = texelPosition(sampleUv);
+    if (neighbour.w >= 1.0) continue;
+    vec3 toSample = neighbour.xyz - position;
     float sampleDistance = length(toSample);
     float falloff = 1.0 - clamp(sampleDistance / (radius * 1.5), 0.0, 1.0);
     total += max(dot(normal, toSample) / max(sampleDistance, 0.0001) - 0.15, 0.0) * falloff;
