@@ -3,8 +3,9 @@ import { compileProgram } from './gl-program.js';
 import { createSplatSorter } from './gaussian-splat-sort.js';
 import { runInChunks } from './gaussian-splat-chunks.js';
 import { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly, parseGaussianSplatPlyAsync } from './gaussian-splat-ply.js';
+import { parseGaussianSplatSpz, parseGaussianSplatSpzAsync } from './gaussian-splat-spz.js';
 
-export { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly, parseGaussianSplatPlyAsync };
+export { GAUSSIAN_SPLAT_HARD_COUNT_LIMIT, GAUSSIAN_SPLAT_LIMITS, parseGaussianSplatPly, parseGaussianSplatPlyAsync, parseGaussianSplatSpz, parseGaussianSplatSpzAsync };
 
 // Gaussian splats as an optional addon (crucible/addons/gaussian-splats). A splat is an ellipsoid with a colour and an opacity;
 // each is drawn as a screen-space quad whose shape comes from projecting its 3D covariance. The splats are drawn after

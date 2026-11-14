@@ -92,7 +92,7 @@ function propertyLayout(properties) {
   return { layout, stride: offset };
 }
 
-function resolveLimits(options) {
+export function resolveLimits(options) {
   const maximumBytes = options.maximumBytes ?? GAUSSIAN_SPLAT_LIMITS.maximumBytes;
   const maximumCount = options.maximumCount ?? GAUSSIAN_SPLAT_LIMITS.maximumCount;
   if (!(maximumBytes > 0) || !(maximumCount > 0)) {
