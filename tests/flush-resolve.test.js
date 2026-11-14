@@ -216,7 +216,7 @@ test('what cannot be ranked is reported: double-sided gaps, parts past the budge
   assert.deepEqual(resolveFlush([floor, touching]), { ranked: 1, leftovers: [] }, 'on one plane the smaller face wins from either side');
   const pebble = partOf('pebble', [quadCorners(5, 5, 0.1, 0.1, 0)]);
   assert.deepEqual(resolveFlush([floor, pebble], { triangleBudget: 2 }).leftovers, [{ reason: 'unchecked', part: 'pebble', triangles: 2 }]);
-  const squashed = partOf('squashed', [quadCorners(8, 8, 1, 1, 0)], { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0.0001, 0, 0, 5, 0, 1] });
+  const squashed = partOf('squashed', [quadCorners(8, 8, 1, 1, 0)], { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1e-8, 0, 0, 5, 0, 1] });
   assert.deepEqual(resolveFlush([squashed]).leftovers, [{ reason: 'collapsed-node', part: 'squashed', triangles: 2 }]);
 });
 

@@ -12,7 +12,8 @@ export const FLUSH_MINIMUM_AREA_SHARE = 1e-4;
 const FLUSH_MINIMUM_AREA = 1e-8;
 const DEFAULT_TRIANGLE_BUDGET = 2_000_000;
 const DEFAULT_PAIR_BUDGET = 4_000_000;
-const SAME_FACING = Math.cos(Math.PI / 180);
+const MAXIMUM_TESTED_PAIRS = 8_000_000;
+const SAME_FACING =Math.cos(Math.PI / 180);
 // Normals one degree apart differ by at most 0.0175 per component. Each triangle is listed in every normal cell within half
 // of that, so two such triangles always share a cell.
 const NORMAL_STEPS = 20;
@@ -377,7 +378,7 @@ function planeHeight(table, id, dropped, axisU, axisV, u, v) {
   return corners[id * 9 + dropped] - slope / normals[id * 3 + dropped];
 }
 
-function createPairTest(table, entries, reach, pairBudget, result) {
+function createPairTest(table, entries, reach, pairBudget, testedPairLimit, result) {
   const { corners, normals, boxes, areas, owner } = table;
   const seen = new Set();
   const tolerances = new Map();
@@ -422,6 +423,12 @@ function createPairTest(table, entries, reach, pairBudget, result) {
     }
     const pairKey = first * table.count + second;
     if (seen.has(pairKey)) return;
+    // A Set holds at most 2^24 keys: a big flat part beside dense props can reach that, so stop the search instead of throwing.
+    if (seen.size >= testedPairLimit) {
+      result.truncated = true;
+      result.truncatedAt ??= entries[owner[second]].part.name;
+      return;
+    }
     seen.add(pairKey);
     const absoluteX = Math.abs(normalX);
     const absoluteY = Math.abs(normalY);
@@ -435,6 +442,7 @@ function createPairTest(table, entries, reach, pairBudget, result) {
     if (area < Math.max(FLUSH_MINIMUM_AREA, FLUSH_MINIMUM_AREA_SHARE * Math.min(areas[first], areas[second]))) return;
     if (result.pairs.length >= pairBudget) {
       result.truncated = true;
+      result.truncatedAt ??= entries[owner[second]].part.name;
       return;
     }
     const lift = planeHeight(table, second, dropped, axisU, axisV, sharedCentre[0], sharedCentre[1]) - planeHeight(table, first, dropped, axisU, axisV, sharedCentre[0], sharedCentre[1]);
@@ -471,7 +479,7 @@ function testCell(cell, boxes, reach, testPair) {
  * two lie on one plane; `opposite` marks a pair that faces opposite ways (one part is double sided). `unchecked` lists parts
  * past `triangleBudget`.
  */
-export function findFlushPairs(parts, { triangleBudget = DEFAULT_TRIANGLE_BUDGET, pairBudget = DEFAULT_PAIR_BUDGET } = {}) {
+export function findFlushPairs(parts, { triangleBudget = DEFAULT_TRIANGLE_BUDGET, pairBudget = DEFAULT_PAIR_BUDGET, testedPairLimit = MAXIMUM_TESTED_PAIRS } = {}) {
   const { entries, unchecked } = withinTriangleBudget(searchableParts(parts), triangleBudget);
   const table = readTriangles(entries);
   const result = { parts: entries.map(entry => entry.part), count: table.count, owner: table.owner, local: table.local, areas: table.areas, corners: table.corners, pairs: [], unchecked, truncated: false };
@@ -485,7 +493,7 @@ export function findFlushPairs(parts, { triangleBudget = DEFAULT_TRIANGLE_BUDGET
   }
   // No pair of parts spans more than the scene, so this is the widest gap any pair is tested with.
   const reach = nearTolerance(boundsDiagonal(sceneBounds));
-  const testPair = createPairTest(table, entries, reach, pairBudget, result);
+  const testPair = createPairTest(table, entries, reach, pairBudget, testedPairLimit, result);
   for (const cell of buildCells(table, gridCellSize(table, reach), reach)) testCell(cell, table.boxes, reach, testPair);
   result.pairs.sort((first, second) => first.first - second.first || first.second - second.second);
   return result;
