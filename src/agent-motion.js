@@ -57,6 +57,7 @@ const LOOK_RANGES = {
 const INTERPOLATIONS = ['LINEAR', 'STEP', 'SMOOTH', 'CUBICSPLINE'];
 const MAX_IK_SOLVERS = 16;
 const IK_SWEEP_SAMPLES = 33;
+const TRACK_SWEEP_SAMPLES = 33;
 const CAMERA_DEFAULTS = { eye: [4, 3, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 1000 };
 
 function validateValue(kind, property, value, valuePath = `${kind}.${property}`) {
@@ -551,6 +552,9 @@ export function normalizeAgentMotion(input, recipe) {
     if (!INTERPOLATIONS.includes(interpolation)) {
       throw invalidField(`motion.tracks[${index}].interpolation`, interpolation, `one of ${INTERPOLATIONS.join(', ')}`);
     }
+    if (track.property === 'visible' && interpolation !== 'STEP') {
+      throw invalidField(`motion.tracks[${index}].interpolation`, interpolation, 'STEP, or the field left out, since a visible track is 1 (shown) or 0 (hidden) and cannot blend between them');
+    }
     denseArray(track.keyframes, 64, 'Motion keyframes');
     keyframeCount += track.keyframes.length;
     if (keyframeCount > 2048) {
@@ -835,6 +839,41 @@ function copiedPatch(patch) {
 }
 
 /** Retains published maps and vectors. A failed sample leaves them unchanged. */
+function checkCameraLens(camera) {
+  for (const field of ['fov', 'near', 'far']) {
+    finite(camera[field], `Camera ${field}`);
+  }
+  if (Math.fround(camera.fov) <= 0 || Math.fround(camera.fov) >= 180 ||
+      Math.fround(camera.near) <= 0 || Math.fround(camera.far) <= Math.fround(camera.near)) {
+    throw invalidField('motion.tracks.camera', { fov: camera.fov, near: camera.near, far: camera.far }, 'a lens with fov above 0 and below 180, near above 0 and far above near, such as fov 50, near 0.1, far 100; check the fov, near and far tracks');
+  }
+}
+
+/**
+ * Samples every track at evenly spaced times across the clip, so interpolation, modifiers and extrapolation that leave a
+ * property's range are refused when the motion is set, not in the middle of a render. The error names the time.
+ */
+function sweepTrackValues(sampler, bindings, cameraPath, stagedCamera, duration) {
+  for (let sample = 0; sample < TRACK_SWEEP_SAMPLES; sample++) {
+    const time = duration * sample / (TRACK_SWEEP_SAMPLES - 1);
+    sampler.sample(time);
+    try {
+      for (const { track, staged } of bindings) {
+        validateValue(track.kind, track.property, staged.length === 1 ? staged[0] : staged);
+      }
+      if (cameraPath) {
+        cameraPath.sample(time, stagedCamera);
+        checkCameraLens(stagedCamera);
+      }
+    } catch (error) {
+      if (error instanceof RangeError) {
+        error.message = `${error.message.replace(/\.$/, '')}, reached at motion time ${Number(time.toFixed(3))} s by interpolation, modifiers or extrapolation (the keyframes alone may be in range).`;
+      }
+      throw error;
+    }
+  }
+}
+
 export function compileAgentMotion(input, recipe) {
   const motion = normalizeAgentMotion(input, recipe);
   if (motion === null) {
@@ -962,6 +1001,7 @@ export function compileAgentMotion(input, recipe) {
     for (const [id, translation] of ikEvaluator?.stagedTranslations ?? []) bases.set(id, { ...bases.get(id), translation });
     return bases;
   }
+  sweepTrackValues(sampler, bindings, cameraPath, stagedCamera, motion.duration);
   return Object.freeze({
     ikUsesStagedPose,
     driveSampler,
@@ -1045,13 +1085,7 @@ export function compileAgentMotion(input, recipe) {
       }
       if (cameraPath) {
         cameraPath.sample(time, stagedCamera, { overrides: cameraOverrides(evaluated?.looks) });
-        for (const field of ['fov', 'near', 'far']) {
-          finite(stagedCamera[field], `Camera ${field}`);
-        }
-        if (Math.fround(stagedCamera.fov) <= 0 || Math.fround(stagedCamera.fov) >= 180 ||
-            Math.fround(stagedCamera.near) <= 0 || Math.fround(stagedCamera.far) <= Math.fround(stagedCamera.near)) {
-          throw invalidField('motion.tracks.camera', { fov: stagedCamera.fov, near: stagedCamera.near, far: stagedCamera.far }, 'a lens with fov above 0 and below 180, near above 0 and far above near, such as fov 50, near 0.1, far 100; check the fov, near and far tracks');
-        }
+        checkCameraLens(stagedCamera);
       }
       // Publish only after every track, material product, camera pose, IK solve and constraint passes.
       for (const { track, patch, staged } of bindings) {

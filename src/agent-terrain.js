@@ -12,6 +12,8 @@ export const TERRAIN_LIMITS = Object.freeze({
   defaultResolution: 64,
   defaultAmplitude: 1,
   maximumHoles: 16,
+  seed: [0, 0x7fffffff],
+  defaultSeed: 1,
 });
 
 function numberWithin(value, fallback, [minimum, maximum], label) {
@@ -28,11 +30,21 @@ function integerWithin(value, fallback, [minimum, maximum], label) {
   return resolved;
 }
 
+function terrainSeed(value) {
+  const [minimum, maximum] = TERRAIN_LIMITS.seed;
+  const resolved = value ?? TERRAIN_LIMITS.defaultSeed;
+  if (!Number.isInteger(resolved) || resolved < minimum || resolved > maximum) {
+    throw invalidField('terrain.seed', resolved, `a whole number from ${minimum} to ${maximum}, such as ${TERRAIN_LIMITS.defaultSeed}`);
+  }
+  return resolved;
+}
+
 /** Vertex count of a terrain record, checked against the recipe limits before any ground is built. */
 export function terrainVertexEstimate(value) {
   const resolution = integerWithin(value.resolution, TERRAIN_LIMITS.defaultResolution, TERRAIN_LIMITS.resolution, 'resolution');
   numberWithin(value.size, TERRAIN_LIMITS.defaultSize, TERRAIN_LIMITS.size, 'size');
   numberWithin(value.amplitude, TERRAIN_LIMITS.defaultAmplitude, TERRAIN_LIMITS.amplitude, 'amplitude');
+  terrainSeed(value.seed);
   if (value.holes !== undefined && (!Array.isArray(value.holes) || value.holes.length > TERRAIN_LIMITS.maximumHoles)) {
     throw invalidField('terrain.holes', value.holes, `a list of at most ${TERRAIN_LIMITS.maximumHoles} circles, such as [{ "center": [0, 0], "radius": 2 }]`);
   }
@@ -42,7 +54,7 @@ export function terrainVertexEstimate(value) {
 /** The terrain addon object of a terrain record: render parts plus heightAt, isHole and bounds. Vegetation scatters over the same ground. */
 export function createRecipeTerrain(value) {
   const size = value.size ?? TERRAIN_LIMITS.defaultSize;
-  const seed = Number.isInteger(value.seed) ? value.seed : 1;
+  const seed = terrainSeed(value.seed);
   return createTerrain({
     size,
     chunks: 1,

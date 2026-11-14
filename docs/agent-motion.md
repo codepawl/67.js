@@ -78,6 +78,12 @@ Tangents use change per second.
 Quaternion values normalize through the existing animation core.
 Quaternion tangents retain their authored values.
 Other interpolation modes reject tangents.
+A `visible` track takes `STEP` only, since it is 1 or 0 and cannot blend.
+
+A motion is checked when it is set: every track is sampled at 33 evenly spaced times across the clip, so interpolation,
+`modifiers` and `extrapolation` that leave a property's range (a `generator` pushing `roughness` past 1, linear extrapolation
+taking `metallic` or camera `fov` out of range, a cubic dipping a scale below zero) are refused with the time they first fail,
+not in the middle of a render. A spike between two samples can still pass; the check is bounded, not exhaustive.
 
 ### Easing
 

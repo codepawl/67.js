@@ -115,39 +115,32 @@ test('invalid cubic mid-pose rejects a whole seek without publishing other chann
     { time: 0, value: [1, 1, 1], inTangent: [0, 0, 0], outTangent: [-16, 0, 0] },
     { time: 1, value: [1, 1, 1], inTangent: [16, 0, 0], outTangent: [0, 0, 0] },
   ] });
+  // The cubic dips below zero between its keys, so the motion is refused when the scene is made, naming the time.
+  assert.throws(() => createAgentScene(input), /scale: got .*reached at motion time [\d.]+ s/);
+});
+
+test('combined parent transforms and invalid camera crossings cannot publish valid sibling tracks', () => {
+  const input = recipe();
+  for (const id of ['hinge', 'arm']) {
+    input.motion.tracks.push({ kind: 'node', id, property: 'scale', keyframes: [
+      { time: 0, value: [1, 1, 1] }, { time: 1, value: [1e20, 1e20, 1e20] },
+    ] });
+  }
   const scene = createAgentScene(input);
   const before = pose(scene);
-  assert.throws(() => scene.sampleMotion(0.5), /scale/);
+  assert.throws(() => scene.sampleMotion(1));
   assert.deepEqual(pose(scene), before);
   assert.equal(scene.revision, 0);
-  scene.sampleMotion(1);
-  assert.equal(scene.parts[0].material.emission, 2);
   scene.sampleMotion(0);
   assert.deepEqual(pose(scene), before);
 });
 
-test('combined parent transforms and invalid camera crossings cannot publish valid sibling tracks', () => {
-  for (const invalid of ['graph', 'camera']) {
-    const input = recipe();
-    if (invalid === 'graph') {
-      for (const id of ['hinge', 'arm']) {
-        input.motion.tracks.push({ kind: 'node', id, property: 'scale', keyframes: [
-          { time: 0, value: [1, 1, 1] }, { time: 1, value: [1e20, 1e20, 1e20] },
-        ] });
-      }
-    } else {
-      input.motion.tracks[2].keyframes = [
-        { time: 0, value: [4, 3, 5] }, { time: 1, value: [-4, -3, -5] },
-      ];
-    }
-    const scene = createAgentScene(input);
-    const before = pose(scene);
-    assert.throws(() => scene.sampleMotion(invalid === 'graph' ? 1 : 0.5));
-    assert.deepEqual(pose(scene), before);
-    assert.equal(scene.revision, 0);
-    scene.sampleMotion(0);
-    assert.deepEqual(pose(scene), before);
-  }
+test('a camera track whose eye crosses its target is refused when the scene is made', () => {
+  const input = recipe();
+  input.motion.tracks[2].keyframes = [
+    { time: 0, value: [4, 3, 5] }, { time: 1, value: [-4, -3, -5] },
+  ];
+  assert.throws(() => createAgentScene(input), /distinct.*reached at motion time/);
 });
 
 test('failed set-motion initial sampling is atomic across recipe, transforms and materials', () => {
