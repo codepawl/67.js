@@ -165,8 +165,9 @@ MCP render jobs take the Cook backends cpu, gpu and native only.
 
 The roadmap in [issue 890](https://github.com/codepawl/crucible/issues/890) groups the renderers into four tiers.
 The tier names are working names.
-The `quality` setting that picks a tier is planned ([issue 904](https://github.com/codepawl/crucible/issues/904)), and so is refine-at-rest ([issue 903](https://github.com/codepawl/crucible/issues/903)).
-Realtime-high does not exist yet ([issue 901](https://github.com/codepawl/crucible/issues/901) and [issue 902](https://github.com/codepawl/crucible/issues/902)).
+The `quality` setting that picks a tier ships: `scene_render_submit` takes `settings.quality` ([Render quality](docs/mcp.md#render-quality)).
+Refine-at-rest is planned ([issue 903](https://github.com/codepawl/crucible/issues/903)).
+The path tracer planned for realtime-high does not exist yet ([issue 901](https://github.com/codepawl/crucible/issues/901) and [issue 902](https://github.com/codepawl/crucible/issues/902)).
 
 Six scenes at 960x540, medians over 3 interleaved runs on an idle card.
 FLIP is the error against a Cycles 4096-sample reference, and lower is better.

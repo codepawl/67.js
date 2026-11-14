@@ -73,7 +73,8 @@ Scenes are plain data with stable IDs, so an agent can edit by ID and check each
 - Cook is the path tracer. Its backends are cpu (the default), gpu (WebGL2), webgpu (a software BVH in WGSL compute) and native (Vulkan ray queries, from the optional Cook package, \`@codepawlhq/cook\`).
 - An experimental real-time path tracer runs on WebGPU with a WebGL2 fallback. The MCP server does not expose it. MCP render jobs take the cpu, gpu and native backends of Cook.
 - In the MCP server, \`--backend gpu\` means hardware WebGL2 in Chrome, and \`--backend cpu\` means software rendering.
-- Planned, not shipped: a \`quality\` setting that picks a tier (draft, realtime, realtime-high, final), and Glaze on WebGPU. Do not call either one. The roadmap is [issue 890](https://github.com/codepawl/crucible/issues/890).
+- \`scene_render_submit\` takes \`settings.quality\` (draft, realtime, realtime-high, final) and falls back one tier when a tier cannot run; the tiers are in [Render quality](${page('mcp.md')}#render-quality).
+- Planned, not shipped: Glaze on WebGPU, the real-time path tracer behind \`realtime-high\`, and refine at rest. The roadmap is [issue 890](https://github.com/codepawl/crucible/issues/890).
 
 ## Connect
 
