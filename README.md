@@ -13,6 +13,8 @@
 
 Crucible is a 3D engine for JavaScript that an AI agent drives through an MCP server. It makes 3D easy to understand and easy to do.
 
+> **67js → Crucible.** 67js is the old name. The `@codepawlhq/67js` package is deprecated: install `@codepawlhq/crucible` instead. Old 67js.codepawl.com links redirect here.
+
 The agent knows every part of Crucible and carries the heavy steps. It builds the scene, lights it, checks the preview and renders the result. You keep the creative choices and stay in the loop, because the agent shows previews and asks when a matter of taste is open.
 
 ## What you can make
