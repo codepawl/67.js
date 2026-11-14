@@ -134,6 +134,30 @@ To add it in Claude Code, run `/plugin marketplace add codepawl/viz3d`, then `/p
 
 Each picture below is a Crucible render. The linked ones open live in the browser.
 
+Path traced with Cook from Blender demo scenes. The line under each one says what was changed by hand.
+
+<table>
+  <tr>
+    <td colspan="2" valign="top">
+      <img src="https://67js.codepawl.com/previews/cook-pabellon.webp" alt="A glass pavilion with a flat roof, a golden stone wall and a pebbled reflecting pool under a cloudy sky" width="100%"><br>
+      <b>Barcelona Pavilion</b><br>
+      <sub>Glass and water switched to transmission, ground grass colour multiplied by 0.3</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="https://67js.codepawl.com/previews/cook-monk.webp" alt="A monastery cloister with a stone well in the courtyard, seen from a desk with an open book and a quill" width="100%"><br>
+      <b>Lone Monk</b><br>
+      <sub>Camera moved to 2 m</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="https://67js.codepawl.com/previews/cook-monster.webp" alt="A child in a purple hood and hockey mask raises a spiked club from a bed held up by a white glossy monster" width="100%"><br>
+      <b>Monster</b><br>
+      <sub>Five small meshes removed</sub>
+    </td>
+  </tr>
+</table>
+
 <table>
   <tr>
     <td width="33%" valign="top"><b><a href="https://crucible.codepawl.com/showcase.html?scene=airport">Airport ramp</a></b></td>
