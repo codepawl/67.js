@@ -512,7 +512,9 @@ export function normalizeAgentMotion(input, recipe) {
     throw invalidField('motion', input, 'at least one track, IK solver, constraint or driver, such as { "duration": 1, "tracks": [...] }; use null to clear it');
   }
   const nodes = new Set((recipe.nodes ?? []).map(node => node.id));
-  const materials = new Set((recipe.materials ?? []).map(material => material.id));
+  // A material track may also name the id of an asset.materials override, which gives a placed asset's material a handle.
+  const assetHandles = (recipe.nodes ?? []).flatMap(node => (node.asset?.materials ?? []).map(override => override.id).filter(Boolean));
+  const materials = new Set([...(recipe.materials ?? []).map(material => material.id), ...assetHandles]);
   // An imported asset lists its morph targets; a recipe mesh offers the names of its shape keys.
   const oceanGeometries = new Set((recipe.geometries ?? []).filter(geometry => geometry.type === 'mesh' && (geometry.stack ?? []).some(node => node?.op === 'ocean')).map(geometry => geometry.id));
   const morphTargets = new Set(recipe.morphTargets ?? (recipe.geometries ?? []).flatMap(geometry => geometry.grow ? [geometry.grow.name] : (geometry.shapeKeys ?? []).map(key => key.name)));
