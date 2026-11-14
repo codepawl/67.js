@@ -36,7 +36,7 @@ The group separates first. Small components separate during the second stage.
 Keep each section's offsets consistent so fasteners follow their panel. Base matrices remain assembled.
 
 Changing assembly amount refreshes shadows while reusing the same shadow texture and geometry buffers.
-For an exploded GLB, use `assemblyOffset(part, amount)` from `67js` for matrix translation entries 12, 13 and 14.
+For an exploded GLB, use `assemblyOffset(part, amount)` from `crucible` for matrix translation entries 12, 13 and 14.
 
 The material tags select renderer behavior.
 
@@ -88,7 +88,7 @@ Material alpha fields: `alphaMode` `'opaque'` (default), `'mask'` (cutout, `alph
 Changing its casting regime requires a new renderer. Shadow-casting groups use separate batches.
 
 ```js
-const renderer = new Renderer67(canvas, world.parts, {
+const renderer = new CrucibleRenderer(canvas, world.parts, {
   world: true,
   ground: false,
   environment: world.environment,
@@ -149,13 +149,13 @@ The frame follows relative morphs before four-influence skinning. Clearance uses
 Bind immutable geometry once. This sparse point attachment does not deform the accessory or certify clearance over its footprint.
 
 
-Agent authoring uses `createAgentScene(recipe, limits)` from `67js/addons/agent-scene`.
+Agent authoring uses `createAgentScene(recipe, limits)` from `crucible/addons/agent-scene`.
 
 Read `docs/agent-scene.md` for schema version one, immutable resources and atomic topology commands.
 Start with capabilities and bounded inspection. Edit stable IDs through one `apply` batch with the current `expectedRevision`.
 
 Checkpoint before uncertain changes, inspect and render the result, then restore or release the checkpoint.
-For rigid scenes (textured parts need `import '@codepawlhq/67js/addons/replace-textured-parts'`; skinned and morphed parts need a new renderer), compare `session.topologyRevision` with the uploaded revision after successful edits.
+For rigid scenes (textured parts need `import '@codepawlhq/crucible/addons/replace-textured-parts'`; skinned and morphed parts need a new renderer), compare `session.topologyRevision` with the uploaded revision after successful edits.
 Call `renderer.replaceParts(session.parts)` for changed topology or `renderer.updateParts(session.parts)` for retained parts, then render the detached camera.
 
 Use add/remove commands for nodes and shared resources, and `set-node` geometry/material fields for rebinding.
@@ -170,7 +170,7 @@ Recipes own procedural motion. Read `docs/agent-motion.md` before authoring loca
 Use `set-motion` for revisioned edits and `sampleMotion(time)` for transient poses. Sampling preserves geometry, canonical recipes and revisions.
 Use `sampleMotion(null)` for the authored base pose. Inspection bounds remain authored-base-world, independent of transient motion.
 
-For a configured MCP client, use the packaged `67js-mcp` server documented in `docs/mcp.md`.
+For a configured MCP client, use the packaged `crucible-mcp` server documented in `docs/mcp.md`.
 Call `scene_capabilities`, create one JSON scene, inspect IDs, checkpoint, apply a small batch, and assess `scene_look` PNG content.
 Use the revision returned by each committed apply or restore. A response with `committed: true` and `renderSucceeded: false` still advances revision.
 Inspect or export the canonical recipe after a render failure. Do not retry the edit with its old revision.
@@ -183,7 +183,7 @@ It supports procedural `motionTime` preview seeks and `settings.motion.start` in
 Read `docs/agent-review.md`. Each shot starts from the authored base pose and reports its camera, clocks and actual render resources.
 
 For imported models, read `docs/agent-asset.md`, configure `--assets` with an absolute local GLB directory, then select a digest from `scene_asset_catalog`.
-Use `scene_create_asset` with a `67js.asset` recipe. Supported texture maps, skinning, morphs and existing clips remain attached to decoded meshes.
+Use `scene_create_asset` with a `crucible.asset` recipe. Supported texture maps, skinning, morphs and existing clips remain attached to decoded meshes.
 Edit imported models through `set-root`, factor-only `set-material`, look commands and absolute `set-animation` sampling. Imported topology is immutable.
 
 Imported source-node overrides and motion exist. Read `docs/agent-character-motion.md` before editing a rig.

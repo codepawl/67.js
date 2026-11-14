@@ -1,5 +1,5 @@
 // The page side of the native tracer (Cook, @codepawlhq/cook), shared by the agent preview page and the bench harness. The
-// tracer runs in the host process; the host exposes it on the page as `__67jsNativeBake` (see the agent runtime), and
+// tracer runs in the host process; the host exposes it on the page as `__crucibleNativeBake` (see the agent runtime), and
 // everything here packs a scene into the tables it reads and unpacks its answer.
 
 function bytesToBase64(bytes) {
@@ -167,7 +167,7 @@ function floatsToBase64(values) {
 export async function traceTexelsOnNative(scene, texels, options) {
   const [pack, { buildNativeTexelInput }] = await Promise.all([import('../src/path-tracer-gpu-pack.js'), import('@codepawlhq/cook/pack-input')]);
   const input = buildNativeTexelInput(scene, { texelCount: texels.count, samples: options.samples, bounces: options.bounces, seed: options.seed, fireflyClamp: options.fireflyClamp }, pack);
-  const answer = await globalThis.__67jsNativeBake({
+  const answer = await globalThis.__crucibleNativeBake({
     action: 'trace',
     tables: encodeNativeTables(input),
     triangleCount: input.triangleCount,
@@ -182,7 +182,7 @@ export async function traceTexelsOnNative(scene, texels, options) {
 
 /** `traceTexelsOnNative` when the host offers a tracer that can run here, otherwise undefined. */
 export async function nativeTexelTracerIfAvailable() {
-  if (typeof globalThis.__67jsNativeBake !== 'function') return undefined;
-  const status = await globalThis.__67jsNativeBake({ action: 'probe' });
+  if (typeof globalThis.__crucibleNativeBake !== 'function') return undefined;
+  const status = await globalThis.__crucibleNativeBake({ action: 'probe' });
   return status.available ? traceTexelsOnNative : undefined;
 }

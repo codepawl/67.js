@@ -87,7 +87,7 @@ test('bad fields are rejected with a clear message', () => {
 
 function sceneWithFields(particleFields, clothFields) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'speck', type: 'box', bevel: 0 }, { id: 'sheet', type: 'grid', segments: 6 }],
     materials: [{ id: 'paint', color: [1, 1, 1], doubleSided: true }],
     nodes: [
@@ -121,7 +121,7 @@ test('one field list moves particles and cloth, and a recipe repeats frame for f
 
 test('fields lean hair toward the push and clamp it to the strand length', () => {
   const recipe = fields => ({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'head', type: 'sphere', segments: 12, rings: 8 }, { id: 'strands', type: 'box' }],
     materials: [{ id: 'fur', color: [0.3, 0.2, 0.1] }],
     nodes: [{ id: 'head', geometry: 'head', material: 'fur' }, { id: 'fur', geometry: 'strands', material: 'fur' }],

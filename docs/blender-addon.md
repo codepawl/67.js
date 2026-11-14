@@ -1,8 +1,8 @@
 # Cook in Blender (#900)
 
-`packages/blender-addon` is a Blender add-on that adds **Cook**, the 67js native path tracer ([Cook](https://github.com/codepawl/cook/blob/main/README.md), kernel `cycles`), to the Render Engine list next to Cycles and Eevee. It exports the evaluated scene, runs the tracer as a Node subprocess and puts the result in Blender's render result. This is the first slice of #900: final-frame renders of what the exporter reads. No viewport render, no node graph baking and no extension packaging yet.
+`packages/blender-addon` is a Blender add-on that adds **Cook**, the Crucible native path tracer ([Cook](https://github.com/codepawl/cook/blob/main/README.md), kernel `cycles`), to the Render Engine list next to Cycles and Eevee. It exports the evaluated scene, runs the tracer as a Node subprocess and puts the result in Blender's render result. This is the first slice of #900: final-frame renders of what the exporter reads. No viewport render, no node graph baking and no extension packaging yet.
 
-The add-on is not part of the npm package (`files` is unchanged) and runs no downloaded code; it reads your scene and starts `node` on the tracer in a 67js checkout.
+The add-on is not part of the npm package (`files` is unchanged) and runs no downloaded code; it reads your scene and starts `node` on the tracer in a Crucible checkout.
 
 ## Install
 
@@ -12,8 +12,8 @@ The add-on is not part of the npm package (`files` is unchanged) and runs no dow
    npm run cook:build
    ```
 
-2. In Blender (4.2 or later, written and checked on 5.3): zip the add-on folder so the zip holds `cook_blender/` at its root (`cd packages/blender-addon && zip -r cook_blender.zip cook_blender`, or compress the folder in your file manager), then Edit > Preferences > Add-ons > Install from Disk and pick the zip. Or copy the whole `cook_blender` folder into Blender's add-ons folder. Installing the single `__init__.py` does not work: the add-on has several modules. Enable "Cook renderer (67js)".
-3. In the add-on's preferences set **Native tracer folder** to the root of the 67js checkout. When it is empty the `COOK_NATIVE_DIR` environment variable is used. Node 20.19 or later must be on `PATH`, or set **Node executable**.
+2. In Blender (4.2 or later, written and checked on 5.3): zip the add-on folder so the zip holds `cook_blender/` at its root (`cd packages/blender-addon && zip -r cook_blender.zip cook_blender`, or compress the folder in your file manager), then Edit > Preferences > Add-ons > Install from Disk and pick the zip. Or copy the whole `cook_blender` folder into Blender's add-ons folder. Installing the single `__init__.py` does not work: the add-on has several modules. Enable "Cook renderer (Crucible)".
+3. In the add-on's preferences set **Native tracer folder** to the root of the Crucible checkout. When it is empty the `COOK_NATIVE_DIR` environment variable is used. Node 20.19 or later must be on `PATH`, or set **Node executable**.
 4. Render properties > Render Engine > **Cook**. Samples, max bounces, seed, pixel filter and environment cap are in the Sampling panel. F12 renders a frame. The environment cap is 0 (the world image is not clamped, as in Cycles); a positive value limits each texel of the world image to that radiance, which lowers noise from small very bright spots and takes their energy away.
 
 A missing folder, an unbuilt addon or a missing Node stops the render with a message that names what to set.
@@ -56,7 +56,7 @@ The tracer keeps every texture in memory, so the total is limited to 1 GiB (16 d
 
 | Name | Meaning |
 | --- | --- |
-| `COOK_NATIVE_DIR` | 67js checkout root, used when the preference is empty |
+| `COOK_NATIVE_DIR` | Crucible checkout root, used when the preference is empty |
 | `COOK_ADDON_PATH` | A built `render-native.node` to use instead of the one under the checkout's `node_modules/@codepawlhq/cook/build` |
 | `COOK_KEEP_FILES=1` | keep the temporary folder (`scene.json`, `trace.log`, the `.npy` output) after a render |
 

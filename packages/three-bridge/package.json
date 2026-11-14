@@ -1,7 +1,7 @@
 {
-  "name": "@codepawlhq/67js-three-bridge",
+  "name": "@codepawlhq/crucible-three-bridge",
   "version": "0.1.0",
-  "description": "Optional addon that imports a three.js object tree as 67js parts and builds three.js meshes from 67js parts. Imports neither three nor 67js. Not part of the core archive.",
+  "description": "Optional addon that imports a three.js object tree as Crucible parts and builds three.js meshes from Crucible parts. Imports neither three nor Crucible. Not part of the core archive.",
   "type": "module",
   "main": "./index.mjs",
   "exports": {
@@ -12,14 +12,14 @@
     "README.md"
   ],
   "keywords": [
-    "67js-addon",
+    "crucible-addon",
     "three",
     "threejs",
     "gltf"
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@codepawlhq/67js": ">=0.19.0 <1.0.0",
+    "@codepawlhq/crucible": ">=0.19.0 <1.0.0",
     "three": ">=0.160.0"
   },
   "engines": {

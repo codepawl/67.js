@@ -1,10 +1,10 @@
 # Game rules: game logic as data
 
-`67js/addons/game-rules` plays a JSON rule document in a live game. The document holds variables, triggers and actions. It is data, not code: there is no `eval`, no `Function` and no script, so an agent can create and edit the rules through a tool without running anything it wrote. Like the [runtime](runtime.md), it loads only when imported and adds no dependency.
+`crucible/addons/game-rules` plays a JSON rule document in a live game. The document holds variables, triggers and actions. It is data, not code: there is no `eval`, no `Function` and no script, so an agent can create and edit the rules through a tool without running anything it wrote. Like the [runtime](runtime.md), it loads only when imported and adds no dependency.
 
 ```js
-import { createRuntime } from '67js/addons/runtime';
-import { createGameRules } from '67js/addons/game-rules';
+import { createRuntime } from 'crucible/addons/runtime';
+import { createGameRules } from 'crucible/addons/game-rules';
 
 const rules = createGameRules(document, {
   input,                                          // a createInput object, only for input triggers

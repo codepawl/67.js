@@ -1,6 +1,6 @@
 import './style.css';
 import './brand.js';
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import { createAdaptiveResolution, createGpuTimer } from './adaptive-quality.js';
 import { createModel } from './model.js';
 import { downloadGlb } from './export.js';
@@ -100,7 +100,7 @@ function invalidate() {
 
 function initialize() {
   const visibleParts = state.layer === 'all' ? parts : parts.filter((part) => part.assembly?.layer === state.layer);
-  renderer = new Renderer67(canvas, visibleParts, { hdr: true, samples: Number(renderParameters.get('samples') ?? 4), memoryBudgetMiB: Number(renderParameters.get('memory') ?? 256), pixelRatio: selectedPixelRatio, createGpuTimer: isExport ? null : createGpuTimer, shadowBounds: { extent: 6, eye: [-3, 7, 4], target: [0, 1.5, 0] } });
+  renderer = new CrucibleRenderer(canvas, visibleParts, { hdr: true, samples: Number(renderParameters.get('samples') ?? 4), memoryBudgetMiB: Number(renderParameters.get('memory') ?? 256), pixelRatio: selectedPixelRatio, createGpuTimer: isExport ? null : createGpuTimer, shadowBounds: { extent: 6, eye: [-3, 7, 4], target: [0, 1.5, 0] } });
   document.querySelector('#parts').textContent = `${visibleParts.length} parts · ${Math.round(renderer.triangles / 1000)}k triangles`;
   document.querySelector('#calls').textContent = `${renderer.batches.length} geometry draws`;
   invalidate();
@@ -159,7 +159,7 @@ document.querySelector('#save-model').addEventListener('click', () => {
   canvas.toBlob(blob => {
     if (!blob) { notify('Image capture failed. Try again.', true); return; }
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = '67js-wall-e.png'; link.click();
+    const link = document.createElement('a'); link.href = url; link.download = 'crucible-wall-e.png'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, 'image/png');
 });

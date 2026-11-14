@@ -6,7 +6,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { createEnvironmentMap } from '/src/hdri.js';
 import { parseGltf } from '/src/gltf.js';
 import { generateGeometryLods } from '/src/mesh-lod.js';
@@ -66,7 +66,7 @@ export async function create67Adapter(canvas, scene, characters, { culling = tru
   const shadowBounds = scene.shadowExtent
     ? { eye: scene.sun.direction.map(value => value * 5), target: [0, 0, 0], up: [0, 1, 0], extent: scene.shadowExtent, near: 0.1, far: 150 }
     : {};
-  const renderer = new Renderer67(canvas, parts, {
+  const renderer = new CrucibleRenderer(canvas, parts, {
     ground: false, hdr, depth: false, samples, pixelRatio: 1, memoryBudgetMiB: 2048, world: true, environment, shadowBounds, culling, shading,
   });
   renderer.resize();

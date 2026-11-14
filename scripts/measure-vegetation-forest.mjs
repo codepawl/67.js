@@ -42,7 +42,7 @@ try {
       result = await page.evaluate(async ({ runs, firstCardLevel, bakeLevel, fadeBand }) => {
         const { scatterVegetation, selectLevels, prepareImpostors } = await import('/src/vegetation.js');
         const { createTerrain } = await import('/src/terrain.js');
-        const { Renderer67 } = await import('/src/renderer.js');
+        const { CrucibleRenderer } = await import('/src/renderer.js');
 
         // Counts draw calls and triangles at the WebGL calls, so the numbers include the terrain.
         const counters = { drawCalls: 0, triangles: 0 };
@@ -92,7 +92,7 @@ try {
 
         // One run: a fresh renderer, 5 warm-up frames, then 30 frames each wrapped in a timer query.
         const measureRun = async (view, keepPicture) => {
-          const renderer = new Renderer67(canvas, [...terrain.parts, ...view.parts], { ground: false, world: true, samples: 1, pixelRatio: 1 });
+          const renderer = new CrucibleRenderer(canvas, [...terrain.parts, ...view.parts], { ground: false, world: true, samples: 1, pixelRatio: 1 });
           const context = renderer.context;
           const timer = context.getExtension('EXT_disjoint_timer_query_webgl2');
           const pixel = new Uint8Array(4);

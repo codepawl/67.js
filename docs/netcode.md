@@ -1,10 +1,10 @@
 # Netcode: multiplayer state sync
 
-`67js/addons/netcode` is a [runtime](runtime.md) system for multiplayer. One side is the authority and owns the truth. It applies every client's input and sends bounded delta snapshots. A client predicts its own entity, corrects it when a snapshot arrives and draws the other entities slightly in the past, between two snapshots. It loads only when imported, adds no dependency and opens no connection or timer.
+`crucible/addons/netcode` is a [runtime](runtime.md) system for multiplayer. One side is the authority and owns the truth. It applies every client's input and sends bounded delta snapshots. A client predicts its own entity, corrects it when a snapshot arrives and draws the other entities slightly in the past, between two snapshots. It loads only when imported, adds no dependency and opens no connection or timer.
 
 ```js
-import { createRuntime } from '67js/addons/runtime';
-import { createNetcode, createWebSocketTransport } from '67js/addons/netcode';
+import { createRuntime } from 'crucible/addons/runtime';
+import { createNetcode, createWebSocketTransport } from 'crucible/addons/netcode';
 
 // Server (or host): owns the truth.
 const server = createNetcode({ role: 'authority', authority: 'server', transport: serverTransport });

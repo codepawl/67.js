@@ -125,7 +125,7 @@ test('random loop cuts on stretched boxes and cylinders stay closed', () => {
 
 test('recipe meshes loop cut through mesh_edit-style edits', () => {
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'pillar', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: [
       { op: 'translate', select: { tag: 'top' }, offset: [0, 2, 0] },
       { op: 'loop_cut', edges: { along: [0, 1, 0] }, cuts: 4, name: 'ring' },

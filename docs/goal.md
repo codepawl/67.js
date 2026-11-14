@@ -1,14 +1,14 @@
 # Goal
 
-67js aims to be as capable as Blender, as light as three.js, and as AI friendly as possible. No public claim of parity or speed is allowed until the evidence below exists.
+Crucible aims to be as capable as Blender, as light as three.js, and as AI friendly as possible. No public claim of parity or speed is allowed until the evidence below exists.
 
 ## Stance
 
-67js makes 3D easy to understand and easy to do. An agent knows how to use every part of 67js and carries the heavy steps of the work: setup, assets, lighting, checks and renders. The person keeps the creative choices and stays active. The agent proposes, shows pictures and asks when a choice is a matter of taste. It does not decide the look on its own and it does not leave the person waiting passively.
+Crucible makes 3D easy to understand and easy to do. An agent knows how to use every part of Crucible and carries the heavy steps of the work: setup, assets, lighting, checks and renders. The person keeps the creative choices and stays active. The agent proposes, shows pictures and asks when a choice is a matter of taste. It does not decide the look on its own and it does not leave the person waiting passively.
 
 Every surface follows from this:
 
-- **Show, then tell.** The README, docs, changelog and release notes lead with renders and clips made by 67js. A reader sees what a feature makes before reading how it works. A change that people can see ships with a picture or a short clip.
+- **Show, then tell.** The README, docs, changelog and release notes lead with renders and clips made by Crucible. A reader sees what a feature makes before reading how it works. A change that people can see ships with a picture or a short clip.
 - **Plain words.** Copy says what the person can make and what the agent does for them. Code comes after that.
 - **The person stays in the loop.** Agent tools return previews and choices to react to. Examples are `scene_ask_user`, review grids and quick previews before a final render.
 

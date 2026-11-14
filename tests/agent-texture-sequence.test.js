@@ -23,7 +23,7 @@ function framePool() {
 
 function quadRecipe(sequence) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'quad', type: 'grid', segments: 1 }],
     materials: [{ id: 'screen', map: { sequence } }],
     nodes: [{ id: 'screen', geometry: 'quad', material: 'screen' }],
@@ -94,7 +94,7 @@ test('an edit can set a sequence and the frame IDs of a recipe are collected for
 });
 
 test('the catalog lists PNG, JPEG and WebP images by content and rejects a mismatched extension', async context => {
-  const directory = await mkdtemp(join(tmpdir(), '67js-sequence-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-sequence-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 1)]);
   const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32, 2)]);

@@ -17,7 +17,7 @@ def load_png(path):
     return np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
@@ -40,7 +40,7 @@ def main():
     cycles_directory = Path(sys.argv[sys.argv.index("--cycles") + 1])
     rows = {}
     for scene_id in scene_ids:
-        cycles = tone_map_like_67js(np.load(cycles_directory / f"{scene_id}-cycles.npy"))
+        cycles = tone_map_like_crucible(np.load(cycles_directory / f"{scene_id}-cycles.npy"))
         row = {}
         for label, name in (("realtime", f"{scene_id}@realtime-rest.png"), ("still-64", f"{scene_id}@still-64.png")):
             if (directory / name).exists():

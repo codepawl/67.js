@@ -1,7 +1,7 @@
 // The scene of the water preview picture (scripts/measure-water-shadows.mjs --preview): a gravel bed, a wooden ladder standing in
 // the water, a boulder and a small rock on the bed. The models are Poly Haven CC0 assets (boulder_01, rock_07 and the ladder of
 // modular_wooden_pier) and the bed is the Poly Haven gravel_ground_01 material; they are read from a folder that is never committed.
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { box } from '../src/geometry.js';
 import { loadGltf } from '../src/gltf.js';
 import '../src/world-material-shader.js';
@@ -77,7 +77,7 @@ export function previewParts(assets, depth, water, opacity) {
 /** Draws one frame on `canvas`; the caller reads the canvas before the next frame. */
 export function drawPreviewPool(canvas, assets, depth, water, view, opacity = 0.35) {
   const parts = previewParts(assets, depth, water, opacity);
-  const renderer = new Renderer67(canvas, parts, { depth: false, world: false, ground: false, pixelRatio: 1, samples: 4, environment: { lightDirection: SUN_DIRECTION, keyColor: [3, 3, 3] } });
+  const renderer = new CrucibleRenderer(canvas, parts, { depth: false, world: false, ground: false, pixelRatio: 1, samples: 4, environment: { lightDirection: SUN_DIRECTION, keyColor: [3, 3, 3] } });
   renderer.render({ ...view, fov: 40, time: 0.5, environment: { lightDirection: SUN_DIRECTION } });
   return renderer;
 }

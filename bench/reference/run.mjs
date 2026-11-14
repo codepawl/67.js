@@ -1,10 +1,10 @@
-// Renders the reference scenes in 67js and Blender, then scores them: npm run reference
-// --default-look [--skip-blender] [--scene <id>,<id>] scores four bare scenes in 67js and three.js against Cycles (default-look.mjs, issue #988); nothing else here runs.
+// Renders the reference scenes in Crucible and Blender, then scores them: npm run reference
+// --default-look [--skip-blender] [--scene <id>,<id>] scores four bare scenes in Crucible and three.js against Cycles (default-look.mjs, issue #988); nothing else here runs.
 // --ambient-occlusion <strength> [--ambient-occlusion-radius <units>] turns occlusion on (off by default).
-// --bake [<id>,<id>] [--bake-preset <name>] bakes bounced light into the named scenes (every scene when no ids follow) before 67js draws them;
+// --bake [<id>,<id>] [--bake-preset <name>] bakes bounced light into the named scenes (every scene when no ids follow) before Crucible draws them;
 // Blender still gets the plain scene.
 // --probes [<id>,<id>] adds reflection probes (src/reflection-probes.js) to the named scenes, on top of --bake when both are given.
-// --no-glossy draws the scenes with metallic 0 and specular 0 on every material (and, in the harness, no sky reflection), the 67js side of render-blender.py --no-glossy (issue #506).
+// --no-glossy draws the scenes with metallic 0 and specular 0 on every material (and, in the harness, no sky reflection), the Crucible side of render-blender.py --no-glossy (issue #506).
 // --ambient <scale> multiplies the light the world gives every surface (0 removes it); with --skip-blender it measures what the world adds.
 // --path-tracer [--samples <n>] [--noise-threshold <n>] [--scene <id>] draws the scenes with the offline path tracer (src/path-tracer.js) instead, keeps the
 // Cycles renders of an earlier run, and scores them into path-tracer.json (--path-tracer-backend gpu draws them with the GPU tracer and
@@ -17,7 +17,7 @@ import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-// --default-look scores bare scenes in 67js and three.js against Cycles (issue #988): bench/reference/default-look.mjs.
+// --default-look scores bare scenes in Crucible and three.js against Cycles (issue #988): bench/reference/default-look.mjs.
 if (process.argv.includes('--default-look')) {
   const { runDefaultLook } = await import('./default-look.mjs');
   await runDefaultLook(process.argv.slice(2));
@@ -26,7 +26,7 @@ if (process.argv.includes('--default-look')) {
 
 // --khronos draws the Khronos sample assets in artifacts/khronos (Blender imports the same files) into their own work
 // directory, and scores them into khronos.json. Nothing in baseline.json or images/<scene>.jpg changes.
-// --cloth draws the cloth scenes (a pinned banner in wind, a sheet dropped on a ball) with 67js's solver and with a Blender
+// --cloth draws the cloth scenes (a pinned banner in wind, a sheet dropped on a ball) with Crucible's solver and with a Blender
 // cloth bake, and scores them into cloth.json the same way (the pixels the scene covers, with the sky left out).
 const khronos = process.argv.includes('--khronos');
 const cloth = process.argv.includes('--cloth');

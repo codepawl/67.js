@@ -927,8 +927,8 @@ function linkedMaterial(liveMaterial, lightMask, wrappers) {
 function normalizeRecipe(input, limits) {
   let recipe = copiedJson(input, limits.maxRecipeBytes);
   knownKeys(recipe, ['format', 'schemaVersion', 'geometries', 'materials', 'nodes', 'armatures', 'camera', 'environment', 'effects', 'shadow', 'motion', 'physics', 'cloth', 'timeline', 'particles', 'bake', 'postPasses', 'game'], 'recipe');
-  if (recipe.format !== '67js.scene' || recipe.schemaVersion !== 1) {
-    throw invalidField(recipe.format !== '67js.scene' ? 'format' : 'schemaVersion', recipe.format !== '67js.scene' ? recipe.format : recipe.schemaVersion, recipe.format !== '67js.scene' ? '"67js.scene"' : '1');
+  if (recipe.format !== 'crucible.scene' || recipe.schemaVersion !== 1) {
+    throw invalidField(recipe.format !== 'crucible.scene' ? 'format' : 'schemaVersion', recipe.format !== 'crucible.scene' ? recipe.format : recipe.schemaVersion, recipe.format !== 'crucible.scene' ? '"crucible.scene"' : '1');
   }
   // A scene with no mesh, or whose nodes all take the default material, has nothing to list: absent means empty.
   // Placed assets generate their own geometries, materials and part nodes each time; an exported or checkpointed recipe may still carry them.

@@ -20,7 +20,7 @@ try {
   }));
   await page.goto('http://127.0.0.1:5173/gltf-morph-smoke.html');
   const report = await page.evaluate(async () => {
-    const { Renderer67, exportGlb } = await import('/build/67.module.js');
+    const { CrucibleRenderer, exportGlb } = await import('/build/67.module.js');
     const { createFilmScenes } = await import('/build/film.js');
     const { parseGltf } = await import('/build/gltf.js');
     const source = createFilmScenes().portrait;
@@ -60,7 +60,7 @@ try {
     bytes.set(binary, 28 + paddedJson);
     const asset = await parseGltf(animated);
     const canvas = document.querySelector('canvas');
-    const renderer = new Renderer67(canvas, asset.parts, {
+    const renderer = new CrucibleRenderer(canvas, asset.parts, {
       world: true, ground: false, environment: source.environment, shadowBounds: source.shadowBounds,
       samples: 2, pixelRatio: 1, hdr: true, memoryBudgetMiB: 128,
     });

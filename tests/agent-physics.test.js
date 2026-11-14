@@ -8,7 +8,7 @@ await loadPhysicsEngine();
 
 function recipe(physics, extraNodes = []) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'slab', type: 'box' },
       { id: 'ball', type: 'sphere' },

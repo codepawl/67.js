@@ -35,7 +35,7 @@ export function sampleRecipe() {
     translation: [index % 2 ? 0.4 : -0.4, 0.25, index > 1 ? 0.4 : -0.4], scale: [0.08, 0.5, 0.08],
   });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       {
         id: 'seat', type: 'mesh', base: { type: 'box', bevel: 0 },

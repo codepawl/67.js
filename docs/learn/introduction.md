@@ -1,11 +1,11 @@
 # Introduction
 
-67js is a 3D engine for the browser. It draws with WebGL2 and runs in every current desktop and phone browser. You describe a scene as a list of parts, and the renderer draws a frame from a camera.
+Crucible is a 3D engine for the browser. It draws with WebGL2 and runs in every current desktop and phone browser. You describe a scene as a list of parts, and the renderer draws a frame from a camera.
 
-The program below is a complete 67js scene. It runs on this page. Drag the picture to turn the camera. Change a number in the code, and the picture changes.
+The program below is a complete Crucible scene. It runs on this page. Drag the picture to turn the camera. Change a number in the code, and the picture changes.
 
 ```js live poster=introduction-cube
-import { Renderer67, box } from '67js';
+import { CrucibleRenderer, box } from 'crucible';
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
@@ -15,7 +15,7 @@ const cube = {
   matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0.5, 0, 1]),
   material: { color: [0.85, 0.45, 0.2], metallic: 0, roughness: 0.4 },
 };
-const renderer = new Renderer67(canvas, [cube]);
+const renderer = new CrucibleRenderer(canvas, [cube]);
 const orbit = { yaw: 0.6, pitch: 0.4, distance: 4.7 };
 
 function draw() {
@@ -40,7 +40,7 @@ new ResizeObserver(() => {
 
 ## What you can build
 
-Each demo on this site is a 67js scene. Open one to see what the engine does, then read its topic in these docs.
+Each demo on this site is a Crucible scene. Open one to see what the engine does, then read its topic in these docs.
 
 ```cards
 Object studio | /object.html | A robot model with orbit controls, lighting looks and an exploded view. | /previews/wall-e.webp
@@ -53,19 +53,19 @@ Showcase | /showcase.html | Large scenes: an airport, a data center and a port. 
 
 ## How a scene works
 
-A 67js scene has three pieces. You make them in this order.
+A Crucible scene has three pieces. You make them in this order.
 
-![Parts go into Renderer67 one time, and each render call draws a picture from a camera](/docs-media/scene-flow.svg)
+![Parts go into CrucibleRenderer one time, and each render call draws a picture from a camera](/docs-media/scene-flow.svg)
 
 1. **Parts.** Each part has a name, a geometry, a position matrix and a material.
-2. **Renderer.** `new Renderer67(canvas, parts)` uploads the parts to the graphics card one time.
+2. **Renderer.** `new CrucibleRenderer(canvas, parts)` uploads the parts to the graphics card one time.
 3. **Frames.** `renderer.render({ eye, target })` draws one picture from a camera at `eye` that looks at `target`.
 
 To move something, change the part and call `renderer.updateParts(parts)`. Then draw the next frame. The renderer keeps the uploaded geometry, so a frame costs little.
 
-## What 67js is not
+## What Crucible is not
 
-67js does not copy the three.js API. If you know three.js, [If you know three.js](#if-you-know-three-js) maps its common calls to 67js, and the optional `three-compat` addon builds 67js parts from the common three.js names. It supports a subset, so code that uses other three.js names needs changes. 67js also has no mouse editor like Blender. You build scenes in code, or an AI agent builds them through the MCP server.
+Crucible does not copy the three.js API. If you know three.js, [If you know three.js](#if-you-know-three-js) maps its common calls to Crucible, and the optional `three-compat` addon builds Crucible parts from the common three.js names. It supports a subset, so code that uses other three.js names needs changes. Crucible also has no mouse editor like Blender. You build scenes in code, or an AI agent builds them through the MCP server.
 
 ## How these docs are organized
 
@@ -76,6 +76,6 @@ To move something, change the part and call `renderer.updateParts(parts)`. Then 
 You need to know some JavaScript and how to run a command in a terminal. You do not need to know WebGL or 3D math.
 
 ```cards
-Install 67js | #install | Make a project and add the package. Five minutes.
+Install Crucible | #install | Make a project and add the package. Five minutes.
 Your first scene | #first-scene | Draw, color, place and animate shapes step by step.
 ```

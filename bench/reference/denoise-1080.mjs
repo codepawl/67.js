@@ -18,9 +18,9 @@ const denoisers = optionValue('--denoisers', 'oidn,wavelet').split(',');
 const outputPath = optionValue('--out', 'artifacts/denoise-1080.json');
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-denoise-1080-'));
-const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('bin/67js-mcp.mjs'), '--backend', 'cpu', '--memory', '256', '--jobs', join(directory, 'jobs')], cwd: resolve('.'), stderr: 'pipe' });
-const client = new Client({ name: '67js-denoise-1080', version: '1' });
+const directory = await mkdtemp(join(tmpdir(), 'crucible-denoise-1080-'));
+const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('bin/crucible-mcp.mjs'), '--backend', 'cpu', '--memory', '256', '--jobs', join(directory, 'jobs')], cwd: resolve('.'), stderr: 'pipe' });
+const client = new Client({ name: 'crucible-denoise-1080', version: '1' });
 const call = (name, argumentsValue) => client.callTool({ name, arguments: argumentsValue }, { timeout: 900000 });
 
 async function finished(jobId) {

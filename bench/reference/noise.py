@@ -1,5 +1,5 @@
-# Measures the speckle and streaks that FLIP does not punish: the high-frequency energy of a 67js frame, against Cycles.
-#   uv run --no-project --python 3.12 --with pillow --with numpy --with scipy python -I bench/reference/noise.py <67js png> <cycles npy> [<label>]
+# Measures the speckle and streaks that FLIP does not punish: the high-frequency energy of a Crucible frame, against Cycles.
+#   uv run --no-project --python 3.12 --with pillow --with numpy --with scipy python -I bench/reference/noise.py <Crucible png> <cycles npy> [<label>]
 # Both images go to display space with the tone curve of src/post.js. The energy of a region is the standard deviation of
 # (image - gaussian blur of the image) over that region, as a percentage of display luminance.
 #   dark   : pixels where Cycles is darker than DARK_LUMINANCE and farther than DARK_MARGIN pixels from a brighter pixel.

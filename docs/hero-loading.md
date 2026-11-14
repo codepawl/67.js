@@ -39,7 +39,7 @@ The chip fab is the one world with an animation clip: engineers walk, hoist vehi
 ```sh
 npx vite build --outDir <folder>
 node scripts/measure-hero-load.mjs --dist <folder> --label <name> --runs 3 [--cpu 4]
-node scripts/measure-hero-load.mjs --origin https://67js.codepawl.com --label live --runs 3
+node scripts/measure-hero-load.mjs --origin https://crucible.codepawl.com --label live --runs 3
 node scripts/measure-hero-load.mjs --dist <folder> --stills <directory>
 node scripts/measure-hero-load.mjs --dist <folder> --video <file.mp4>
 ```

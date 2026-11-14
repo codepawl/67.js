@@ -32,5 +32,5 @@ test('release preparation builds the standalone module before npm pack and check
 });
 
 test('the install guide shows a pinned jsdelivr snippet with a single module script', () => {
-  assert.match(installGuide, /https:\/\/cdn\.jsdelivr\.net\/npm\/@codepawlhq\/67js@\d+\.\d+\.\d+\/build\/67\.standalone\.js/);
+  assert.match(installGuide, /https:\/\/cdn\.jsdelivr\.net\/npm\/@codepawlhq\/crucible@\d+\.\d+\.\d+\/build\/67\.standalone\.js/);
 });

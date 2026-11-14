@@ -6,7 +6,7 @@ import { readableErrorMessage } from '../scripts/mcp-server.mjs';
 
 function baseRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }, { id: 'block', type: 'mesh', base: { type: 'box', bevel: 0 } }],
     materials: [{ id: 'paint', color: [0.2, 0.4, 0.8] }],
     nodes: [{ id: 'body', geometry: 'cube', material: 'paint' }, { id: 'child', parent: 'body' }],

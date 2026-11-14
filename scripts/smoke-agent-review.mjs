@@ -10,7 +10,7 @@ import { createAgentCharacterFixture } from './agent-character-fixture.mjs';
 import { createTexturedRigFixture } from './agent-asset-fixture.mjs';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-review-proof-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-review-proof-'));
 const assets = join(directory, 'assets');
 await mkdir(assets);
 const fixture = await createAgentCharacterFixture();
@@ -19,12 +19,12 @@ fixture.recipe.assetId = createHash('sha256').update(fixture.bytes).digest('hex'
 const clipFixture = await createTexturedRigFixture();
 await writeFile(join(assets, 'clip-rig.glb'), clipFixture);
 const clipAssetId = createHash('sha256').update(clipFixture).digest('hex');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const transport = new PatientStdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '96', '--assets', assets], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-review-proof', version: '1' });
+const client = new Client({ name: 'crucible-review-proof', version: '1' });
 async function call(name, argumentsValue) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 60000 });
   assert.equal(result.isError, undefined, result.content?.find(item => item.type === 'text')?.text);
@@ -105,7 +105,7 @@ try {
   assert.deepEqual(image(await call('scene_look', { sessionId, motionTime: 1.5, width: 384, height: 384 })), preview);
   await call('scene_dispose', { sessionId });
   const imported = (await call('scene_create_asset', { recipe: {
-    format: '67js.asset', schemaVersion: 1, assetId: clipAssetId,
+    format: 'crucible.asset', schemaVersion: 1, assetId: clipAssetId,
     camera: { eye: [1, 3, 7], target: [1, 3, 0], fov: 35, near: 0.1, far: 40 },
   } })).structuredContent;
   const clipSessionId = imported.sessionId;
@@ -133,5 +133,5 @@ try {
   console.log(JSON.stringify(report));
 } finally {
   await client.close();
-  assert.equal(diagnostics.replace('67js preview resources closed.\n', '').trim(), '');
+  assert.equal(diagnostics.replace('Crucible preview resources closed.\n', '').trim(), '');
 }

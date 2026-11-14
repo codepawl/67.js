@@ -14,7 +14,7 @@ function bore(cutter, name = 'bore') {
 }
 
 function recipeWith(geometries) {
-  return { format: '67js.scene', schemaVersion: 1, geometries, materials, nodes: [{ id: 'block', geometry: geometries[0].id, material: 'steel' }] };
+  return { format: 'crucible.scene', schemaVersion: 1, geometries, materials, nodes: [{ id: 'block', geometry: geometries[0].id, material: 'steel' }] };
 }
 
 function meshReport(geometries) {

@@ -1,11 +1,11 @@
 # Vegetation
 
-`67js/addons/vegetation` grows seeded trees, bushes and grass, scatters them on terrain and switches detail by distance.
+`crucible/addons/vegetation` grows seeded trees, bushes and grass, scatters them on terrain and switches detail by distance.
 It is available from version `0.10.0`. Everything returns plain renderer parts: geometry, a matrix and a material.
 
 ```js
-import { Renderer67 } from '67js';
-import { scatterVegetation, selectLevels } from '67js/addons/vegetation';
+import { CrucibleRenderer } from 'crucible';
+import { scatterVegetation, selectLevels } from 'crucible/addons/vegetation';
 
 const forest = scatterVegetation({
   area: { minX: -40, maxX: 40, minZ: -40, maxZ: 40 },
@@ -18,7 +18,7 @@ const forest = scatterVegetation({
   seed: 11,
 });
 const view = selectLevels(forest.instances, camera.eye, { cullDistance: 120 });
-const renderer = new Renderer67(canvas, [terrain, ...view.parts], options);
+const renderer = new CrucibleRenderer(canvas, [terrain, ...view.parts], options);
 ```
 
 ## Trees
@@ -66,10 +66,10 @@ Rings wide enough for 1.5 tiles or more wrap a whole number of tiles, so they ha
 
 ## Scanned leaves
 
-`createTree({ species, leafTextures })` and `scatterVegetation({ leafTextures })` swap the procedural leaf cards for scanned ones. `loadLeafTextures('/textures/leaves')` from `67js/addons/texture-set` returns `{ broadleaf, birch, bush, conifer }`, each `{ color, normal, crown }`, ready to pass straight in:
+`createTree({ species, leafTextures })` and `scatterVegetation({ leafTextures })` swap the procedural leaf cards for scanned ones. `loadLeafTextures('/textures/leaves')` from `crucible/addons/texture-set` returns `{ broadleaf, birch, bush, conifer }`, each `{ color, normal, crown }`, ready to pass straight in:
 
 ```js
-import { loadLeafTextures } from '67js/addons/texture-set';
+import { loadLeafTextures } from 'crucible/addons/texture-set';
 
 const leafTextures = await loadLeafTextures('/textures/leaves');
 const forest = scatterVegetation({ area, leafTextures, barkTextures, seed: 11 });
@@ -118,7 +118,7 @@ When `changed` is true, build a new renderer from the new parts. Grass switches 
 
 ## Recipes and MCP
 
-A recipe node with a `vegetation` field grows and scatters these trees, with wind, seasons and imported trees; see "Vegetation" in [Agent scenes](https://67js.codepawl.com/agent-scene.md). `scatterVegetation` is called with the terrain's own `heightAt`, so the instances match the addon for the same options.
+A recipe node with a `vegetation` field grows and scatters these trees, with wind, seasons and imported trees; see "Vegetation" in [Agent scenes](https://crucible.codepawl.com/agent-scene.md). `scatterVegetation` is called with the terrain's own `heightAt`, so the instances match the addon for the same options.
 `levelForDistance(distance, variant, { distanceScale, cullDistance })` is the stateless form of `selectLevels`: no hysteresis, so the level is a pure function of the distance.
 
 ## Impostors and cross-fade
@@ -126,7 +126,7 @@ A recipe node with a `vegetation` field grows and scatters these trees, with win
 Both are off by default, so a scene keeps its picture and its hysteresis until it asks.
 
 ```js
-import { prepareImpostors, selectLevels } from '67js/addons/vegetation';
+import { prepareImpostors, selectLevels } from 'crucible/addons/vegetation';
 
 prepareImpostors(forest.variants);                 // bake now, so no frame pays for it
 const view = selectLevels(forest.instances, camera.eye, { impostors: { from: 3 }, fade: 0.06, cullDistance: 900 });

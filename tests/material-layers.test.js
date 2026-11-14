@@ -11,7 +11,7 @@ import { dielectricReflectance, materialLayerState, validateMaterialLayers, MATE
 
 function recipeWithMaterial(material) {
   return {
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'finish', ...material }],

@@ -28,7 +28,7 @@ async function startServer(port) {
 async function drawFrames(page) {
   const task = async () => {
     const { box, sphere } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { installRenderPasses } = await import('/src/render-passes.js');
     const { readFloatPixels } = await import('/src/float-output.js');
     const canvas = document.createElement('canvas');
@@ -47,7 +47,7 @@ async function drawFrames(page) {
       { name: 'shiny', geometry: uvSphere, matrix: scaled(0.8, 0.8, 0.8, -1.5, 1, 0), material: { id: 'shiny-mat', tag: 'surface', color: [0.9, 0.2, 0.2], metallic: 0.8, roughness: 0.25, emission: 0, aov: [0.8, 0.25, 0.5] } },
       { name: 'rough', geometry: uvSphere, matrix: scaled(0.8, 0.8, 0.8, 1.5, 1, 0), material: { id: 'rough-mat', tag: 'surface', color: [0.2, 0.5, 0.9], metallic: 0, roughness: 0.6, emission: 0.15, aov: [0.2, 0.9, 0.4] } },
     ];
-    const renderer = installRenderPasses(new Renderer67(canvas, parts, { ground: false, samples: 1, pixelRatio: 1 }));
+    const renderer = installRenderPasses(new CrucibleRenderer(canvas, parts, { ground: false, samples: 1, pixelRatio: 1 }));
     const size = renderer.canvas.width;
     copy.width = size;
     copy.height = size;
@@ -72,7 +72,7 @@ async function drawFrames(page) {
     const manifest = renderer.passSupport.cryptomatteManifest();
 
     // Also test transmission pass on a transmissive glass part:
-    const glassRenderer = installRenderPasses(new Renderer67(canvas, [
+    const glassRenderer = installRenderPasses(new CrucibleRenderer(canvas, [
       ...parts,
       { name: 'glass', geometry, matrix: scaled(1.4, 1.4, 1.4, 0, 1.2, 2.0), material: { id: 'glass-mat', tag: 'surface', color: [0.8, 0.95, 1.0], metallic: 0, roughness: 0.1, emission: 0, transmission: 0.85 } },
     ], { ground: false, samples: 1, pixelRatio: 1 }));

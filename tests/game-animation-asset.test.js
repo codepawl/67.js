@@ -63,7 +63,7 @@ function heroAnimation(overrides = {}) {
 
 function heroScene(assets) {
   return createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [], materials: [],
     nodes: [{ id: 'Hero', asset: { id: HERO_ID } }],
   }, {}, { assets });
@@ -158,7 +158,7 @@ test('the web export carries the placed assets and the page loads them by URL', 
   const recipe = setGame(heroScene(await loadAssets()), { player: { node: 'Hero', walkSpeed: WALK_SPEED, runSpeed: RUN_SPEED, animation: heroAnimation() } });
   assert.deepEqual(gameAssetIds(recipe).sort(), [HERO_ID, SOURCE_ID].sort());
 
-  const directory = await mkdtemp(join(tmpdir(), '67js-asset-export-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-asset-export-'));
   const buildDirectory = join(directory, 'build');
   await mkdir(buildDirectory);
   await writeFile(join(buildDirectory, 'game.js'), 'export const startGame = () => {};');

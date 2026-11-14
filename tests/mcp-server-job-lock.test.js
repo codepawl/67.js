@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
 
 function waitForProcessExit(processId) {
@@ -53,14 +53,14 @@ async function startAskAndClose(jobsDirectory) {
 }
 
 test('the MCP server gives back store.lock when the client closes, so the next run starts', { skip: !hasBuild && 'run npm run build:lib first', timeout: 60000 }, async context => {
-  const jobsDirectory = await mkdtemp(join(tmpdir(), '67js-job-lock-'));
+  const jobsDirectory = await mkdtemp(join(tmpdir(), 'crucible-job-lock-'));
   context.after(() => rm(jobsDirectory, { recursive: true, force: true }));
   assert.equal(await startAskAndClose(jobsDirectory), false, 'first run leaves no lock');
   assert.equal(await startAskAndClose(jobsDirectory), false, 'second run starts and leaves no lock');
 });
 
 test('a server killed without cleanup leaves a lock that the next start takes over', { skip: !hasBuild && 'run npm run build:lib first', timeout: 60000 }, async context => {
-  const jobsDirectory = await mkdtemp(join(tmpdir(), '67js-job-lock-'));
+  const jobsDirectory = await mkdtemp(join(tmpdir(), 'crucible-job-lock-'));
   context.after(() => rm(jobsDirectory, { recursive: true, force: true }));
   const { serverProcessId } = await startAndTakeLock(jobsDirectory);
   process.kill(serverProcessId, 'SIGKILL');
@@ -70,7 +70,7 @@ test('a server killed without cleanup leaves a lock that the next start takes ov
 });
 
 test('a process that exits without closing the job controller still removes its lock',{ timeout: 30000 }, async context => {
-  const jobsDirectory = await mkdtemp(join(tmpdir(), '67js-job-lock-'));
+  const jobsDirectory = await mkdtemp(join(tmpdir(), 'crucible-job-lock-'));
   context.after(() => rm(jobsDirectory, { recursive: true, force: true }));
   const controllerUrl = new URL('../scripts/agent-render-jobs.mjs', import.meta.url).href;
   const source = `import { createAgentRenderJobs } from ${JSON.stringify(controllerUrl)};
@@ -82,7 +82,7 @@ test('a process that exits without closing the job controller still removes its 
 });
 
 test('the MCP server refuses an unusable --jobs path at startup, naming the flag', { skip: !hasBuild && 'run npm run build:lib first', timeout: 60000 }, async context => {
-  const directory = await mkdtemp(join(tmpdir(), '67js-jobs-file-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-jobs-file-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = join(directory, 'not-a-directory');
   await writeFile(filePath, 'x');

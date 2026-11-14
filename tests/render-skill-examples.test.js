@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
-// The render-67js-media skill teaches agents scene_render_submit by example. Every json block in its jobs reference must be
+// The render-crucible-media skill teaches agents scene_render_submit by example. Every json block in its jobs reference must be
 // valid JSON whose settings use only fields the tool schema declares, and a kind, width and height the schema requires.
 const serverSource = await readFile(new URL('../scripts/mcp-server.mjs', import.meta.url), 'utf8');
 const schemaStart = serverSource.indexOf('const renderSettings = z.strictObject({');
 const schemaEnd = serverSource.indexOf('}).describe(', schemaStart);
 const declaredFields = new Set([...serverSource.slice(schemaStart, schemaEnd).matchAll(/^  (\w+): z\./gm)].map(match => match[1]));
-const referenceUrl = new URL('../skills/render-67js-media/references/jobs.md', import.meta.url);
+const referenceUrl = new URL('../skills/render-crucible-media/references/jobs.md', import.meta.url);
 const reference = await readFile(referenceUrl, 'utf8');
 const submissions = [...reference.matchAll(/```json\r?\n([\s\S]*?)```/g)].map(match => JSON.parse(match[1]));
 

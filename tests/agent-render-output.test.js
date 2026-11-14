@@ -12,7 +12,7 @@ const limits = { maxOutputBytes: 1024 ** 2, maxFrameBytes: 128, maxStoreBytes: 8
 const submission = settings => ({ sourceRevision: 1, snapshot: { recipe: { format: 'fixture' } }, settings });
 
 async function withController(context, run) {
-  const root = await mkdtemp(join(tmpdir(), '67js-render-output-'));
+  const root = await mkdtemp(join(tmpdir(), 'crucible-render-output-'));
   const controller = await createAgentRenderJobs({ root, limits, run });
   context.after(async () => {
     await controller.close();
@@ -118,7 +118,7 @@ test('a video may run at 60 fps and no faster', async context => {
 });
 
 test('options survive a restart of the job store', async context => {
-  const root = await mkdtemp(join(tmpdir(), '67js-render-output-'));
+  const root = await mkdtemp(join(tmpdir(), 'crucible-render-output-'));
   const first = await createAgentRenderJobs({ root, limits, run: recordingRunner([]) });
   const settings = { kind: 'image', width: 64, height: 64, format: 'exr', transparent: true, region: { x: 0, y: 0, width: 32, height: 32 } };
   const { jobId } = await first.submit(submission(settings));

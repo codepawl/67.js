@@ -1,9 +1,9 @@
 {
   "name": "hdri-look-and-fog",
   "skills": [
-    "build-67js-scene"
+    "build-crucible-scene"
   ],
-  "prompt": "Using the 67js MCP tools and the build-67js-scene skill: make a small outdoor-style scene (a ground slab and a sphere). Use the shipped HDRI sky-clouds as the visible sky, the shipped teal-orange color look, and volume fog with 3 scatter octaves. Look at it, then finish by calling scene_export_recipe.",
+  "prompt": "Using the Crucible MCP tools and the build-crucible-scene skill: make a small outdoor-style scene (a ground slab and a sphere). Use the shipped HDRI sky-clouds as the visible sky, the shipped teal-orange color look, and volume fog with 3 scatter octaves. Look at it, then finish by calling scene_export_recipe.",
   "expected": "The agent ends with a recipe that has hdri sky-clouds, look teal-orange, volumeFog.scatterOctaves 3 with density above 0, and a scene_look after the last edit.",
   "checks": [
     {

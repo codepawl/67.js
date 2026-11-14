@@ -76,7 +76,7 @@ function shape(index) {
 
 function recipeOf(geometries, nodes) {
   return {
-    format: '67js.scene', schemaVersion: 1, geometries, materials: IDENTITY_MATERIALS, nodes,
+    format: 'crucible.scene', schemaVersion: 1, geometries, materials: IDENTITY_MATERIALS, nodes,
     camera: { eye: [0, 0, 14], target: [0, 0, -2], fov: 50, near: 0.1, far: 60 },
   };
 }

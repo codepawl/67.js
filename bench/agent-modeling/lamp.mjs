@@ -15,7 +15,7 @@ function lampRecipe(shadeWidth) {
     { id: 'shade', geometry: 'block', scale: [shadeWidth, SHADE_HEIGHT, shadeWidth], translation: [0, SHADE_BOTTOM_Y + SHADE_HEIGHT / 2, 0] },
   ];
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.8, 0.75, 0.6] }],
     nodes: parts.map(part => ({ material: 'paint', ...part })),

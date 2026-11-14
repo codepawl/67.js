@@ -11,7 +11,7 @@ Transforms must be finite and invertible. Use one geometry object for repeated p
 Drag the picture to orbit. The slider turns one part: the code changes its matrix in place and calls `updateParts`, which uploads the new matrix without building anything again.
 
 ```js live poster=parts-shared-geometry
-import { Renderer67, box } from '67js';
+import { CrucibleRenderer, box } from 'crucible';
 
 // A column-major matrix: turn about Y by `angle`, scale by `size`, move to (x, y, z).
 function placeAt(x, y, z, size, angle = 0) {
@@ -53,7 +53,7 @@ for (let row = 0; row < 3; row++) {
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts, { samples: 4, pixelRatio: 1.25 });
+const renderer = new CrucibleRenderer(canvas, parts, { samples: 4, pixelRatio: 1.25 });
 const orbit = { yaw: 0.6, pitch: 0.5, distance: 7 };
 
 function draw() {
@@ -98,7 +98,7 @@ The log shows the effect of sharing: nine parts and one batch. If each part had 
 `box(fillet, samples)`, `cylinder(segments)`, `sphere(segments, rings)` and `torus(tubeRadius, segments, sides)` are the core primitives. Every call returns `{ positions, normals, indices, uvs }` at unit size, and the part matrix sets the size. The slider below rebuilds the scene with more or fewer segments, so you can see what the numbers buy.
 
 ```js live poster=parts-primitive-detail
-import { Renderer67, box, cylinder, sphere, torus } from '67js';
+import { CrucibleRenderer, box, cylinder, sphere, torus } from 'crucible';
 
 function placeAt(x, y, z, size) {
   return new Float32Array([size, 0, 0, 0, 0, size, 0, 0, 0, 0, size, 0, x, y, z, 1]);
@@ -123,7 +123,7 @@ function build(segments) {
     material: { color: [0.3 + index * 0.15, 0.5, 0.75 - index * 0.15], metallic: 0.1, roughness: 0.4 },
   }));
   renderer?.dispose();
-  renderer = new Renderer67(canvas, parts, { samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, parts, { samples: 4, pixelRatio: 1.25 });
   renderer.resize();
   draw();
   const counts = shapes.map(([name, geometry]) => `${name} ${geometry.indices.length / 3}`);
@@ -168,14 +168,14 @@ At 12 segments the sphere is visibly faceted, and at 48 it looks round. The cost
 | `cylinder(segments = 80, bevel = 0.025, bevelSegments = 6)` | Y-axis cylinder with radius 1 and height 1. | Segments from 3 to 2048. Bevel from 0 to 0.5. Bevel segments from 1 to 128. |
 | `torus(tubeRadius = 0.08, segments = 96, sides = 24, arc = 2π, start = 0)` | XY torus with major radius 1. Partial arcs have end caps. | Positive tube radius. Segments from 3 to 2048. Sides from 3 to 128. Arc within (0, 2π]. Start uses radians. |
 
-Counts must be integers and numbers must stay finite in Float32. The [primitive contract](https://github.com/codepawl/67.js/blob/main/docs/primitives.md) covers closed seams and the geometry limits. Primitives do not perform Boolean operations, sculpting or collision resolution.
+Counts must be integers and numbers must stay finite in Float32. The [primitive contract](https://github.com/codepawl/crucible/blob/main/docs/primitives.md) covers closed seams and the geometry limits. Primitives do not perform Boolean operations, sculpting or collision resolution.
 
 ## Constructor options that matter for parts
 
 Supply a real HTML canvas with nonzero CSS width and height.
 
 ```js
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new CrucibleRenderer(canvas, parts, {
   ground: false, hdr: true, samples: 4, pixelRatio: 1.25, memoryBudgetMiB: 256,
 });
 renderer.render({ eye: [3, 2, 4], target: [0, 0, 0] });

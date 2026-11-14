@@ -26,5 +26,5 @@ message first: each one names the cause and the next step.
 2. Preview edits work again once the job is terminal.
 3. Fix one setting, resubmit a small version (a still or 2 seconds) and check it before the full job.
 4. `scene_render_release` every job you are done with, failed ones too, so the store stays small.
-5. If a valid job fails with a graphics error or a crash, stop retrying. File an issue at `codepawl/67.js` with the
+5. If a valid job fails with a graphics error or a crash, stop retrying. File an issue at `codepawl/crucible` with the
    settings, the recipe from `scene_export_recipe` and the `scene_render_result` or status message. No local paths.

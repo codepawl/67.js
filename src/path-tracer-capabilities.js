@@ -11,7 +11,7 @@ export const PATH_TRACER_JOB_LIMITS = Object.freeze({
 });
 
 // "wavelet" is the built-in filter (true), "none" is no filter (false), and "oidn" is Intel Open Image Denoise from the optional
-// package @codepawlhq/67js-denoise-oidn. A job that asks for "oidn" and leaves samples out gets OIDN_DEFAULT_SAMPLES.
+// package @codepawlhq/crucible-denoise-oidn. A job that asks for "oidn" and leaves samples out gets OIDN_DEFAULT_SAMPLES.
 export const PATH_TRACER_DENOISERS = Object.freeze(['wavelet', 'oidn', 'none']);
 export const OIDN_DEFAULT_SAMPLES = 16;
 

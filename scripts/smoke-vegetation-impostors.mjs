@@ -39,7 +39,7 @@ try {
   // Vite reloads the page once when it first optimises a dependency, which destroys a running evaluate.
   const result = await evaluateWithRetry(page, async () => {
     const { scatterVegetation, selectLevels, prepareImpostors } = await import('/src/vegetation.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const forest = scatterVegetation({ area: { minX: -260, maxX: 260, minZ: -260, maxZ: 260 }, density: 0.0016, mix: { broadleaf: 3, birch: 1.5, conifer: 2 }, seed: 5 });
     const bake = prepareImpostors(forest.variants);
     const frame = { eye: [0, 3.5, 250], target: [0, 8, 0], up: [0, 1, 0], fov: 38, near: 0.5, far: 1500, time: 1, wind: 0.3 };
@@ -52,7 +52,7 @@ try {
     copy.height = 540;
     const copyContext = copy.getContext('2d', { willReadFrequently: true });
     const draw = (view) => {
-      const renderer = new Renderer67(canvas, view.parts, { ground: true, world: true, samples: 1, pixelRatio: 1 });
+      const renderer = new CrucibleRenderer(canvas, view.parts, { ground: true, world: true, samples: 1, pixelRatio: 1 });
       renderer.render(frame);
       copyContext.drawImage(canvas, 0, 0);
       const pixels = copyContext.getImageData(0, 0, 960, 540).data;

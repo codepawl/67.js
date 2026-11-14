@@ -132,7 +132,7 @@ test('the documented example passes the validator and builds a scene', async () 
   assert.equal(pass.scale, 0.25);
   const glsl = documentation.match(/```glsl\n([\s\S]*?)\n```/)[1];
   assert.equal(glsl, postPasses[0].fragment);
-  const recipe = { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], postPasses };
+  const recipe = { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], postPasses };
   await loadAgentSceneModules(recipe);
   const scene = createAgentScene(recipe);
   assert.equal(scene.postPasses[0].name, 'pixel-dither');

@@ -22,7 +22,7 @@ const SECRET_PATTERNS = [
 ];
 
 // Links the note may keep: this repository on GitHub and the project site. Everything else becomes inert text.
-const ALLOWED_URL = /^https:\/\/(github\.com\/codepawl\/67\.js|67js\.codepawl\.com)([/?#][^\s)]*)?$/i;
+const ALLOWED_URL = /^https:\/\/(github\.com\/codepawl\/crucible|crucible\.codepawl\.com)([/?#][^\s)]*)?$/i;
 const MAX_CLEAN_PASSES = 6;
 
 // The note must never read as an approval, so text that uses one of these words or phrases is not posted at all.

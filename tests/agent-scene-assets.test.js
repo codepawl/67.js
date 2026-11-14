@@ -27,7 +27,7 @@ async function loadedAssets(copies = 1) {
 
 function recipe(nodes) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'ground', type: 'box' }],
     materials: [{ id: 'grass', color: [0.2, 0.5, 0.2] }],
     nodes: [{ id: 'floor', geometry: 'ground', material: 'grass', scale: [20, 0.1, 20] }, ...nodes],

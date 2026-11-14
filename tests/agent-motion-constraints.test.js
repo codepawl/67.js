@@ -11,7 +11,7 @@ const DEGREES = Math.PI / 180;
 
 function nodeRecipe(nodes, motion, materials = []) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }, ...materials],
     nodes: nodes.map(node => ({ geometry: 'box', material: 'paint', ...node })),

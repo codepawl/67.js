@@ -1,11 +1,11 @@
 # Vehicle kit
 
-`67js/addons/vehicle` is available from version `0.10.0`.
+`crucible/addons/vehicle` is available from version `0.10.0`.
 It animates a wheeled vehicle along a path without physics.
 Sampling the same time always returns the same pose, so frames can be rendered in any order.
 
 ```js
-import { createVehicleRig, driveAlongPath, applyVehiclePoseToParts } from '67js/addons/vehicle';
+import { createVehicleRig, driveAlongPath, applyVehiclePoseToParts } from 'crucible/addons/vehicle';
 
 const rig = createVehicleRig({ parts: vehicleParts });          // wheels found by name and geometry
 const drive = driveAlongPath(rig, [[0, 0, -20], [5, 0, 0], [0, 0, 20]], {

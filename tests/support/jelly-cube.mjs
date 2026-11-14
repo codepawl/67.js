@@ -11,7 +11,7 @@ const LIFT_OFF_HEIGHT = 0.02;
 /** The recipe for one jelly cube; `softBody` and `sheet` override the film's softBody fields and sheet fields. */
 export function jellyCubeRecipe({ softBody = {}, sheet = {}, x = 0, duration = 2, bevel = 0.12, subdivisions = 3 } = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'jelly', type: 'box', bevel, subdivisions }, { id: 'floor', type: 'box', bevel: 0 }],
     materials: [{ id: 'gel', color: [0.25, 0.85, 0.45] }, { id: 'stone', color: [0.55, 0.55, 0.58] }],
     nodes: [

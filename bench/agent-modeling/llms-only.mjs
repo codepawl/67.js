@@ -22,7 +22,7 @@ const TASK_ID = 'llms-only-png';
 const BUILT_IN_TOOLS_DENIED = ['WebFetch', 'WebSearch', 'Agent', 'Task', 'NotebookEdit'];
 const PROMPT = `Write a Node.js script named render.mjs in the current folder that renders a 3D scene to a PNG file named scene.png, 512 by 512 pixels, and run it.
 The scene: a red sphere resting on a grey ground plane, seen from a three-quarter view above.
-The 67js package is installed in node_modules. This folder also holds llms.txt, the map of its documentation. You have no internet access and no MCP tools, so use only llms.txt and the files in node_modules.
+The Crucible package is installed in node_modules. This folder also holds llms.txt, the map of its documentation. You have no internet access and no MCP tools, so use only llms.txt and the files in node_modules.
 Google Chrome is installed. When scene.png exists, reply with one line saying so.
 ${SHELL_ARM_PROCESS_RULE}`;
 
@@ -174,7 +174,7 @@ async function removeFolder(folder) {
 }
 
 async function runAttempt(archivePath, attempt) {
-  const workingDirectory = await mkdtemp(join(tmpdir(), '67js-llms-only-'));
+  const workingDirectory = await mkdtemp(join(tmpdir(), 'crucible-llms-only-'));
   try {
     await writeFile(join(workingDirectory, 'package.json'), JSON.stringify({ name: 'llms-only-task', private: true, type: 'module' }));
     execFileSync(npmExecutable, ['install', archivePath, '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: workingDirectory, stdio: 'ignore', shell: process.platform === 'win32' });
@@ -214,7 +214,7 @@ async function runAttempt(archivePath, attempt) {
 
 await mkdir(rawDirectory, { recursive: true });
 await mkdir(resultsDirectory, { recursive: true });
-const archiveFolder = await mkdtemp(join(tmpdir(), '67js-llms-only-pack-'));
+const archiveFolder = await mkdtemp(join(tmpdir(), 'crucible-llms-only-pack-'));
 const records = [];
 try {
   const archivePath = packArchive(archiveFolder);

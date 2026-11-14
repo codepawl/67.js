@@ -3,7 +3,7 @@
 
 export const MAX_MESH_EXPORT_TRIANGLES = 1_000_000;
 const MAX_NAME_LENGTH = 64;
-const STL_HEADER_TEXT = '67js binary STL';
+const STL_HEADER_TEXT = 'Crucible binary STL';
 const ALPHA_MODES = ['opaque', 'mask', 'blend', 'add'];
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -185,7 +185,7 @@ export function exportObj(parts, options = {}) {
   }
   const materialNames = new Map();
   const materialBlocks = [];
-  const lines = [`67js OBJ export`, `mtllib ${mtlFilename}`];
+  const lines = [`Crucible OBJ export`, `mtllib ${mtlFilename}`];
   let vertexBase = 1;
   let uvBase = 1;
   let normalBase = 1;
@@ -229,7 +229,7 @@ export function exportObj(parts, options = {}) {
     if (uvs) uvBase += vertexCount;
     if (normals) normalBase += vertexCount;
   });
-  return { obj: `${lines.join('\n')}\n`, mtl: `# 67js MTL export\n${materialBlocks.join('\n\n')}\n` };
+  return { obj: `${lines.join('\n')}\n`, mtl: `# Crucible MTL export\n${materialBlocks.join('\n\n')}\n` };
 }
 
 // Normals use the inverse transpose of the upper 3x3 so non-uniform scale keeps them perpendicular to the surface.

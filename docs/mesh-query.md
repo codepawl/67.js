@@ -5,7 +5,7 @@ These CPU queries accept static geometry and explicit affine matrices.
 They do not measure penetration depth, correct collisions, or diagnose depth-buffer artifacts.
 
 ```js
-import { createMeshQueryIndex, createMeshPairQuery } from '67js/addons/mesh-query';
+import { createMeshQueryIndex, createMeshPairQuery } from 'crucible/addons/mesh-query';
 
 const outer = createMeshQueryIndex(outerGeometry, { solid: true });
 const inner = createMeshQueryIndex(innerGeometry, { solid: true });

@@ -3,8 +3,8 @@
 Available from version `0.4.0`. The optional addon does not add Three.js to the core renderer.
 
 ```js
-import { sphere } from '@codepawlhq/67js';
-import { sculptGeometry } from '@codepawlhq/67js/addons/sculpt';
+import { sphere } from '@codepawlhq/crucible';
+import { sculptGeometry } from '@codepawlhq/crucible/addons/sculpt';
 
 const geometry = sculptGeometry(sphere(64, 40), [
   { type: 'inflate', center: [0, 0.7, 0.7], radius: 0.6, strength: 0.12 },
@@ -13,7 +13,7 @@ const geometry = sculptGeometry(sphere(64, 40), [
 ]);
 ```
 
-Assign the result to a part before creating `Renderer67`. It copies positions, normals, triangle indices, UVs and RGB colors. The source remains unchanged. Replaying the same strokes produces the same geometry. Each stroke reads positions produced by previous strokes.
+Assign the result to a part before creating `CrucibleRenderer`. It copies positions, normals, triangle indices, UVs and RGB colors. The source remains unchanged. Replaying the same strokes produces the same geometry. Each stroke reads positions produced by previous strokes.
 
 ## Brushes and units
 

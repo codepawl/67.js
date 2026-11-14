@@ -1,4 +1,4 @@
-"""Render an exported 67js scene JSON in Blender 5.3 EEVEE and time its frames.
+"""Render an exported Crucible scene JSON in Blender 5.3 EEVEE and time its frames.
 
   blender -b --factory-startup --python bench/tiers/render-eevee.py -- <sceneJsonPath> <outputPrefix> [--preset default|lowest] [--width 960] [--height 540] [--frames 10]
 

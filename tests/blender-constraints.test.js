@@ -6,7 +6,7 @@ import { createAgentScene } from '../src/agent-scene.js';
 import { quaternionFromEuler } from '../src/rotation-euler.js';
 
 // tests/fixtures/blender/constraints.json holds Blender 5.2's evaluated world matrix of the constrained node in each case
-// (scripts/blender-constraints-golden.py). 67js builds the same nodes, applies the same constraint and must land on the same
+// (scripts/blender-constraints-golden.py). Crucible builds the same nodes, applies the same constraint and must land on the same
 // matrix. Coordinates are shared as they are; track_to is given worldUp [0, 0, 1] because Blender's up is Z.
 
 const golden = JSON.parse(readFileSync(new URL('./fixtures/blender/constraints.json', import.meta.url), 'utf8'));
@@ -29,7 +29,7 @@ function recipeFor(testCase) {
     tracks.push({ kind: 'node', id: testCase.pose.id, property: 'rotation', keyframes: [{ time: 0, value: eulerQuaternion(testCase.pose.rotation) }] });
   }
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }], materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
     nodes, motion: { duration: 1, tracks, constraints: [testCase.constraint] },
   };

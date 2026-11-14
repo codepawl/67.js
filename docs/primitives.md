@@ -3,7 +3,7 @@
 Available from version `0.4.0`.
 
 ```js
-import { box, sphere, cylinder, torus } from '@codepawlhq/67js';
+import { box, sphere, cylinder, torus } from '@codepawlhq/crucible';
 
 const shell = box(0.15, 7);
 const eye = sphere(64, 40);

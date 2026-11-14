@@ -22,7 +22,7 @@ function galleryRecipe(lightPosition) {
     { id: 'pillar', geometry: 'block', scale: [0.4, 2.6, 0.4], translation: [-0.3, 1.3, -0.5] },
   ];
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }],
     materials: [{ id: 'plaster', color: [0.8, 0.78, 0.72] }],
     nodes: parts.map(part => ({ material: 'plaster', ...part })),

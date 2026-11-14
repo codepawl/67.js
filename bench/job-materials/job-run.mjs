@@ -22,13 +22,13 @@ if (!entry || !outputFolder || !samples || scenes.length === 0) {
 }
 
 async function renderScene(sceneName) {
-  const workFolder = mkdtempSync(join(tmpdir(), '67js-job-materials-'));
+  const workFolder = mkdtempSync(join(tmpdir(), 'crucible-job-materials-'));
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [resolve(entry), '--backend', 'gpu', '--memory', '192', '--jobs', join(workFolder, 'jobs'), ...(browser ? ['--browser', browser] : [])],
     cwd: workFolder, env: { ...process.env }, stderr: 'pipe' });
   let diagnostics = '';
   transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
-  const client = new Client({ name: '67js-job-materials', version: '1' });
+  const client = new Client({ name: 'crucible-job-materials', version: '1' });
   await client.connect(transport);
   const call = async (name, argumentsValue) => {
     const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 120000 });

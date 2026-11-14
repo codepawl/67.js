@@ -18,7 +18,7 @@ const npxCli = resolve(dirname(process.execPath), process.platform === 'win32'
 const serverScript = resolve('scripts/mcp-server.mjs');
 const pythonClientScript = resolve('scripts/smoke-mcp-python-client.py');
 // The clients run from an empty folder so they cannot pick up this repo's files.
-const workFolder = mkdtempSync(join(tmpdir(), '67js-mcp-clients-'));
+const workFolder = mkdtempSync(join(tmpdir(), 'crucible-mcp-clients-'));
 const recipePath = join(workFolder, 'recipe.json');
 writeFileSync(recipePath, JSON.stringify(createAgentPreviewFixture()));
 const results = [];

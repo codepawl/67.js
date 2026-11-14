@@ -1,17 +1,17 @@
 # Imported asset authoring
 
-`67js/addons/agent-asset` is an optional addon available since 0.5.0. It wraps one
+`crucible/addons/agent-asset` is an optional addon available since 0.5.0. It wraps one
 decoded `parseGltf()` asset in a JSON authoring session. It preserves renderer
 geometry, texture descriptors, skins, morph targets, and their typed arrays.
 The module performs CPU validation and creates no GPU resources.
 
 ```js
-import { parseGltf } from '67js/addons/gltf';
-import { createAgentAssetScene } from '67js/addons/agent-asset';
+import { parseGltf } from 'crucible/addons/gltf';
+import { createAgentAssetScene } from 'crucible/addons/agent-asset';
 
 const asset = await parseGltf(glbBytes);
 const scene = createAgentAssetScene(asset, {
-  format: '67js.asset',
+  format: 'crucible.asset',
   schemaVersion: 1,
   assetId: sha256Hex,
 });
@@ -26,7 +26,7 @@ scene.releaseCheckpoint(checkpoint);
 
 ## Recipe and IDs
 
-The recipe requires `format: '67js.asset'`, `schemaVersion: 1`, and a 64-character
+The recipe requires `format: 'crucible.asset'`, `schemaVersion: 1`, and a 64-character
 SHA256 hexadecimal `assetId`. The caller binds that digest to the decoded bytes.
 This helper validates its spelling and retains it in lowercase. It does not
 hash or fetch assets. Ordinary finite JSON is required: unknown keys, accessors,

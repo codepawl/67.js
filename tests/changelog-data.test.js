@@ -67,11 +67,11 @@ test('the site changelog gets an Unreleased section above the released ones', as
 });
 
 test('release notes are one version section with its breaking marker and the install line', () => {
-  const notes = releaseNotes(changelog, '0.15.0', '@codepawlhq/67js');
+  const notes = releaseNotes(changelog, '0.15.0', '@codepawlhq/crucible');
   assert.match(notes, /^- Add a thing \(issue #10\)\./);
   assert.match(notes, /Breaking: a renderer no longer draws X/);
   assert.doesNotMatch(notes, /0\.14\.0|playback/);
-  assert.match(notes, /npm install @codepawlhq\/67js@0\.15\.0`\n$/);
+  assert.match(notes, /npm install @codepawlhq\/crucible@0\.15\.0`\n$/);
   assert.equal(extractVersionSection(changelog, '0.14.0'), '- Fix a seek that works without breaking playback (part of #9).');
 });
 
@@ -98,5 +98,5 @@ test('a ### heading groups the entries below it, and the Breaking changes group 
 });
 
 test('release notes fail clearly when the version is not in the changelog', () => {
-  assert.throws(() => releaseNotes(changelog, '9.9.9', '@codepawlhq/67js'), /CHANGELOG\.md has no section for 9\.9\.9\./);
+  assert.throws(() => releaseNotes(changelog, '9.9.9', '@codepawlhq/crucible'), /CHANGELOG\.md has no section for 9\.9\.9\./);
 });

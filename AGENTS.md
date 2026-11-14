@@ -1,20 +1,20 @@
-# 67js for coding agents
+# Crucible for coding agents
 
 Read this before you change code in this repository. [CONTRIBUTING.md](CONTRIBUTING.md) has the full rules; this file is the short path.
-To build scenes with 67js rather than change it, use the MCP server and the skills in `skills/` instead ([README](README.md#for-agents)).
+To build scenes with Crucible rather than change it, use the MCP server and the skills in `skills/` instead ([README](README.md#for-agents)).
 
 ## Stance
 
-67js makes 3D easy to understand and easy to do. The agent carries the heavy steps, and the person keeps the creative choices and stays active ([docs/goal.md](docs/goal.md#stance)). So:
+Crucible makes 3D easy to understand and easy to do. The agent carries the heavy steps, and the person keeps the creative choices and stays active ([docs/goal.md](docs/goal.md#stance)). So:
 
-- A change that people can see ships with a still or a clip rendered by 67js. Put it in the pull request and in its change note.
+- A change that people can see ships with a still or a clip rendered by Crucible. Put it in the pull request and in its change note.
 - Docs and copy show the result first and explain in plain words before code.
 - Agent-facing features return previews and choices, and ask on matters of taste instead of deciding them.
 
 ## Layout
 
 - `src/` is the library, one flat folder. `src/agent-*.js` and `src/mcp*` are the MCP tool surface.
-- `bin/67js-mcp.mjs` starts the MCP server. `packages/` holds the addon packages.
+- `bin/crucible-mcp.mjs` starts the MCP server. `packages/` holds the addon packages.
 - `tests/` holds the Node tests, one `*.test.js` per area. `scripts/` holds the build, smoke and gate scripts.
 - `docs/` holds one guide per feature. `skills/` holds the agent skills that ship with the package.
 - `changes/` holds one changelog note per pull request. `artifacts/` is ignored output for screenshots and logs.

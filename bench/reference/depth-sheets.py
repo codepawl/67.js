@@ -1,4 +1,4 @@
-# Blind comparison sheets for issue #197: the Cycles image on top, two 67js images below it in random order, labelled only 1 and 2.
+# Blind comparison sheets for issue #197: the Cycles image on top, two Crucible images below it in random order, labelled only 1 and 2.
 #   uv run --no-project --python 3.12 --with numpy --with pillow python -I bench/reference/depth-sheets.py <cycles directory> <before directory> <after directory> <output directory> <scene id>,<scene id>
 # <cycles directory> holds <id>-cycles.npy, the other two hold <id>-gpu.png. The file key.txt in the output directory says which image is which.
 import random
@@ -14,7 +14,7 @@ HEIGHT = 540
 LABEL_HEIGHT = 30
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
     return mapped ** (1 / GAMMA)
@@ -34,7 +34,7 @@ def main():
     generator = random.Random()
     key_lines = []
     for scene_id in scene_ids:
-        cycles = Image.fromarray((tone_map_like_67js(np.load(cycles_directory / f"{scene_id}-cycles.npy")) * 255).astype(np.uint8)).resize((WIDTH, HEIGHT), Image.LANCZOS)
+        cycles = Image.fromarray((tone_map_like_crucible(np.load(cycles_directory / f"{scene_id}-cycles.npy")) * 255).astype(np.uint8)).resize((WIDTH, HEIGHT), Image.LANCZOS)
         before = Image.open(before_directory / f"{scene_id}-gpu.png").convert("RGB")
         after = Image.open(after_directory / f"{scene_id}-gpu.png").convert("RGB")
         pair = [("before", before), ("after", after)]

@@ -1,4 +1,4 @@
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import { createAgentScene, loadAgentSceneModules } from './agent-scene.js';
 import { agentGroundPlacement, createAgentGround, FLOOR_COLOR } from './agent-ground.js';
 import { agentEnvironmentMap } from './agent-look.js';
@@ -145,7 +145,7 @@ function runCleanups(cleanups) {
   while (cleanups.length > 0) cleanups.pop()();
 }
 
-async function buildGame(canvas, recipe, { replay, showStatus = true, assets: providedAssets, assetUrls, physicsUrl, createRenderer = (...rendererArguments) => new Renderer67(...rendererArguments) }, cleanups) {
+async function buildGame(canvas, recipe, { replay, showStatus = true, assets: providedAssets, assetUrls, physicsUrl, createRenderer = (...rendererArguments) => new CrucibleRenderer(...rendererArguments) }, cleanups) {
   const setup = recipe.game;
   if (!setup) throw new Error('startGame needs a recipe with a game section. Add one with the set-game operation.');
   // Live physics replaces the recorded bake of the same section, so the scene is built without it.

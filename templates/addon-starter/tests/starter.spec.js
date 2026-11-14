@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createController, listControllerKinds } from '@codepawlhq/67js/addons/player';
+import { createController, listControllerKinds } from '@codepawlhq/crucible/addons/player';
 import { registerHoverController } from '../src/index.js';
 
 test('the hover kind is registered and holds its height while moving', () => {

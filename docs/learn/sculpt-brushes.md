@@ -1,6 +1,6 @@
 # Sculpt brushes
 
-Version `0.4.0` provides `sculptGeometry` through `67js/addons/sculpt`. It applies `inflate`, directional `displace` and `smooth` strokes to a copy of static indexed geometry. Stroke centers, radii and strengths use geometry-local units. The result preserves topology, UVs and colors, and rebuilds normals. The source geometry stays unchanged, and replaying the same strokes gives the same geometry.
+Version `0.4.0` provides `sculptGeometry` through `crucible/addons/sculpt`. It applies `inflate`, directional `displace` and `smooth` strokes to a copy of static indexed geometry. Stroke centers, radii and strengths use geometry-local units. The result preserves topology, UVs and colors, and rebuilds normals. The source geometry stays unchanged, and replaying the same strokes gives the same geometry.
 
 The workflow has four steps:
 
@@ -14,8 +14,8 @@ The workflow has four steps:
 The scene below sculpts a unit sphere with one stroke centered on the front. Choose the brush, and change its strength and radius. Each change builds the geometry again, and the log reports the vertex count, the time and how far the farthest vertex moved. Drag the picture to turn the sphere and look at the bump from the side.
 
 ```js live poster=sculpt-one-brush
-import { Renderer67, sphere } from '67js';
-import { sculptGeometry } from '67js/addons/sculpt';
+import { CrucibleRenderer, sphere } from 'crucible';
+import { sculptGeometry } from 'crucible/addons/sculpt';
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
@@ -56,7 +56,7 @@ function build() {
     material: { color: [0.8, 0.55, 0.4], metallic: 0, roughness: 0.55 },
   };
   renderer?.dispose();
-  renderer = new Renderer67(canvas, [part], { ground: false, samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, [part], { ground: false, samples: 4, pixelRatio: 1.25 });
   renderer.resize();
   draw();
   console.log(`${brush.type}, strength ${brush.strength}, radius ${brush.radius}: ${geometry.positions.length / 3} vertices, ${milliseconds.toFixed(1)} ms, farthest move ${farthestMove(geometry).toFixed(3)}`);
@@ -120,8 +120,8 @@ The brush falls off smoothly. For a normalized distance `t = distance / radius`,
 Each stroke reads the positions that the previous strokes produced. This example raises a bump, then applies a `smooth` stroke over it. The slider sets the smooth strength, from 0 to 1. The log shows that smoothing also pulls the whole patch inward, because Laplacian smoothing does not preserve volume.
 
 ```js live poster=sculpt-smooth-shrink
-import { Renderer67, sphere } from '67js';
-import { sculptGeometry } from '67js/addons/sculpt';
+import { CrucibleRenderer, sphere } from 'crucible';
+import { sculptGeometry } from 'crucible/addons/sculpt';
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
@@ -153,7 +153,7 @@ function build(smoothStrength) {
     material: { color: [0.8, 0.55, 0.4], metallic: 0, roughness: 0.55 },
   };
   renderer?.dispose();
-  renderer = new Renderer67(canvas, [part], { ground: false, samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, [part], { ground: false, samples: 4, pixelRatio: 1.25 });
   renderer.resize();
   draw();
   console.log(`smooth strength ${smoothStrength.toFixed(2)}: mean radius ${meanRadius(beforeSmoothing).toFixed(4)} before the smooth stroke, ${meanRadius(geometry).toFixed(4)} after`);
@@ -215,11 +215,11 @@ Normals are rebuilt from area-weighted triangle cross products. UV coordinates, 
 
 `maxVertexVisits` bounds the vertex count multiplied by the stroke count. Each limit is checked before the geometry is copied. These limits bound inputs and work, not total browser memory. An empty or zero-strength stroke list returns an independent copy.
 
-The [sculpt contract](https://github.com/codepawl/67.js/blob/main/docs/sculpt.md) defines brush strength, seam handling and work limits.
+The [sculpt contract](https://github.com/codepawl/crucible/blob/main/docs/sculpt.md) defines brush strength, seam handling and work limits.
 
 ## Common mistakes
 
-- **Sculpting every frame.** Renderer geometry buffers are static, so rebuilding the mesh each frame costs CPU time and new GPU uploads. Build once, or turn compatible deformations into [relative morph targets](https://github.com/codepawl/67.js/blob/main/docs/morph-targets.md) and animate their weights.
+- **Sculpting every frame.** Renderer geometry buffers are static, so rebuilding the mesh each frame costs CPU time and new GPU uploads. Build once, or turn compatible deformations into [relative morph targets](https://github.com/codepawl/crucible/blob/main/docs/morph-targets.md) and animate their weights.
 - **A negative or large `smooth` strength.** The blend must be within 0 and 1, otherwise the call throws.
 - **A stroke too strong for the mesh.** Strong strokes can fold or intersect surfaces, and sculpting does not detect that. A triangle that collapses throws `Sculpt stroke collapsed a triangle at Float32 precision. Reduce strength.`
 - **Expecting a volume-preserving smooth.** Smoothing can shrink volume and soften boundaries, as the second example shows.

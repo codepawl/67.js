@@ -143,14 +143,14 @@ test('preloadTextures uploads a large texture in bands and createTexture then re
   await withDevServerPage(testContext, async (page) => {
     const result = await page.evaluate(async () => {
       const { box } = await import('/src/geometry.js');
-      const { Renderer67 } = await import('/src/renderer.js');
+      const { CrucibleRenderer } = await import('/src/renderer.js');
       const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
       const material = { tag: 'surface', color: [0.5, 0.5, 0.5], metallic: 0, roughness: 0.5, emission: 0 };
       const canvas = document.createElement('canvas');
       canvas.width = 32;
       canvas.height = 32;
       document.body.append(canvas);
-      const renderer = new Renderer67(canvas, [{ name: 'box', geometry: box(0, 1), matrix: identity, material }], { samples: 1, pixelRatio: 1 });
+      const renderer = new CrucibleRenderer(canvas, [{ name: 'box', geometry: box(0, 1), matrix: identity, material }], { samples: 1, pixelRatio: 1 });
       const imageOf = size => Object.assign(document.createElement('canvas'), { width: size, height: size });
       const large = { image: imageOf(256) };
       const small = { image: imageOf(8) };

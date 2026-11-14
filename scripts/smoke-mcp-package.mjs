@@ -15,7 +15,7 @@ setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const metadata = JSON.parse(await readFile('package.json', 'utf8'));
 const published = process.argv.includes('--published');
 const protocolOnly = process.argv.includes('--protocol-only');
-const consumer = await mkdtemp(join(tmpdir(), '67js-mcp-consumer-'));
+const consumer = await mkdtemp(join(tmpdir(), 'crucible-mcp-consumer-'));
 await writeFile(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
 const npmCli = process.env.npm_execpath ?? resolve(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
 function npm(argumentsValue) {
@@ -26,15 +26,15 @@ function npm(argumentsValue) {
 const packResult = JSON.parse(npm(['pack', published ? `${metadata.name}@${metadata.version}` : process.cwd(), '--ignore-scripts', '--json', '--pack-destination', consumer]));
 const packed = Array.isArray(packResult) ? packResult[0] : packResult[metadata.name];
 assert.ok(packed?.filename, 'npm pack must return the package archive.');
-for (const path of ['bin/67js-mcp.mjs', 'build/mcp/server.mjs', 'build/mcp/preview.js', 'build/mcp/manifest.json', 'build/mcp/LICENSES.md']) {
+for (const path of ['bin/crucible-mcp.mjs', 'build/mcp/server.mjs', 'build/mcp/preview.js', 'build/mcp/manifest.json', 'build/mcp/LICENSES.md']) {
   assert.ok(packed.files.some(file => file.path === path), `Packed CLI must contain ${path}.`);
 }
 const archive = join(consumer, packed.filename).replaceAll('\\', '/');
-npm(['install', `67js@file:${archive}`, ...(published ? [] : ['--offline']), '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund']);
-const installedRoot = join(consumer, 'node_modules', '67js');
+npm(['install', `crucible@file:${archive}`, ...(published ? [] : ['--offline']), '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund']);
+const installedRoot = join(consumer, 'node_modules', 'crucible');
 const installed = JSON.parse(await readFile(join(installedRoot, 'package.json'), 'utf8'));
 assert.equal(installed.version, metadata.version);
-assert.equal(installed.bin['67js-mcp'], './bin/67js-mcp.mjs');
+assert.equal(installed.bin['crucible-mcp'], './bin/crucible-mcp.mjs');
 const sourceManifest = JSON.parse(await readFile('package.json', 'utf8'));
 assert.deepEqual(installed.dependencies, { 'playwright-core': sourceManifest.dependencies['playwright-core'] });
 for (const dependency of ['vite', 'zod', 'three', 'gl-matrix', '@modelcontextprotocol/server', '@modelcontextprotocol/client', 'playwright']) {
@@ -65,7 +65,7 @@ for (const chunk of manifest.previewChunks) {
   assert.equal(bytes.length, chunk.bytes);
   assert.equal(createHash('sha256').update(bytes).digest('hex'), chunk.sha256);
 }
-const cli = join(installedRoot, 'bin', '67js-mcp.mjs');
+const cli = join(installedRoot, 'bin', 'crucible-mcp.mjs');
 // MCP_SERVER_RUNTIME runs the installed server under another runtime, such as bun, while this script stays on Node.
 const serverRuntime = process.env.MCP_SERVER_RUNTIME || process.execPath;
 const runtimeLabel = process.env.MCP_SERVER_RUNTIME ? `-${process.env.MCP_SERVER_RUNTIME.replace(/^.*[\/]/, '').replace(/.exe$/, '')}` : '';
@@ -79,7 +79,7 @@ const invalid = spawnSync(serverRuntime, [cli, '--memory', '0'], { cwd: consumer
 assert.equal(invalid.status, 1);
 assert.equal(invalid.stdout, '');
 assert.match(invalid.stderr, /32 to 384/);
-const shim = join(consumer, 'node_modules', '.bin', process.platform === 'win32' ? '67js-mcp.cmd' : '67js-mcp');
+const shim = join(consumer, 'node_modules', '.bin', process.platform === 'win32' ? 'crucible-mcp.cmd' : 'crucible-mcp');
 const shimVersion = process.platform === 'win32'
   ? spawnSync('cmd.exe', ['/d', '/s', '/c', `""${shim}" --version"`], {
     cwd: consumer, encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true,
@@ -97,7 +97,7 @@ for (const era of ['modern', 'legacy']) {
     args: [cli, '--backend', 'cpu', '--memory', '96', '--assets', assets], cwd: consumer, stderr: 'pipe' });
   let diagnostics = '';
   transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
-  const client = new Client({ name: '67js-installed-cli-proof', version: '1' }, {
+  const client = new Client({ name: 'crucible-installed-cli-proof', version: '1' }, {
     versionNegotiation: { mode: era === 'modern' ? { pin: '2026-07-28' } : 'legacy', probe: { timeoutMs: 180000 } },
   });
   let processId;
@@ -139,7 +139,7 @@ for (const era of ['modern', 'legacy']) {
       await call('scene_dispose', { sessionId: created.sessionId });
       const catalog = (await call('scene_asset_catalog')).structuredContent;
       assert.equal(catalog.assets.length, 1);
-      const rig = (await call('scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
+      const rig = (await call('scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
         camera: { eye: [1, 3, 7], target: [1, 3, 0], fov: 35, near: 0.1, far: 40 } } })).structuredContent;
       assert.equal(rig.render.materialTextures, 1);
       assert.equal(rig.render.skinTextures, 1);
@@ -163,7 +163,7 @@ for (const era of ['modern', 'legacy']) {
   } finally {
     await client.close();
   }
-  assert.match(diagnostics, /67js preview resources closed\./);
+  assert.match(diagnostics, /crucible preview resources closed\./);
   assert.doesNotMatch(diagnostics, /cleanup failed|shutdown failed/);
   assert.throws(() => process.kill(processId, 0), /ESRCH/);
 }

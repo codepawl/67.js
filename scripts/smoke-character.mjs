@@ -12,7 +12,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const backend = process.argv[2] ?? 'gpu';
-const directory = await mkdtemp(join(tmpdir(), '67js-character-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-character-'));
 const assets = join(directory, 'assets');
 const jobs = join(directory, 'jobs');
 await mkdir(assets);
@@ -29,7 +29,7 @@ let diagnostics = '';
 transport.stderr.on('data', chunk => {
   diagnostics += chunk.toString();
 });
-const client = new Client({ name: '67js-character-smoke', version: '1' });
+const client = new Client({ name: 'crucible-character-smoke', version: '1' });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 180000 });
@@ -70,7 +70,7 @@ try {
   await client.connect(transport);
   const catalog = (await call('scene_asset_catalog')).structuredContent;
   const created = (await call('scene_create_asset', { recipe: {
-    format: '67js.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
+    format: 'crucible.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
     camera: { eye: [1.5, 3, 11], target: [0, 2.6, 0], fov: 38, near: 0.1, far: 100 },
     animation: { clip: 10, time: 0.2 },
   } })).structuredContent;

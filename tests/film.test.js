@@ -30,7 +30,7 @@ test('187-second study has contiguous authored cuts, a late detonation and termi
   assert.equal(sampleFilm(180.9).title, '');
   assert.equal(sampleFilm(183).title, '');
   assert.equal(sampleFilm(185).title, 'OPPENHEIMER');
-  assert.equal(sampleFilm(185).subtitle, 'A 67js trailer study');
+  assert.equal(sampleFilm(185).subtitle, 'A Crucible trailer study');
   assert.equal(sampleFilm(185).titleOpacity, 1);
   assert.equal(sampleFilm(180.9).explosionProgress, 0);
   assert.equal(sampleFilm(181).sceneTime, 0);

@@ -74,7 +74,7 @@ function defaultVisibility() {
 
 function validateOptions(target, options) {
   if (target === null || typeof target !== 'object' || typeof target.render !== 'function') {
-    throw new TypeError('createRuntime needs a renderer as its first argument: an object with a render(frame) method, such as a Renderer67.');
+    throw new TypeError('createRuntime needs a renderer as its first argument: an object with a render(frame) method, such as a CrucibleRenderer.');
   }
   if (options === null || typeof options !== 'object') throw new TypeError('createRuntime options must be an object or left out.');
   const mode = options.mode ?? 'both';

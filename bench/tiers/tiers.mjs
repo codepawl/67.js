@@ -1,5 +1,5 @@
 // What each tier runs in the tier benchmark. Names are working names from issue #890; `quality` is planned (#904), so none of this is an API.
-// A Glaze tier is the set of Renderer67 options plus the frame effects of the reference harness. A setting that is not listed keeps its default.
+// A Glaze tier is the set of CrucibleRenderer options plus the frame effects of the reference harness. A setting that is not listed keeps its default.
 
 // The realtime tier is Glaze as the reference suite draws it: every option at the value bench/reference/harness.js passes.
 export const REALTIME_TIER = {

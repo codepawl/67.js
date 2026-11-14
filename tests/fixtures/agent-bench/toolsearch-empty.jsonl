@@ -1,5 +1,5 @@
-{"type":"system","subtype":"init","model":"claude-haiku-4-5","tools":["ToolSearch"],"mcp_servers":[{"name":"67js","status":"connected"}]}
-{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"ToolSearch","input":{"query":"select:mcp__67js__scene_create"}}]}}
+{"type":"system","subtype":"init","model":"claude-haiku-4-5","tools":["ToolSearch"],"mcp_servers":[{"name":"crucible","status":"connected"}]}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"ToolSearch","input":{"query":"select:mcp__crucible__scene_create"}}]}}
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"No matching deferred tools found"}]}]}}
 {"type":"assistant","message":{"content":[{"type":"text","text":"The tools are not available."}]}}
 {"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"The tools are not available.","usage":{"output_tokens":900}}

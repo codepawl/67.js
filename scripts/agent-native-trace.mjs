@@ -11,7 +11,7 @@ import { NATIVE_JOB_MAXIMUM_INSTANCES, NATIVE_JOB_MAXIMUM_TRIANGLES } from './na
 const NATIVE_PACKAGE = '@codepawlhq/cook';
 const INSTALL_HINT = 'npm install github:codepawl/cook, then npm run build inside it';
 const MODULE_NOT_FOUND_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND']);
-// The 67js defaults of a job, lowered by the limits the installed engine declares.
+// The Crucible defaults of a job, lowered by the limits the installed engine declares.
 const DEFAULT_ENGINE_LIMITS = { triangles: NATIVE_JOB_MAXIMUM_TRIANGLES, instances: NATIVE_JOB_MAXIMUM_INSTANCES };
 const TABLE_NAMES = ['triangles', 'materials', 'lights', 'atlas', 'environmentColors', 'environmentTables', 'parameters'];
 const TABLE_TYPES = { triangles: Float32Array, materials: Float32Array, lights: Float32Array, atlas: Uint32Array,
@@ -63,7 +63,7 @@ function checkNativePackage(imported) {
 /**
  * A cached look for the native tracer. Looking costs one import and one file check, done once per process. `markUnusable`
  * records a failure from a real trace (usually no ray query adapter), so later jobs skip the attempt and keep the reason.
- * A found tracer comes with the engine `description` and the job `limits` (67js defaults lowered by the engine's own).
+ * A found tracer comes with the engine `description` and the job `limits` (Crucible defaults lowered by the engine's own).
  */
 export function createNativeTracerLocator({ importPackage = specifier => import(specifier) } = {}) {
   let lookup;
@@ -290,7 +290,7 @@ function floatsFromBase64(data) {
 }
 
 /**
- * Traces the texels of a recipe bake that the page packed, for the page's `__67jsNativeBake` bridge. `request` holds the
+ * Traces the texels of a recipe bake that the page packed, for the page's `__crucibleNativeBake` bridge. `request` holds the
  * scene `tables` and `triangleCount` as `exportNativeScene` makes them, plus `texelCount`, `points`, `normals` (base64
  * floats) and `samples`. Resolves with the base64 `radiance` and `escaped` arrays; throws when the tracer cannot run.
  */

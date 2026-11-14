@@ -8,7 +8,7 @@ import { listTools } from '../scripts/measure-tool-cost.mjs';
 import { checkToolSchemas, summarizeFindings, TOOL_NAME_PATTERN } from '../scripts/check-tool-schemas.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const siteOrigin = 'https://67js.codepawl.com';
+const siteOrigin = 'https://crucible.codepawl.com';
 const tools = await listTools();
 
 function createStrictValidator() {

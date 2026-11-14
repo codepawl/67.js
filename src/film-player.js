@@ -1,6 +1,6 @@
 import './film-style.css';
 import './brand.js';
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import './explosion-shader.js';
 import { createFilmScenes, FILM_DURATION, sampleFilm } from './film.js';
 
@@ -60,7 +60,7 @@ function renderAt(time) {
     renderer = null;
     activeScene = null;
     const parts = sample.scene === 'ignition' ? scene.parts.filter(part => !['fire', 'smoke'].includes(part.material.tag)) : scene.parts;
-    renderer = new Renderer67(canvas, parts, {
+    renderer = new CrucibleRenderer(canvas, parts, {
       world: true,
       ground: scene.ground,
       environment: scene.environment,

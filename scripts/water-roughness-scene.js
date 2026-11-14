@@ -1,6 +1,6 @@
 // The scene of the rough water picture (scripts/measure-water-roughness.mjs): a dark sea under the sky, with a boulder, a rock and a
 // ladder standing in it. The models are Poly Haven CC0 assets read by water-preview-scene.js from a folder that is never committed.
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { box } from '../src/geometry.js';
 import { applyWaterReflection, attachWaterReflection } from '../src/water-reflection.js';
 import { previewParts } from './water-preview-scene.js';
@@ -22,7 +22,7 @@ export function roughSeaParts(assets, roughness) {
 /** Draws one frame on `canvas` and returns what `applyWaterReflection` decided; the caller reads the canvas before the next frame. */
 export function drawRoughSea(canvas, assets, roughness, view) {
   const marked = applyWaterReflection(roughSeaParts(assets, roughness));
-  const renderer = new Renderer67(canvas, marked.parts, { hdr: true, depth: true, world: true, ground: false, pixelRatio: 1, samples: 4 });
+  const renderer = new CrucibleRenderer(canvas, marked.parts, { hdr: true, depth: true, world: true, ground: false, pixelRatio: 1, samples: 4 });
   const detach = attachWaterReflection(renderer, marked.surface);
   renderer.render({ ...view, fov: 45, time: 0.5 });
   return { placed: marked.report.placed, dispose: () => { detach(); renderer.dispose?.(); } };

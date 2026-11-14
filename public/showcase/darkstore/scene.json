@@ -24,7 +24,7 @@
   "frame": { "fov": 34, "near": 0.25, "far": 300, "effects": { "ambientOcclusion": 0.6, "saturation": 1.05, "vignette": 0.3, "bloom": { "strength": 0.3, "threshold": 1, "radius": 1 } } },
   "credits": [
     { "model": "Shelving, crates, products and equipment (NVIDIA SimReady assets)", "author": "NVIDIA", "licence": "CC BY 4.0", "source": "https://docs.omniverse.nvidia.com/usd/latest/usd_content_samples/simready_assets.html" },
-    { "model": "Store layout and remaining props", "author": "CodePawl", "licence": "MIT", "source": "https://github.com/codepawl/67.js" },
+    { "model": "Store layout and remaining props", "author": "CodePawl", "licence": "MIT", "source": "https://github.com/codepawl/crucible" },
     { "model": "warm_restaurant_night (sky lighting, 512 x 256 average)", "author": "Poly Haven", "licence": "CC0", "source": "https://polyhaven.com/a/warm_restaurant_night" }
   ]
 }

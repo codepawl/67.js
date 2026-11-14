@@ -1,14 +1,14 @@
 # Wheeled vehicles
 
-`67js/addons/vehicle` drives a car or truck along a path with deterministic, physics-free animation. It is available from version `0.10.0`. Wheel spin, front-wheel steering, roll, pitch and ground following all come from the path, and `sample(seconds)` gives the same pose for the same time.
+`crucible/addons/vehicle` drives a car or truck along a path with deterministic, physics-free animation. It is available from version `0.10.0`. Wheel spin, front-wheel steering, roll, pitch and ground following all come from the path, and `sample(seconds)` gives the same pose for the same time.
 
 ## Drive a real vehicle
 
 The example builds a car from a box body and four wheel parts named `Wheel FL`, `Wheel FR`, `Wheel RL` and `Wheel RR`, each a cylinder whose axle runs along x. It passes them to `createVehicleRig`, which finds the wheels by name and geometry, then drives them around an oval with `driveAlongPath`. Drag to orbit and change the speed with the slider. The console prints the rig (wheel count, wheelbase, track width), the length and duration of each drive, and once a second the pose: distance, steer angle, roll and the spin of the front-left wheel.
 
 ```js live poster=vehicle-drive
-import { Renderer67 } from '67js';
-import { createVehicleRig, driveAlongPath, applyVehiclePoseToParts } from '67js/addons/vehicle';
+import { CrucibleRenderer } from 'crucible';
+import { createVehicleRig, driveAlongPath, applyVehiclePoseToParts } from 'crucible/addons/vehicle';
 
 // Geometry at rest in the model's own coordinates: forward is +z, left is +x, the ground is y = 0.
 function boxGeometry(center, size) {
@@ -92,7 +92,7 @@ function makeDrive(speed) {
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts, { world: true });
+const renderer = new CrucibleRenderer(canvas, parts, { world: true });
 const state = { speed: 6, yaw: 0.5, pitch: 0.6, distance: 24, playing: true };
 let drive = makeDrive(state.speed);
 let seconds = 0;
@@ -182,7 +182,7 @@ Units are metres, +Y is up and the system is right-handed. Angles are radians. T
 - Through MCP the tail lights drive only the materials of an asset recipe, and `groundHeight` is not available.
 - Scene-graph nodes with a nonzero `pivot` are rejected. Wheel radius from geometry assumes a round wheel in the plane across its axle.
 
-The [vehicle contract](https://github.com/codepawl/67.js/blob/main/docs/vehicle.md) lists conventions, options and limits.
+The [vehicle contract](https://github.com/codepawl/crucible/blob/main/docs/vehicle.md) lists conventions, options and limits.
 
 ## Common mistakes
 

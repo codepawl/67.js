@@ -9,7 +9,7 @@ import { loadAgentSceneModules } from '../src/agent-scene-modules.js';
 
 function baseRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }, { id: 'sheet', type: 'grid', segments: 4 }],
     materials: [{ id: 'plain', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'body', geometry: 'cube', material: 'plain' }, { id: 'flag', geometry: 'sheet', material: 'plain' }],

@@ -21,12 +21,12 @@ let directory;
 let client;
 
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), '67js-physics-film-'));
+  directory = await mkdtemp(join(tmpdir(), 'crucible-physics-film-'));
   const transport = new StdioClientTransport({ command: process.execPath,
-    args: [resolve('bin/67js-mcp.mjs'), '--backend', process.env.PHYSICS_FILM_BACKEND ?? 'cpu', '--memory', '96', '--jobs', join(directory, 'jobs'),
+    args: [resolve('bin/crucible-mcp.mjs'), '--backend', process.env.PHYSICS_FILM_BACKEND ?? 'cpu', '--memory', '96', '--jobs', join(directory, 'jobs'),
       ...(process.env.PHYSICS_FILM_BROWSER ? ['--browser', process.env.PHYSICS_FILM_BROWSER] : [])],
     cwd: directory, stderr: 'pipe' });
-  client = new Client({ name: '67js-physics-film-test', version: '1' });
+  client = new Client({ name: 'crucible-physics-film-test', version: '1' });
   await client.connect(transport);
 });
 
@@ -67,7 +67,7 @@ function decodedFrames(file, width, height) {
 
 function sceneWithGround(nodes, physics) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'slab', type: 'box', bevel: 0 }, { id: 'ball', type: 'sphere' }],
     materials: [{ id: 'brick', color: [0.6, 0.3, 0.2] }, { id: 'steel', color: [0.7, 0.7, 0.75] }],
     nodes: [{ id: 'floor', geometry: 'slab', material: 'brick', translation: [0, -0.25, 0], scale: [8, 0.5, 8] }, ...nodes],

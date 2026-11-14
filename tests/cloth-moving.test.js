@@ -136,7 +136,7 @@ test('seeking to a time gives the cloth that playing to it gives', () => {
 
 test('a ball and a capsule on nodes follow their node and push cloth aside', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'sheet', type: 'grid', segments: 20 }],
     materials: [{ id: 'fabric', doubleSided: true }],
     nodes: [

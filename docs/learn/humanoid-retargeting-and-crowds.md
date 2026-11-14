@@ -1,14 +1,14 @@
 # Humanoid retargeting and crowds
 
-`67js/addons/retarget` is available from version `0.10.0`. It moves a humanoid clip onto another skeleton and offsets many copies in time, so a crowd does not march in step.
+`crucible/addons/retarget` is available from version `0.10.0`. It moves a humanoid clip onto another skeleton and offsets many copies in time, so a crowd does not march in step.
 
 ## One clip, many walkers
 
 The example calls the real `createCrowd` for a seeded placement, a time offset and a playback rate per walker, and `crowd.sample(seconds)` for each walker's pose tracks. The docs host cannot load a rigged character, so the walkers are blocks posed from those tracks, and the clip only has rotations, so it plays on figures of any size, which is the same reason a retargeted clip works on another skeleton. Drag the slider to change the count and press the button to switch between a grid and a scatter layout. The console prints the first instances, how `mapHumanoidBones` reads the joint names of two rig families, and the cost of each batch of frames.
 
 ```js live poster=crowd-walk
-import { Renderer67, box, sphere, createAnimationClip } from '67js';
-import { createCrowd, mapHumanoidBones } from '67js/addons/retarget';
+import { CrucibleRenderer, box, sphere, createAnimationClip } from 'crucible';
+import { createCrowd, mapHumanoidBones } from 'crucible/addons/retarget';
 
 const multiply = (a, b) => {
   const out = new Float32Array(16);
@@ -87,7 +87,7 @@ const state = { count: 24, layout: 'grid' };
 const makeCrowd = () => createCrowd({ count: state.count, clip, seed: 7, layout: state.layout, spacing: 1.4, columns: 6, size: 8, randomYaw: state.layout === 'scatter' });
 let crowd = makeCrowd();
 let parts = buildParts(crowd);
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 console.log('first instances:', crowd.instances.slice(0, 3).map(instance => ({ timeOffset: instance.timeOffset, playbackRate: instance.playbackRate })));
 
 const bar = document.createElement('div');
@@ -141,15 +141,15 @@ Every walker plays the same clip at its own time and rate, so the legs are never
 1. Build rigs with `createRigFromSkin(asset.skins[0])`. Name families (Mixamo, VRM, Unreal, Rigify, Quaternius) map through `mapHumanoidBones`. Fix a miss with `targetOverrides`.
 2. Call `retargetClip(sourceRig, targetRig, clip, { rootMotion })`.
 3. Play it with `createSkinClipPlayer(skin, clip).apply(seconds)`, then `renderer.updateParts(parts)`.
-4. For a crowd, `createCrowd({ count, clip, seed })` gives placement, time offsets and playback rates. For dozens or hundreds of animated instances, bake the clip once with `67js/addons/crowd-skinning`, so they draw as a few instanced batches. The plain path needs one skin pose per instance.
+4. For a crowd, `createCrowd({ count, clip, seed })` gives placement, time offsets and playback rates. For dozens or hundreds of animated instances, bake the clip once with `crucible/addons/crowd-skinning`, so they draw as a few instanced batches. The plain path needs one skin pose per instance.
 
 ```js
-import { mapHumanoidBones, createRigFromSkin, retargetClip, createSkinClipPlayer, createCrowd } from '67js/addons/retarget';
-import { createCrowdRig, bakeCrowdPalette, createCrowdParts } from '67js/addons/crowd-skinning'; // import it before the Renderer67 is made
+import { mapHumanoidBones, createRigFromSkin, retargetClip, createSkinClipPlayer, createCrowd } from 'crucible/addons/retarget';
+import { createCrowdRig, bakeCrowdPalette, createCrowdParts } from 'crucible/addons/crowd-skinning'; // import it before the CrucibleRenderer is made
 
 const source = createRigFromSkin(mixamoAsset.skins[0]);
 const target = createRigFromSkin(characterAsset.skins[0], { rootMatrix: armatureWorldMatrix });
-// asset.animations holds three.js clips; convert them first with clipFromGltfAnimation from 67js/addons/skeleton-pose.
+// asset.animations holds three.js clips; convert them first with clipFromGltfAnimation from crucible/addons/skeleton-pose.
 const clip = retargetClip(source, target, clipFromGltfAnimation(mixamoAsset.animations[0]), { rootMotion: false });
 console.log(mapHumanoidBones(jointNames, { overrides: { leftLowerLeg: 'shinbone_left' } }));
 
@@ -158,7 +158,7 @@ const player = createSkinClipPlayer(characterAsset.skins[0], clip);
 const palette = bakeCrowdPalette(rig, seconds => player.apply(seconds), { duration: clip.duration, frameRate: 30 });
 const crowd = createCrowd({ count: 500, clip, seed: 7 });
 const set = createCrowdParts({ rig, palette, instances: crowd.instances });
-const renderer = new Renderer67(canvas, set.parts, options);
+const renderer = new CrucibleRenderer(canvas, set.parts, options);
 // each frame:
 set.setTimes(index => crowd.clipTime(index, seconds));
 renderer.updateParts(set.parts);
@@ -196,7 +196,7 @@ Canonical bone names are in `HUMANOID_BONES`: `hips`, `spine`, `chest`, `upperCh
 - The clip is resampled at `frameRate`, so cubic-spline and step curves are baked to linear keys. Source scale and non-hips translation tracks are ignored.
 - There is no IK, so different proportions can make feet slide or arms intersect the body.
 
-The [retarget contract](https://github.com/codepawl/67.js/blob/main/docs/retarget.md) covers rest-pose assumptions and measured cost. Mixamo clips need the owner's Adobe login to download. The code only consumes files.
+The [retarget contract](https://github.com/codepawl/crucible/blob/main/docs/retarget.md) covers rest-pose assumptions and measured cost. Mixamo clips need the owner's Adobe login to download. The code only consumes files.
 
 ## Common mistakes
 

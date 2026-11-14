@@ -77,7 +77,7 @@ test('sessions and denoisers are required only when the description offers them'
   assert.ok(requireRenderEngine(plain).engine);
 });
 
-test('67js limits are lowered by the limits an engine declares, and null declares none', () => {
+test('Crucible limits are lowered by the limits an engine declares, and null declares none', () => {
   const defaults = { triangles: 1500000, instances: 1000000, pixels: 50 };
   const declared = { triangles: null, instances: 500, pixels: 1000, samples: 8 };
   assert.deepEqual(clampLimitsByEngine(defaults, declared), { triangles: 1500000, instances: 500, pixels: 50 });

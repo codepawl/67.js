@@ -38,7 +38,7 @@ test('a grid file encodes and decodes with its channels, resolution and size', (
 
 test('a grid file that is wrong or too big is refused with what to pass instead', () => {
   const small = encodeVolumeGrid({ resolution: [2, 2, 2], channels: uniformGrid([2, 2, 2], { density: 1 }) });
-  assert.throws(() => decodeVolumeGrid(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])), /not a 67js grid file.*vdb-to-grid\.py/);
+  assert.throws(() => decodeVolumeGrid(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])), /not a Crucible grid file.*vdb-to-grid\.py/);
   assert.throws(() => decodeVolumeGrid(small.subarray(0, small.length - 2)), /bytes of data, expected 16 for 2x2x2/);
   assert.throws(() => encodeVolumeGrid({ resolution: [VOLUME_GRID_MAX_AXIS + 1, 2, 2], channels: { density: new Float32Array(1) } }), /each axis is an integer from 1 to 256.*--max-resolution 256/);
   assert.throws(() => encodeVolumeGrid({ resolution: [256, 256, 256], channels: { density: new Float32Array(1), temperature: new Float32Array(1), flame: new Float32Array(1) } }), /100663296 bytes, over the 67108864 byte limit/);

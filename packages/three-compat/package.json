@@ -1,7 +1,7 @@
 {
-  "name": "@codepawlhq/67js-three-compat",
+  "name": "@codepawlhq/crucible-three-compat",
   "version": "0.1.0",
-  "description": "Optional three.js-shaped names that build 67js parts, materials, cameras and lights. Imports neither three nor 67js. Not part of the core archive.",
+  "description": "Optional three.js-shaped names that build Crucible parts, materials, cameras and lights. Imports neither three nor Crucible. Not part of the core archive.",
   "type": "module",
   "main": "./index.mjs",
   "exports": {

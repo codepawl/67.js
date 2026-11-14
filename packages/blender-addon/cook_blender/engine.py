@@ -42,7 +42,7 @@ class CookPreferences(bpy.types.AddonPreferences):
 
     native_directory: bpy.props.StringProperty(
         name="Native tracer folder",
-        description=f"Root of a 67js checkout with Cook built (npm run cook:build), unless COOK_ADDON_PATH names a built render-native.node. The {native_runner.NATIVE_DIRECTORY_VARIABLE} environment variable is used when this is empty",
+        description=f"Root of a Crucible checkout with Cook built (npm run cook:build), unless COOK_ADDON_PATH names a built render-native.node. The {native_runner.NATIVE_DIRECTORY_VARIABLE} environment variable is used when this is empty",
         subtype="DIR_PATH",
     )
     node_executable: bpy.props.StringProperty(name="Node executable", description="Node 20.19 or later; 'node' is looked up on PATH", default="node")

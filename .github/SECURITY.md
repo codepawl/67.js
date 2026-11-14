@@ -2,11 +2,11 @@
 
 ## Report a problem
 
-Report it privately on GitHub: open the [Security tab](https://github.com/codepawl/67.js/security/advisories/new) and choose "Report a vulnerability", with the steps to reproduce the problem. If you cannot use GitHub, email legal@codepawl.com. Do not open a public issue for a vulnerability.
+Report it privately on GitHub: open the [Security tab](https://github.com/codepawl/crucible/security/advisories/new) and choose "Report a vulnerability", with the steps to reproduce the problem. If you cannot use GitHub, email legal@codepawl.com. Do not open a public issue for a vulnerability.
 
 ## Supported versions
 
-Only the latest published version of `@codepawlhq/67js` gets security fixes.
+Only the latest published version of `@codepawlhq/crucible` gets security fixes.
 
 ## What the MCP server protects
 

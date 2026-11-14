@@ -1,4 +1,4 @@
-"""Turns a Blender demo scene into a GLB that 67js can load, for the README hero render (#1043).
+"""Turns a Blender demo scene into a GLB that Crucible can load, for the README hero render (#1043).
 
 Source: the Classroom demo scene by Christophe Seux (CC0), from the Blender demo files, https://download.blender.org/demo/test/classroom.zip
 The .blend and the exported GLB stay out of git.

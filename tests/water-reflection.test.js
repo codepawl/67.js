@@ -4,7 +4,7 @@ import { box, sphere } from '../src/geometry.js';
 import { applyWaterReflection, attachWaterReflection, canReuseMirrorImage, findWaterSurface, waterMirrorLevel, waterMirrorWeight, WATER_BLUR_LIMIT_ROUGHNESS, WATER_MAXIMUM_BLUR_LEVEL, WATER_MIRROR_LOD_SCALE, WATER_MIRROR_MINIMUM_PIXEL_RADIUS } from '../src/water-reflection.js';
 import { createTerrain } from '../src/terrain.js';
 import { createFragmentShader } from '../src/shaders.js';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 
 const cube = box(0, 1);
 
@@ -158,7 +158,7 @@ test('a render pass frame skips the mirror image and the next lit frame draws it
 test('the mirror draw leaves out spot and area lights and the lit frame sends them again', () => {
   const counts = {};
   const context = new Proxy({}, { get: (_, name) => (name === 'uniform1i' ? (location, value) => { counts[location] = value; } : () => {}) });
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const lighting = { spotCount: 3, areaCount: 2, shadowCasters: [], pointShadows: [], spotPositions: [], spotColors: [], spotDirections: [], spotParameters: [], areaPositions: [], areaColors: [], areaNormals: [], areaTangents: [] };
   Object.assign(renderer, { context, lighting, uniforms: { spotLightCount: 'spot', areaLightCount: 'area' } });
   renderer.applyLocalLightUniforms(true);

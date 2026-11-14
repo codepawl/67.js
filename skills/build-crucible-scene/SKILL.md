@@ -1,13 +1,13 @@
 ---
-name: build-67js-scene
-description: Build, light, film and refine 3D scenes through the 67js MCP server (npm package @codepawlhq/67js). Use when an agent has the scene_* tools and must model parts, set materials, lights, HDRI, color looks, fog, lens and depth of field, animate a camera, lights, sun, sky and effects, bake light, fix z-fighting or recover from a tool error. Also for "làm cảnh 67js", "dựng cảnh 3D bằng 67js", "model bị răng cưa", "ánh sáng cảnh 67js", "đổ bóng", "sương mù 67js", "camera 67js". Image and video export is the render-67js-media skill.
+name: build-crucible-scene
+description: Build, light, film and refine 3D scenes through the Crucible MCP server (npm package @codepawlhq/crucible). Use when an agent has the scene_* tools and must model parts, set materials, lights, HDRI, color looks, fog, lens and depth of field, animate a camera, lights, sun, sky and effects, bake light, fix z-fighting or recover from a tool error. Also for "làm cảnh Crucible", "dựng cảnh 3D bằng Crucible", "model bị răng cưa", "ánh sáng cảnh Crucible", "đổ bóng", "sương mù Crucible", "camera Crucible". Image and video export is the render-crucible-media skill.
 license: MIT
 ---
 
-# Build scenes with 67js over MCP
+# Build scenes with Crucible over MCP
 
-You drive 67js through the `scene_*` tools of the `67js-mcp` server. No checkout is needed.
-Start the server with `npx --package @codepawlhq/67js 67js-mcp --backend gpu --assets <abs dir> --jobs <abs dir>`
+You drive Crucible through the `scene_*` tools of the `crucible-mcp` server. No checkout is needed.
+Start the server with `npx --package @codepawlhq/crucible crucible-mcp --backend gpu --assets <abs dir> --jobs <abs dir>`
 (`--assets` for GLB, HDR and cube files, `--jobs` for render jobs, `--backend cpu` without a GPU).
 
 ## Loop
@@ -15,7 +15,7 @@ Start the server with `npx --package @codepawlhq/67js 67js-mcp --backend gpu --a
 1. `scene_capabilities`: with no arguments it returns a short index of features, limits and topic names. Pass
    `topic` for the field list of one feature (`environment`, `materialFields`, `geometries`, `meshEdit.bevel`,
    `motion`) or `examples.scene_apply` for a complete call of a hard tool. Tool schemas list only common fields, so read the topic before a feature you have not used.
-2. `scene_create` with a `recipe`: `{ "format": "67js.scene", "schemaVersion": 1, "geometries": [], "materials": [], "nodes": [] }`
+2. `scene_create` with a `recipe`: `{ "format": "crucible.scene", "schemaVersion": 1, "geometries": [], "materials": [], "nodes": [] }`
    plus optional `camera`, `environment`, `effects`, `shadow`, `motion`, `bake`, `timeline`.
 3. `scene_inspect`: node IDs, bounds, `diagnostics`, current `revision`.
 4. `scene_look`: the PNG. Add `labels: true` to match node names to the image. Judge the image, not the lint.
@@ -68,5 +68,5 @@ Variants: `scene_apply` with a `branch` name, compare in one `scene_review` (a `
 
 Deliver the recipe, one `scene_look` image and any limit you hit. Say what you measured (counts, bounds, seconds)
 apart from what you judged by eye. Do not claim Blender parity or general speed over three.js.
-Changes, including unreleased and breaking ones: `https://67js.codepawl.com/changelog.json`.
-A 67js bug: `gh issue create -R codepawl/67.js` with the steps, the recipe and a still; no local paths.
+Changes, including unreleased and breaking ones: `https://crucible.codepawl.com/changelog.json`.
+A Crucible bug: `gh issue create -R codepawl/crucible` with the steps, the recipe and a still; no local paths.

@@ -66,7 +66,7 @@ test('ground that climbs faster than the slope limit blocks the way', () => {
 
 test('scene_inspect path returns translation keyframes around the hole of a recipe terrain', async () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'ground', type: 'terrain', size: 40, resolution: 64, seed: 3, amplitude: 1.2, holes: [{ center: [0, 0], radius: 3 }] }, { id: 'rock', type: 'box' }],
     materials: [{ id: 'grass', color: [0.3, 0.6, 0.2] }],
     nodes: [{ id: 'ground', geometry: 'ground', material: 'grass' }, { id: 'rock', geometry: 'rock', material: 'grass', translation: [-7, 0.5, -7], scale: [3, 1, 3] }],

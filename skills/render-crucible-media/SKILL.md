@@ -1,10 +1,10 @@
 ---
-name: render-67js-media
-description: Export a 67js scene to PNG stills, render passes or an MP4 through the MCP render job tools (scene_render_submit, scene_render_status, scene_render_result) of the npm package @codepawlhq/67js. Use when an agent must render an image or video of a scene, play a camera or light animation to video, cut shots with a timeline, add a score, write depth or object-ID passes, path trace a still, choose GPU or CPU and an encoder, or stay inside memory limits. Also for "render ảnh 3D", "render video 3D", "xuất mp4", "export 67js", "render bị lỗi bộ nhớ", "chất lượng MSAA". Scene building is the build-67js-scene skill.
+name: render-crucible-media
+description: Export a Crucible scene to PNG stills, render passes or an MP4 through the MCP render job tools (scene_render_submit, scene_render_status, scene_render_result) of the npm package @codepawlhq/crucible. Use when an agent must render an image or video of a scene, play a camera or light animation to video, cut shots with a timeline, add a score, write depth or object-ID passes, path trace a still, choose GPU or CPU and an encoder, or stay inside memory limits. Also for "render ảnh 3D", "render video 3D", "xuất mp4", "export Crucible", "render bị lỗi bộ nhớ", "chất lượng MSAA". Scene building is the build-crucible-scene skill.
 license: MIT
 ---
 
-# Export images and video from 67js over MCP
+# Export images and video from Crucible over MCP
 
 A render job is an immutable snapshot of one scene (`sessionId`, else the last used) and stays tied to it. Edits made while it runs do not change it, and it does not
 change the scene's revision, pose or checkpoints. The MCP server must have been started with `--jobs <abs private dir>`;

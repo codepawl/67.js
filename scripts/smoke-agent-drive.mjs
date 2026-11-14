@@ -19,7 +19,7 @@ const transport = new StdioClientTransport({
 });
 let diagnostics = '';
 transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
-const client = new Client({ name: '67js-drive-proof', version: '1' }, {
+const client = new Client({ name: 'crucible-drive-proof', version: '1' }, {
   versionNegotiation: { mode: { pin: '2026-07-28' }, probe: { timeoutMs: 180000 } },
 });
 async function call(name, argumentsValue = {}) {
@@ -50,7 +50,7 @@ try {
   const catalog = (await call('scene_asset_catalog')).structuredContent;
   const car = catalog.assets.find(asset => asset.name === 'car.glb').assetId;
 
-  const created = (await call('scene_create_asset', { recipe: { format: '67js.asset', schemaVersion: 1, assetId: car, motion: { drive }, camera } })).structuredContent;
+  const created = (await call('scene_create_asset', { recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: car, motion: { drive }, camera } })).structuredContent;
   const sessionId = created.sessionId;
   const duration = (await call('scene_export_recipe', { sessionId })).structuredContent.recipe.motion.duration;
   const report = (await call('scene_inspect', { sessionId, kind: 'hierarchy', limit: 1 })).structuredContent.motionDrive;
@@ -64,7 +64,7 @@ try {
   await call('scene_dispose', { sessionId });
 
   const placed = (await call('scene_create', { recipe: {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'ground', type: 'box' }],
     materials: [{ id: 'asphalt', color: [0.12, 0.12, 0.13], roughness: 0.9 }],
     nodes: [

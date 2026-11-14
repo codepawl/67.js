@@ -16,7 +16,7 @@ import { FILM_FRAMES_PER_SECOND, FINE_FLAG_FILM_SECONDS, FLAG_FILM_SECONDS, axis
 const FINE_FLAG_SIDE = 64;
 const PREVIEW = { width: 960, height: 540, fps: FILM_FRAMES_PER_SECOND };
 const FONT_FILE = 'C\\:/Windows/Fonts/arial.ttf';
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 
 async function renderJob(call, sessionId, settings) {
   const submitted = await call('scene_render_submit', { sessionId, expectedRevision: 0, settings });
@@ -83,7 +83,7 @@ function cubeSize(frame) {
 
 /** Joins the contact and max dent stills left and right, each captioned with its step, time and measured size. */
 function writeComparisonStill(outputDirectory, files, captions) {
-  const captionDirectory = mkdtempSync(join(tmpdir(), '67js-captions-'));
+  const captionDirectory = mkdtempSync(join(tmpdir(), 'crucible-captions-'));
   const inputs = [];
   const filters = [];
   Object.keys(captions).forEach((label, index) => {
@@ -143,7 +143,7 @@ async function main() {
   const flagSettling = Math.round(flagTouch * 2);
   const flagHash = flag.record.hashes[flagFrames - 1];
 
-  const jobsDirectory = join(tmpdir(), `67js-soft-body-film-${process.pid}`);
+  const jobsDirectory = join(tmpdir(), `crucible-soft-body-film-${process.pid}`);
   const transport = new StdioClientTransport({ command: process.execPath, args: [serverEntry, '--jobs', jobsDirectory], stderr: 'ignore' });
   const client = new Client({ name: 'soft-body-film', version: '1.0.0' });
   await client.connect(transport);

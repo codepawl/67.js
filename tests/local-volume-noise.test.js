@@ -82,7 +82,7 @@ const LOOKING_DOWN = { eye: [0, 3, 0], target: [0, 0, 0], up: [0, 0, -1], fov: 4
 async function rasterFrames(page, volume) {
   const task = async ({ size, localVolume, camera }) => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { createFloatOutput, readFloatPixels } = await import('/src/float-output.js');
     await import('/src/fog-shader.js');
     const canvas = document.createElement('canvas');
@@ -93,7 +93,7 @@ async function rasterFrames(page, volume) {
     document.body.append(canvas);
     const material = { tag: 'unlit', color: [1, 1, 1], metallic: 0, roughness: 1, emission: 0 };
     const ground = { name: 'ground', geometry: box(0, 1), matrix: new Float32Array([40, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 40, 0, 0, -0.1, 0, 1]), material };
-    const renderer = new Renderer67(canvas, [ground], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+    const renderer = new CrucibleRenderer(canvas, [ground], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
     const output = createFloatOutput(renderer.context, size, size);
     const draw = (localVolumes) => {
       const environment = { keyIntensity: 0, fillIntensity: 0, ambientIntensity: 0, localVolumes };

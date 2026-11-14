@@ -22,7 +22,7 @@ Machine: Windows 11, RTX 3060 12 GB (shared with other jobs, 24 to 100 percent b
 
 ## What was tested
 
-There is no WGSL port of the 67js shaders, and writing one is the work this decision avoids. The spike draws the `bench/runtime` scenes `instanced-objects`, `many-materials` and `large-mesh` (the scenes where three.js wins, `bench/runtime/PROFILE.md`) with three.js 0.186.1 on its WebGL2 renderer and on its WebGPU renderer, with the same geometry, materials and lights. This is a proxy: it tells what the API and the driver stack change for a full PBR scene, not what a 67js WGSL backend would cost. The spike draws `instanced-objects` as individual meshes (the bench's non-instanced three.js variant), so it is a heavier draw-call load than the 3-draw 67js run. The 67js rows come from `node bench/runtime/run.mjs --engine 67js --frames 20` in the same session.
+There is no WGSL port of the Crucible shaders, and writing one is the work this decision avoids. The spike draws the `bench/runtime` scenes `instanced-objects`, `many-materials` and `large-mesh` (the scenes where three.js wins, `bench/runtime/PROFILE.md`) with three.js 0.186.1 on its WebGL2 renderer and on its WebGPU renderer, with the same geometry, materials and lights. This is a proxy: it tells what the API and the driver stack change for a full PBR scene, not what a Crucible WGSL backend would cost. The spike draws `instanced-objects` as individual meshes (the bench's non-instanced three.js variant), so it is a heavier draw-call load than the 3-draw Crucible run. The Crucible rows come from `node bench/runtime/run.mjs --engine Crucible --frames 20` in the same session.
 
 ## Is WebGPU available in headless Chrome here
 
@@ -60,7 +60,7 @@ SwiftShader (WebGL through `--use-angle=swiftshader`, WebGPU through SwiftShader
 | `many-materials` | 424 ms | 766 ms | 266.1 ms | 384.5 ms |
 | `large-mesh` | 983 ms | 1,160 ms | 235.3 ms | 419.1 ms |
 
-67js on its own pipeline (HDR target, MSAA, shadows, post), same session:
+Crucible on its own pipeline (HDR target, MSAA, shadows, post), same session:
 
 | Scene | RTX 3060 first frame | RTX 3060 frame | SwiftShader first frame | SwiftShader frame |
 | --- | --- | --- | --- | --- |
@@ -71,14 +71,14 @@ SwiftShader (WebGL through `--use-angle=swiftshader`, WebGPU through SwiftShader
 What this says:
 
 - Three.js on WebGPU was slower than three.js on WebGL2 in all 6 pairs: 2.6 to 4.4 times the frame time on the GPU, 1.4 to 3.0 on SwiftShader, and 1.2 to 6.5 times the first frame (measured). A new API did not remove the first-frame compile cost: WebGPU had to build its pipelines too.
-- On the fallback, WebGPU on SwiftShader was 1.4 to 3.0 times the WebGL frame (measured). The 67js gap on SwiftShader is the per-pixel cost of one large lit shader with MSAA and an HDR target (`PROFILE.md`), which runs on the CPU either way; a graphics API does not change that (inferred).
+- On the fallback, WebGPU on SwiftShader was 1.4 to 3.0 times the WebGL frame (measured). The Crucible gap on SwiftShader is the per-pixel cost of one large lit shader with MSAA and an HDR target (`PROFILE.md`), which runs on the CPU either way; a graphics API does not change that (inferred).
 - The 3.4 s first-frame cost that `PROFILE.md` found in ANGLE's compile of the 37,179 character fragment shader was already cut to 0.7 to 1.0 s on the GPU by `#define` specialization, which is a WebGL change that needs no new backend (measured, `PROFILE.md`).
-- Not measured: a hand-written WGSL port of the 67js shader. A hand-written WGSL path could differ from three.js's generated shaders, and these numbers do not say by how much.
+- Not measured: a hand-written WGSL port of the Crucible shader. A hand-written WGSL path could differ from three.js's generated shaders, and these numbers do not say by how much.
 - Pictures were not compared pixel for pixel. The share of non-background pixels matched between backends in every scene (0.36, 0.87, 0.29, measured), which shows the same scene was drawn and nothing more.
 
 ## Bundle size
 
-A scene with a box, one light and a standard material, built with Vite and esbuild minify, in a clean entry (measured). These are three.js numbers, not 67js numbers.
+A scene with a box, one light and a standard material, built with Vite and esbuild minify, in a clean entry (measured). These are three.js numbers, not Crucible numbers.
 
 | Entry | Minified | Gzip |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ A scene with a box, one light and a standard material, built with Vite and esbui
 | `three/webgpu` WebGPURenderer (it carries its own WebGL2 fallback backend) | 1,023,136 | 236,780 |
 | both imported | 1,449,769 | 329,427 |
 
-For 67js, the lit box is 58,928 bytes gzip (`npm run size`, 2026-10-31, against a goal of 50,000 and three.js at 133,652) and `entry:core` has a budget of 82,600 (`bench/size/budgets.json`). A second backend means a second set of shaders, pipelines and resource code. Counting template-literal text in the 7 files that hold GLSL gives 1,377 non-blank lines (an upper bound, some are JS strings): `shaders.js` 847, `post.js` 244, `environment.js` 163, `camera-effects.js` 67, `ambient-occlusion.js` 45, `render-passes.js` 4, `gl-program.js` 7. The `context.` call count is 357 in `renderer.js`, 34 in `environment.js`, 25 in `render-passes.js`, 24 in `camera-effects.js` and 12 in `gl-program.js`, about 450 call sites in total (measured by grep). Guessed: carrying both backends adds 25 to 45 KB gzip to core, because WGSL is wordier than GLSL and WebGPU needs explicit pipeline and bind group code; which would move the lit box further from its 50,000 goal. This estimate was not built.
+For Crucible, the lit box is 58,928 bytes gzip (`npm run size`, 2026-10-31, against a goal of 50,000 and three.js at 133,652) and `entry:core` has a budget of 82,600 (`bench/size/budgets.json`). A second backend means a second set of shaders, pipelines and resource code. Counting template-literal text in the 7 files that hold GLSL gives 1,377 non-blank lines (an upper bound, some are JS strings): `shaders.js` 847, `post.js` 244, `environment.js` 163, `camera-effects.js` 67, `ambient-occlusion.js` 45, `render-passes.js` 4, `gl-program.js` 7. The `context.` call count is 357 in `renderer.js`, 34 in `environment.js`, 25 in `render-passes.js`, 24 in `camera-effects.js` and 12 in `gl-program.js`, about 450 call sites in total (measured by grep). Guessed: carrying both backends adds 25 to 45 KB gzip to core, because WGSL is wordier than GLSL and WebGPU needs explicit pipeline and bind group code; which would move the lit box further from its 50,000 goal. This estimate was not built.
 
 ## Which shader features would need rewriting
 
@@ -127,7 +127,7 @@ When to look again:
 - the MCP `cpu` backend needs a different software renderer, or
 - a three.js WebGPU frame beats WebGL2 on the same scenes on the 3060 on a quiet GPU.
 
-Not verified: a WGSL port of the 67js shaders; WebGPU timing on a quiet GPU (the RTX 3060 was shared); Firefox, Safari and Android behaviour (support facts only come from MDN and web.dev); the bundle growth of a real second backend.
+Not verified: a WGSL port of the Crucible shaders; WebGPU timing on a quiet GPU (the RTX 3060 was shared); Firefox, Safari and Android behaviour (support facts only come from MDN and web.dev); the bundle growth of a real second backend.
 
 ## Spike for the path tracer: WGSL compute against the WebGL2 kernel (issue #625, 2026-11-08)
 

@@ -22,7 +22,7 @@ function roomRecipe({ roof = true, bake } = {}) {
   ];
   if (roof) slabs.push(wall('roof', [0, 3, 0], [10, WALL, 10]));
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'stone', color: [0.5, 0.5, 0.5] }],
     nodes: slabs,

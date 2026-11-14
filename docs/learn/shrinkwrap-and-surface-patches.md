@@ -1,6 +1,6 @@
 # Shrinkwrap and surface patches
 
-Two static tools fit one mesh to another. `shrinkwrapGeometry` from `67js/addons/shrinkwrap` moves the vertices of a source mesh onto a target surface and keeps the source topology, UVs and colors. `createSurfacePatch` from `67js/addons/surface` clips the target's own triangles into a small overlay with its own UVs and material. Both are construction-time operations: they do not follow skin or morph deformation.
+Two static tools fit one mesh to another. `shrinkwrapGeometry` from `crucible/addons/shrinkwrap` moves the vertices of a source mesh onto a target surface and keeps the source topology, UVs and colors. `createSurfacePatch` from `crucible/addons/surface` clips the target's own triangles into a small overlay with its own UVs and material. Both are construction-time operations: they do not follow skin or morph deformation.
 
 ## Shrinkwrap a grid onto a sphere
 
@@ -15,8 +15,8 @@ Two static tools fit one mesh to another. `shrinkwrapGeometry` from `67js/addons
 The example wraps a flat grid onto a sphere. Pick the mode, change the clearance, and make the grid bigger than the sphere to see misses. The log prints `stats` for every build, and the error text if a build throws.
 
 ```js live poster=shrinkwrap-grid
-import { Renderer67, sphere } from '67js';
-import { shrinkwrapGeometry } from '67js/addons/shrinkwrap';
+import { CrucibleRenderer, sphere } from 'crucible';
+import { shrinkwrapGeometry } from 'crucible/addons/shrinkwrap';
 
 // A flat grid in the XY plane at height z, facing +Z.
 function grid(halfSize, divisions, z) {
@@ -65,7 +65,7 @@ function build() {
     console.log(`${settings.mode}: ${error.message}`);
   }
   renderer?.dispose();
-  renderer = new Renderer67(canvas, parts, { ground: false, samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, parts, { ground: false, samples: 4, pixelRatio: 1.25 });
   renderer.resize();
   draw();
 }
@@ -144,7 +144,7 @@ The return value is `{ geometry, stats }`. `stats` has `queriedVertices`, `match
 | `maxTriangleTests` | 20000000 | Total callback budget from 1 through 100000000 |
 | `memoryBudgetMiB` | 64 | Target index allocation estimate, greater than 0 through 1024 |
 
-Use the output with the target part's retained matrix. The [shrinkwrap contract](https://github.com/codepawl/67.js/blob/main/docs/shrinkwrap.md) defines local distances, work budgets and miss handling. Moving the shared matrix moves the wrapped geometry rigidly without rebuilding it, but changing the target's vertices needs another shrinkwrap. The mode distinction follows Blender's [Nearest Surface Point and Project methods](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/shrinkwrap.html).
+Use the output with the target part's retained matrix. The [shrinkwrap contract](https://github.com/codepawl/crucible/blob/main/docs/shrinkwrap.md) defines local distances, work budgets and miss handling. Moving the shared matrix moves the wrapped geometry rigidly without rebuilding it, but changing the target's vertices needs another shrinkwrap. The mode distinction follows Blender's [Nearest Surface Point and Project methods](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/shrinkwrap.html).
 
 `createMeshQueryIndex` also gives target-local `nearest(point, options)` and `project(ray)` helpers. Both return `{ hit, triangleTests }`, where `hit` is `null` or `{ point, distance, triangle, barycentric, normal }`.
 
@@ -153,8 +153,8 @@ Use the output with the target part's retained matrix. The [shrinkwrap contract]
 The wrapping runs before the renderer exists. When the source and the output share a coordinate frame and topology, their difference becomes a relative GPU morph target, so no BVH is rebuilt and no vertex is wrapped on each frame.
 
 ```js
-import { createMorphPose } from '67js';
-import { shrinkwrapGeometry } from '67js/addons/shrinkwrap';
+import { createMorphPose } from 'crucible';
+import { shrinkwrapGeometry } from 'crucible/addons/shrinkwrap';
 
 const wrapped = shrinkwrapGeometry(source, target, { mode: 'project', direction: [0, 0, -1] }).geometry;
 const animatedGeometry = {
@@ -165,7 +165,7 @@ const animatedGeometry = {
   }],
 };
 const morph = createMorphPose(1);
-// Assign animatedGeometry and morph to the part before constructing Renderer67.
+// Assign animatedGeometry and morph to the part before constructing CrucibleRenderer.
 // Update morph.weights[0] between zero and one before renderer.updateParts(parts).
 ```
 
@@ -178,8 +178,8 @@ Intermediate shapes need their own collision checks. Safe endpoints do not prove
 The slider walks a badge around the equator of a sphere. For each position the projector is rotated so that its +Z axis faces outward from the sphere, and the patch is built again. The log prints its size.
 
 ```js live poster=surface-badge
-import { Renderer67, sphere } from '67js';
-import { createSurfacePatch } from '67js/addons/surface';
+import { CrucibleRenderer, sphere } from 'crucible';
+import { createSurfacePatch } from 'crucible/addons/surface';
 
 const matrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const target = { name: 'Shell', geometry: sphere(64, 40), matrix, material: { color: [0.03, 0.2, 0.3], metallic: 0.2, roughness: 0.4 } };
@@ -199,7 +199,7 @@ function build() {
   });
   const badge = { name: 'Badge', geometry, matrix: target.matrix, material: { color: [1, 0.2, 0.02], metallic: 0, roughness: 0.5 } };
   renderer?.dispose();
-  renderer = new Renderer67(canvas, [target, badge], { ground: false, samples: 4, pixelRatio: 1.25 });
+  renderer = new CrucibleRenderer(canvas, [target, badge], { ground: false, samples: 4, pixelRatio: 1.25 });
   renderer.resize();
   draw();
   console.log(`angle ${settings.angle.toFixed(2)}, width ${settings.width.toFixed(2)}: ${geometry.positions.length / 3} vertices, ${geometry.indices.length / 3} triangles, ${(performance.now() - started).toFixed(1)} ms`);
@@ -252,7 +252,7 @@ Back-facing triangles are excluded, but a deep projector can still catch several
 
 Zero clearance deliberately creates a coplanar patch and can produce z-fighting. Constant local clearance does not give a constant world gap under nonuniform scale. The addon checks the rounded displacement against each clipped Float32 triangle, so vanishing gaps, reversed winding and a fully collapsed output throw. This checks local patch construction, not collision against other scene objects.
 
-Clipping runs while you build the scene, and the patch is reused every frame without clipping again. Skin, morph, assembly and procedural target materials are rejected, because their visible surfaces differ from the static target geometry. Rebuild the patch after static sculpting. The [surface patch contract](https://github.com/codepawl/67.js/blob/main/docs/surface.md) defines projector orientation, depth and local clearance.
+Clipping runs while you build the scene, and the patch is reused every frame without clipping again. Skin, morph, assembly and procedural target materials are rejected, because their visible surfaces differ from the static target geometry. Rebuild the patch after static sculpting. The [surface patch contract](https://github.com/codepawl/crucible/blob/main/docs/surface.md) defines projector orientation, depth and local clearance.
 
 ### Three different overlap problems
 

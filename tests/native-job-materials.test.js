@@ -318,7 +318,7 @@ cookTest('a job frame with a blend pane differs from the same scene traced from 
   assert.notDeepEqual(viaV2, Buffer.from(direct.rgba.buffer, direct.rgba.byteOffset, direct.rgba.byteLength));
 });
 
-// The kernel reads the green channel of the coat map as a roughness scale and the alpha of the sheen map as one; a 67js
+// The kernel reads the green channel of the coat map as a roughness scale and the alpha of the sheen map as one; a Crucible
 // material keeps those in other maps, so a weight or tint map is carried only when it cannot change the roughness (#1036).
 cookTest('a coat or sheen map is carried only when its other channel cannot change the roughness', () => {
   const coatMask = checker(2, 9);

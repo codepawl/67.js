@@ -111,7 +111,7 @@ test('chained booleans with coplanar contact stay closed', () => {
 
 test('recipe meshes run booleans with inline primitive cutters', () => {
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: [
       { op: 'boolean', operation: 'difference', name: 'bore', cutter: { type: 'cylinder', segments: 32, bevel: 0 }, scale: [0.3, 2, 0.3] },
       { op: 'boolean', operation: 'union', name: 'boss', cutter: { type: 'sphere', segments: 24, rings: 12 }, translation: [0.5, 0, 0], scale: [0.3, 0.3, 0.3] },
@@ -127,7 +127,7 @@ test('recipe meshes run booleans with inline primitive cutters', () => {
   assert.ok(report.edits[1].tags['boss.cut'] > 0);
   assert.ok(Math.abs(report.bounds.max[0] - 0.8) < 1e-3);
   assert.throws(() => createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'bad', type: 'mesh', base: { type: 'box' }, edits: [{ op: 'boolean', operation: 'union', cutter: { type: 'box', id: 'x' } }] }],
     materials: [], nodes: [],
   }), /geometries\[0\]\.cutter: got \{"type":"box","id":"x"\}; expected a primitive or profile record without an id/);

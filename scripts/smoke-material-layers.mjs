@@ -14,16 +14,16 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-layers-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-layers-'));
 const jobs = join(directory, 'jobs');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const backend = process.argv[3] ?? 'cpu';
 const stillsFolder = process.env.LAYER_STILLS;
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', backend, '--memory', '128', '--jobs', jobs], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-material-layers-proof', version: '1' });
+const client = new Client({ name: 'crucible-material-layers-proof', version: '1' });
 const WIDTH = 320;
 const HEIGHT = 240;
 
@@ -105,7 +105,7 @@ function stripesBehindBall(material, { ballTag, extraLook } = {}) {
     stripeNodes.push({ id: `stripe-${index}`, geometry: 'box', material: `stripe${index % 3}`, translation: [(index - 4) * 0.5, 1, -1.6], scale: [0.5, 3, 0.1] });
   }
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }, { id: 'sphere', type: 'sphere', segments: 48, rings: 32 }],
     materials: [{ id: 'floor', color: [0.12, 0.12, 0.13], roughness: 0.9 }, ...stripeMaterials, { id: 'ball', ...(ballTag ? { tag: ballTag } : {}), ...material }],
     nodes: [

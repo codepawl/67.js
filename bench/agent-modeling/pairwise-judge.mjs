@@ -5,7 +5,7 @@
 // "first" or "second" is position bias, and a result near the control's size is not a preference for a system.
 //
 // node bench/agent-modeling/pairwise-judge.mjs --claude <path> --model <name> --name <result name> --tasks crate,bolt
-//   --a "67js MCP=artifacts/agent-modeling/<run>/look/{attempt}/{task}-three-quarter.png"
+//   --a "Crucible MCP=artifacts/agent-modeling/<run>/look/{attempt}/{task}-three-quarter.png"
 //   --b "three.js by code=artifacts/agent-modeling/<run>/{task}-{attempt}.png" [--attempts 1] [--seed 53] [--control-only]
 // Each side is `label=image pattern`; `{task}` and `{attempt}` are filled in. One judge call per task, attempt and
 // pairing (the pair, then the control). The result is written to bench/agent-modeling/results/<name>.json, and
@@ -25,7 +25,7 @@ Judge only the pictures. Give one short sentence naming what decided it, then as
 /** Splits `label=pattern` at the first equals sign. */
 export function parseSide(argument) {
   const separator = String(argument ?? '').indexOf('=');
-  if (separator < 1 || separator === argument.length - 1) throw new RangeError('Give each side as "label=image pattern", for example "67js=dir/{task}-{attempt}.png".');
+  if (separator < 1 || separator === argument.length - 1) throw new RangeError('Give each side as "label=image pattern", for example "Crucible=dir/{task}-{attempt}.png".');
   return { label: argument.slice(0, separator), pattern: argument.slice(separator + 1) };
 }
 

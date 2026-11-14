@@ -13,7 +13,7 @@ import { TERRAIN_TASKS } from './terrain.mjs';
 import { EASING_TASKS } from './easing.mjs';
 import { SCENE_TASKS } from './scenes.mjs';
 
-export const PROMPT_PREAMBLE = `You are modeling with the 67js MCP tools. Build the object described below as a procedural recipe scene:
+export const PROMPT_PREAMBLE = `You are modeling with the Crucible MCP tools. Build the object described below as a procedural recipe scene:
 start it with scene_create, refine it with mesh_edit, mesh_stack and scene_apply, and look at it with scene_look when
 that helps. Units are metres and Y is up. Rest the object on the ground (lowest point at Y = 0), centred on X = 0 and
 Z = 0. Build it as closed, watertight solids. When the object is finished, call scene_export_recipe once: the exported

@@ -21,7 +21,7 @@ export function duskRecipe(grade) {
     { id: 'cloth', geometry: 'block', material: 'linen', scale: [0.5, 0.01, 0.5], translation: [0.2, 0.755, -0.3] },
   ];
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0.01 }],
     materials: [
       { id: 'oak', color: [0.45, 0.3, 0.17] },

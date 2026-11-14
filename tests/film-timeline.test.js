@@ -12,7 +12,7 @@ import { audioCodecArguments } from '../scripts/frame-encoder.mjs';
 
 function recipeWith(extra = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'grey', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'block', geometry: 'box', material: 'grey' }],
@@ -112,7 +112,7 @@ test('sampling is stateless: a time gives one shot, motion clock, camera and bri
 });
 
 async function controllerFor(context) {
-  const root = await mkdtemp(join(tmpdir(), '67js-timeline-jobs-'));
+  const root = await mkdtemp(join(tmpdir(), 'crucible-timeline-jobs-'));
   const controller = await createAgentRenderJobs({ root, async run({ signal }) {
     await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
     throw signal.reason;
@@ -179,8 +179,8 @@ test('audio codec arguments: AAC by default, PCM for parts that will be joined, 
 });
 
 test('the audio library resolves plain files only and refuses links, empty files and wrong names', async context => {
-  const root = await mkdtemp(join(tmpdir(), '67js-audio-library-'));
-  const outside = await mkdtemp(join(tmpdir(), '67js-audio-outside-'));
+  const root = await mkdtemp(join(tmpdir(), 'crucible-audio-library-'));
+  const outside = await mkdtemp(join(tmpdir(), 'crucible-audio-outside-'));
   context.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outside, { recursive: true, force: true })]));
   await writeFile(join(root, 'score.wav'), 'RIFF');
   await writeFile(join(root, 'empty.wav'), '');

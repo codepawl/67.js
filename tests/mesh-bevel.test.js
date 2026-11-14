@@ -165,7 +165,7 @@ test('random bevels on random boxes stay closed and valid', () => {
 
 test('recipe meshes bevel as an edit or as a stack node', () => {
   const scene = createAgentScene({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'mesh', base: { type: 'box', bevel: 0 },
       edits: [{ op: 'bevel', edges: { between: [{ tag: 'top' }, { tag: 'side' }] }, width: 0.08, segments: 3 }],
       stack: [{ op: 'bevel', edges: { angle: 80 }, width: 0.02 }] }],

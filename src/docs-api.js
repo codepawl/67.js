@@ -1,8 +1,8 @@
-// The API reference: every export of `67js` and its addons, from /api-reference.json, which `npm run build` makes with
+// The API reference: every export of `crucible` and its addons, from /api-reference.json, which `npm run build` makes with
 // scripts/api-reference.mjs. In development, run that script once.
 import { highlightCode } from './code-highlight.js';
 
-const sourceBase = 'https://github.com/codepawl/67.js/blob/main/';
+const sourceBase = 'https://github.com/codepawl/crucible/blob/main/';
 
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -56,8 +56,8 @@ export function createApiReference() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   }).then(reference => {
-    const core = reference.modules.filter(module => module.module === '67js');
-    const addons = reference.modules.filter(module => module.module !== '67js');
+    const core = reference.modules.filter(module => module.module === 'crucible');
+    const addons = reference.modules.filter(module => module.module !== 'crucible');
     for (const [title, modules] of [['Core', core], ['Addons', addons]]) {
       const heading = document.createElement('h2');
       heading.id = title.toLowerCase();

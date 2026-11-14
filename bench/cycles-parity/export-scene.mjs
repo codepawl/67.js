@@ -1,4 +1,4 @@
-// Exports a 67js reference scene to JSON for Cycles parity runs and verifies lossless round-trip packing.
+// Exports a Crucible reference scene to JSON for Cycles parity runs and verifies lossless round-trip packing.
 //   node bench/cycles-parity/export-scene.mjs <outputDirectory> [--scene lit-interior]
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';

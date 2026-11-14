@@ -7,7 +7,7 @@ import { PARTICLE_LIMITS, createParticleLaunches, particleStateAt } from '../src
 
 function sparkRecipe(particles, extraNodes = []) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'speck', type: 'box', bevel: 0 }, { id: 'sheet', type: 'grid', segments: 2 }, { id: 'ball', type: 'sphere' }],
     materials: [{ id: 'glow', color: [1, 0.5, 0.1], emission: 4 }],
     nodes: [{ id: 'sparks', geometry: 'speck', material: 'glow' }, ...extraNodes],
@@ -253,7 +253,7 @@ test('the particle code stays unloaded for a scene without particles', async () 
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import { createAgentScene } from './src/agent-scene.js';
     import { agentSceneModuleLoaded } from './src/agent-scene-modules.js';
-    createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'cube', type: 'box' }], materials: [{ id: 'paint' }], nodes: [{ id: 'part', geometry: 'cube', material: 'paint' }] });
+    createAgentScene({ format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'cube', type: 'box' }], materials: [{ id: 'paint' }], nodes: [{ id: 'part', geometry: 'cube', material: 'paint' }] });
     console.log(agentSceneModuleLoaded('particles'));
   `], { cwd: process.cwd(), encoding: 'utf8' });
   assert.equal(result.stdout.trim(), 'false', result.stderr);
@@ -261,7 +261,7 @@ test('the particle code stays unloaded for a scene without particles', async () 
 
 function hairRecipe(system, surfaceTranslation = [0, 0, 0]) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'head', type: 'sphere', segments: 12, rings: 8 }, { id: 'strands', type: 'box' }],
     materials: [{ id: 'fur', color: [0.3, 0.2, 0.1] }],
     nodes: [

@@ -7,7 +7,7 @@ const OCEAN = { op: 'ocean', seed: 3, windSpeed: 4, size: 2, resolution: 4 };
 
 function seaRecipe({ trackTime = true, stack = [{ op: 'subdivide', levels: 3 }, OCEAN] } = {}) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, stack }],
     materials: [{ id: 'water', color: [0.1, 0.3, 0.5] }],
     nodes: [{ id: 'surface', geometry: 'sea', material: 'water' }],

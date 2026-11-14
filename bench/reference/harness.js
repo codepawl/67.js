@@ -1,6 +1,6 @@
 // Runs in the page: draws one reference scene, and describes it as plain data for Blender.
 import { useCompactColor } from '/src/compact-color.js';
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { REFERENCE_SCENES, KHRONOS_SCENES, KTX2_SCENES, loadBarnLampVariant, CLOTH_SCENES } from './scenes.js';
 import { GRAND_SCENES } from './grand-scenes.js';
 import { LOOK_OPTIONS, GRAND_PICKS } from './look-options.js';
@@ -153,7 +153,7 @@ function boxProjectedFor(part, cache) {
   return byScale.get(key);
 }
 
-// Blender's glTF importer cannot reproduce this rig's pose (three.js and 67js agree on it), so Blender gets the
+// Blender's glTF importer cannot reproduce this rig's pose (three.js and Crucible agree on it), so Blender gets the
 // skinned result as plain geometry. A score then measures shading, and not an importer's pose.
 function describeScene(id, scene) {
   const { map: _map, ...environment } = scene.environment;
@@ -175,7 +175,7 @@ function describeScene(id, scene) {
   };
 }
 
-// Blender always gets the original parts: the bake is 67js's approximation of what Cycles computes.
+// Blender always gets the original parts: the bake is Crucible's approximation of what Cycles computes.
 async function bakeScene(scene, bakeOptions) {
   if (bakeOptions.preset) {
     return bakeScenePreset(scene, bakeOptions.preset, bakeOptions.irradianceGrid, { bounces: bakeOptions.bounces, gridFog: bakeOptions.gridFog });
@@ -209,10 +209,10 @@ async function bakeScenePreset(scene, preset, irradianceGrid = false, overrides 
   return { parts: baked.parts, report: baked.report, seconds: (performance.now() - started) / 1000 };
 }
 
-// The 67js renderer for a scene: light linking from the lights' affects lists, and cascaded sun shadows when asked for.
+// The Crucible renderer for a scene: light linking from the lights' affects lists, and cascaded sun shadows when asked for.
 function createSceneRenderer(parts, scene, cascades, { water = WATER_REFLECTION } = {}) {
   const reflecting = water === 'planar' ? applyWaterReflection(parts) : { parts, surface: null };
-  const renderer = new Renderer67(document.querySelector('canvas'), applyLightLinks(reflecting.parts, scene.environment), {
+  const renderer = new CrucibleRenderer(document.querySelector('canvas'), applyLightLinks(reflecting.parts, scene.environment), {
     ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, world: true,
     environment: scene.environment, shadowBounds: scene.shadow, shadowCascades: cascades ? createCascadedShadows({ count: cascades }) : null, skyOpenness, fogSkyVisibility,
   });
@@ -361,7 +361,7 @@ async function compareBakeBackends(id, variants) {
 
 window.measureReferenceFrameTime = measureReferenceFrameTime;
 // The scene preparation the suite uses, for bench/tiers/page.js, which draws the same scenes with other renderer options.
-window.referenceInternals = { SCENES, Renderer67, applyLightLinks, withDerivedGroundBounce, withFloorSky, skyOpenness, fogSkyVisibility };
+window.referenceInternals = { SCENES, CrucibleRenderer, applyLightLinks, withDerivedGroundBounce, withFloorSky, skyOpenness, fogSkyVisibility };
 window.compareBakeBackends = compareBakeBackends;
 
 async function renderReferencePathTraced(id, options) {

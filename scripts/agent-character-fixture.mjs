@@ -117,7 +117,7 @@ export async function createAgentCharacterFixture() {
   return {
     bytes: Buffer.from(bytes),
     recipe: {
-      format: '67js.asset', schemaVersion: 1,
+      format: 'crucible.asset', schemaVersion: 1,
       camera: { eye: [5.2, 3.3, 7.8], target: [0, 1.62, 0], fov: 38, near: 0.1, far: 100 },
       environment: { daylight: 1, keyIntensity: 1.9, fillIntensity: 2.4, ambientIntensity: 1.05, lightDirection: [-0.7, 1, 0.65] },
       effects: { bloom: { strength: 0.14 }, grain: 0, vignette: 0.08 },

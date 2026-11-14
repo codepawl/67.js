@@ -70,7 +70,7 @@ test('source suspend and resume preserve transient motion pose and checkpoints',
 test('asset review samples imported clips and motion atomically and resets to authored clip pose', async () => {
   const harness = previewHarness();
   const sessionId = 'asset-review';
-  const input = { format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
+  const input = { format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32),
     animation: { clip: 0, time: 0.25 }, motion: { duration: 2, tracks: [
       { kind: 'node', id: 'node-0', property: 'translation', keyframes: [
         { time: 0, value: [0, 0, 0] }, { time: 2, value: [2, 0, 0] } ] },
@@ -112,7 +112,7 @@ test('review private cameras reject Float32 overflow and preserve canonical revi
 });
 
 function recipe() {
-  return { format: '67js.scene', schemaVersion: 1,
+  return { format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.4, 0.5, 0.6] }],
     nodes: [{ id: 'cube', geometry: 'cube', material: 'paint' }] };
@@ -186,7 +186,7 @@ test('driver errors disclose committed revision and context loss preserves recip
 test('scene_look with labels names the parts of an imported asset instead of throwing', async () => {
   const harness = previewHarness();
   const sessionId = 'asset-labels';
-  const input = { format: '67js.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) };
+  const input = { format: 'crucible.asset', schemaVersion: 1, assetId: 'ab'.repeat(32) };
   await harness.preview.createAsset({ sessionId, recipe: input,
     data: Buffer.from(skinnedStripAsset()).toString('base64'), backend: 'cpu', memoryBudgetMiB: 64 });
   const { metadata } = harness.preview.look({ sessionId, labels: true });

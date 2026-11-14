@@ -1,16 +1,16 @@
 # Humanoid retargeting and crowds
 
-`67js/addons/retarget` is available from version `0.10.0`. It moves a humanoid clip from one skeleton onto another and
+`crucible/addons/retarget` is available from version `0.10.0`. It moves a humanoid clip from one skeleton onto another and
 places many skinned copies with their own timing. It only consumes files: Mixamo clips need the owner's Adobe login to download,
 and this package never fetches them.
 
 ```js
-import { loadGltf } from '67js/addons/gltf';
-import { mapHumanoidBones, createRigFromSkin, retargetClip, createSkinClipPlayer, createCrowd } from '67js/addons/retarget';
+import { loadGltf } from 'crucible/addons/gltf';
+import { mapHumanoidBones, createRigFromSkin, retargetClip, createSkinClipPlayer, createCrowd } from 'crucible/addons/retarget';
 
 const source = createRigFromSkin(mixamoAsset.skins[0]);
 const target = createRigFromSkin(characterAsset.skins[0], { rootMatrix: armatureWorldMatrix });
-// asset.animations holds three.js clips; convert them first with clipFromGltfAnimation from 67js/addons/skeleton-pose.
+// asset.animations holds three.js clips; convert them first with clipFromGltfAnimation from crucible/addons/skeleton-pose.
 const clip = retargetClip(source, target, clipFromGltfAnimation(mixamoAsset.animations[0]), { rootMotion: false });
 
 const player = createSkinClipPlayer(characterAsset.skins[0], clip);
@@ -89,17 +89,17 @@ column-major `matrix`. `clipTime(index, seconds)` gives the instance's clip time
 ### GPU crowds
 
 The plain path (a skin pose per instance) is one batch and one palette upload per instance, about 0.26 ms of JavaScript per instance on the author's
-GPU, so about 50 instances fit 60 fps. `67js/addons/crowd-skinning` draws a crowd of one character and clip as instanced batches instead:
+GPU, so about 50 instances fit 60 fps. `crucible/addons/crowd-skinning` draws a crowd of one character and clip as instanced batches instead:
 
 ```js
-import { createCrowd } from '67js/addons/retarget';
-import { createCrowdRig, bakeCrowdPalette, createCrowdParts } from '67js/addons/crowd-skinning'; // import it before the Renderer67 is made
+import { createCrowd } from 'crucible/addons/retarget';
+import { createCrowdRig, bakeCrowdPalette, createCrowdParts } from 'crucible/addons/crowd-skinning'; // import it before the CrucibleRenderer is made
 
 const rig = createCrowdRig(asset.parts);                       // one geometry per material, a joint per rigid part and skin joint
 const palette = bakeCrowdPalette(rig, seconds => pose.apply(seconds), { duration, frameRate: 30 });
 const crowd = createCrowd({ count: 500, clip, seed: 7 });
 const set = createCrowdParts({ rig, palette, instances: crowd.instances });
-const renderer = new Renderer67(canvas, set.parts, options);
+const renderer = new CrucibleRenderer(canvas, set.parts, options);
 // each frame:
 set.setTimes(index => crowd.clipTime(index, seconds));
 renderer.updateParts(set.parts);

@@ -9,12 +9,12 @@ import { resolveAddons, addonFileFor, addonImportMap, MAXIMUM_ADDON_BUNDLE_BYTES
 import { runMcpCli } from '../scripts/mcp-server.mjs';
 import { VERSION } from '../src/version.js';
 
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const starterFolder = new URL('../templates/addon-starter', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const hasBuild = existsSync(new URL('../build/mcp/preview.js', import.meta.url));
 
 // A folder with the starter installed under node_modules, after `change` edits its package.json and files.
-function installStarter(change = () => {}, name = '67js-addon-starter') {
+function installStarter(change = () => {}, name = 'crucible-addon-starter') {
   const folder = mkdtempSync(join(tmpdir(), 'addons-test-'));
   const packageFolder = join(folder, 'node_modules', ...name.split('/'));
   mkdirSync(join(packageFolder, '..'), { recursive: true });
@@ -27,7 +27,7 @@ function installStarter(change = () => {}, name = '67js-addon-starter') {
   return folder;
 }
 
-function skippedReason(folder, name = '67js-addon-starter') {
+function skippedReason(folder, name = 'crucible-addon-starter') {
   const { addons, skipped } = resolveAddons({ folder, names: [name], version: VERSION });
   assert.deepEqual(addons, []);
   assert.equal(skipped.length, 1);
@@ -36,9 +36,9 @@ function skippedReason(folder, name = '67js-addon-starter') {
 
 test('the starter addon passes when it is allowlisted and installed inside the folder', () => {
   const folder = installStarter();
-  const { addons, skipped } = resolveAddons({ folder, names: ['67js-addon-starter'], version: VERSION });
+  const { addons, skipped } = resolveAddons({ folder, names: ['crucible-addon-starter'], version: VERSION });
   assert.deepEqual(skipped, []);
-  assert.equal(addons[0].name, '67js-addon-starter');
+  assert.equal(addons[0].name, 'crucible-addon-starter');
   assert.equal(addons[0].entry, 'src/index.js');
   assert.deepEqual(addons[0].extensionPoints, ['registerController']);
 });
@@ -58,16 +58,16 @@ test('an addon that is listed but not installed names the install command', () =
 
 test('an addon that fails the contract is skipped with the contract errors', () => {
   const folder = installStarter(pack => { delete pack.keywords; });
-  assert.match(skippedReason(folder), /fails the addon contract: .*67js-addon/);
+  assert.match(skippedReason(folder), /fails the addon contract: .*crucible-addon/);
 });
 
-test('an addon whose range excludes the running 67js version is skipped', () => {
-  const folder = installStarter(pack => { pack['67js'].range = '>=0.1.0 <0.2.0'; });
-  assert.match(skippedReason(folder), /does not allow 67js/);
+test('an addon whose range excludes the running Crucible version is skipped', () => {
+  const folder = installStarter(pack => { pack['crucible'].range = '>=0.1.0 <0.2.0'; });
+  assert.match(skippedReason(folder), /does not allow Crucible/);
 });
 
 test('an addon that declares more than the bundle bound is skipped', () => {
-  const folder = installStarter(pack => { pack['67js'].bundleBytes = MAXIMUM_ADDON_BUNDLE_BYTES + 1; });
+  const folder = installStarter(pack => { pack['crucible'].bundleBytes = MAXIMUM_ADDON_BUNDLE_BYTES + 1; });
   assert.match(skippedReason(folder), /above the server bound/);
 });
 
@@ -76,7 +76,7 @@ test('conditional exports resolve to the import entry', () => {
     pack.exports = { '.': { import: './src/index.js', require: './missing.cjs' } };
     delete pack.main;
   });
-  const { addons, skipped } = resolveAddons({ folder, names: ['67js-addon-starter'], version: VERSION });
+  const { addons, skipped } = resolveAddons({ folder, names: ['crucible-addon-starter'], version: VERSION });
   assert.deepEqual(skipped, []);
   assert.equal(addons[0].entry, 'src/index.js');
 });
@@ -99,7 +99,7 @@ test('a package whose real path is outside the addons folder is refused', contex
   const folder = mkdtempSync(join(tmpdir(), 'addons-test-'));
   mkdirSync(join(folder, 'node_modules'));
   try {
-    symlinkSync(join(outside, 'node_modules', '67js-addon-starter'), join(folder, 'node_modules', '67js-addon-starter'), 'junction');
+    symlinkSync(join(outside, 'node_modules', 'crucible-addon-starter'), join(folder, 'node_modules', 'crucible-addon-starter'), 'junction');
   } catch (error) {
     context.skip(`cannot create a link here: ${error.message}`);
     return;
@@ -111,7 +111,7 @@ test('a file inside an addon that links outside the package is not served', cont
   const folder = installStarter();
   const outsideFile = join(folder, 'secret.js');
   writeFileSync(outsideFile, 'export default 1;');
-  const { addons } = resolveAddons({ folder, names: ['67js-addon-starter'], version: VERSION });
+  const { addons } = resolveAddons({ folder, names: ['crucible-addon-starter'], version: VERSION });
   const linked = join(addons[0].folder, 'src', 'linked.js');
   try {
     symlinkSync(outsideFile, linked);
@@ -130,7 +130,7 @@ test('startup options are checked and the import map covers the addon entries', 
   assert.throws(() => resolveAddons({ names: ['x'], version: VERSION }), /--allow-addon needs --addons/);
   assert.throws(() => resolveAddons({ folder: 'relative', names: [], version: VERSION }), /absolute path/);
   const { imports } = addonImportMap({ '.': './build/67.module.js', './addons/player': './build/player.js', './standalone': './build/x.js' });
-  assert.deepEqual(imports, { '@codepawlhq/67js': '/67.module.js', '@codepawlhq/67js/addons/player': '/player.js' });
+  assert.deepEqual(imports, { '@codepawlhq/crucible': '/67.module.js', '@codepawlhq/crucible/addons/player': '/player.js' });
 });
 
 test('the server parser takes --allow-addon more than once and keeps the error style', async () => {
@@ -144,7 +144,7 @@ function textOf(result) {
 
 function recipeWithController(controller) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
     materials: [{ id: 'blue', color: [0.1, 0.3, 0.8] }],
     nodes: [{ id: 'creature', geometry: 'cube', material: 'blue' }],
@@ -165,7 +165,7 @@ async function connect(context, folder, names) {
 }
 
 test('the allowlisted starter loads in the page and its hover controller works through scene_create', { skip: !hasBuild && 'run npm run build first', timeout: 120000 }, async context => {
-  const client = await connect(context, installStarter(), ['67js-addon-starter']);
+  const client = await connect(context, installStarter(), ['crucible-addon-starter']);
   const refused = await client.callTool({ name: 'scene_create', arguments: { recipe: recipeWithController('boat') } });
   assert.equal(refused.isError, true);
   assert.match(textOf(refused), /Use one of: .*character.*vehicle.*hover/);
@@ -175,14 +175,14 @@ test('the allowlisted starter loads in the page and its hover controller works t
   assert.equal(exported.structuredContent.recipe.game.player.controller, 'hover');
   const topic = await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'addons' } });
   const report = topic.structuredContent?.value ?? JSON.parse(textOf(topic)).value;
-  assert.equal(report.loaded[0].name, '67js-addon-starter');
+  assert.equal(report.loaded[0].name, 'crucible-addon-starter');
   assert.deepEqual(report.loaded[0].registered.controllers, ['hover']);
   assert.deepEqual(report.skipped, []);
 });
 
 test('an addon that registers a point it did not declare is refused and its kind taken back', { skip: !hasBuild && 'run npm run build first', timeout: 120000 }, async context => {
-  const folder = installStarter(pack => { pack['67js'].extensionPoints = ['userPass']; });
-  const client = await connect(context, folder, ['67js-addon-starter']);
+  const folder = installStarter(pack => { pack['crucible'].extensionPoints = ['userPass']; });
+  const client = await connect(context, folder, ['crucible-addon-starter']);
   const created = await client.callTool({ name: 'scene_create', arguments: { recipe: recipeWithController('hover') } });
   assert.equal(created.isError, true);
   const topic = await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'addons' } });
@@ -194,7 +194,7 @@ test('an addon that registers a point it did not declare is refused and its kind
 test('no tool argument can name an addon path or load one', { skip: !hasBuild && 'run npm run build first', timeout: 120000 }, async context => {
   const client = await connect(context, installStarter(), []);
   for (const [name, args] of [
-    ['scene_create', { recipe: recipeWithController('hover'), addons: ['67js-addon-starter'] }],
+    ['scene_create', { recipe: recipeWithController('hover'), addons: ['crucible-addon-starter'] }],
     ['scene_capabilities', { topic: 'addons', addon: '/tmp/evil.js' }],
   ]) {
     let failed = false;

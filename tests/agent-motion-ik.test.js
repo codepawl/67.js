@@ -19,7 +19,7 @@ function armRecipe(motion, nodeOverrides = {}) {
     { id: 'ball', geometry: 'box', material: 'paint', translation: [0.3, 1.5, 0.3], scale: [0.05, 0.05, 0.05] },
     { id: 'lamp', geometry: 'box', material: 'paint', translation: [-1, 1, 0], scale: [0.1, 0.1, 0.1] },
   ].map(node => ({ ...node, ...nodeOverrides[node.id] }));
-  return { format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'box', type: 'box', bevel: 0 }], materials: SEGMENT_MATERIALS, nodes, ...(motion ? { motion } : {}) };
+  return { format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'box', type: 'box', bevel: 0 }], materials: SEGMENT_MATERIALS, nodes, ...(motion ? { motion } : {}) };
 }
 
 function worldPosition(scene, name) {
@@ -192,7 +192,7 @@ test('recipe chain IK and spline IK reach targets, stretch and follow curve node
     { id: 'c3', translation: [1.8, 1, 0] },
   ];
   const makeRecipe = ik => ({
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: SEGMENT_MATERIALS,
     nodes,

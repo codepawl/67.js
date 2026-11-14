@@ -6,59 +6,59 @@
   "height": 360,
   "cyclesSamples": 128,
   "pixelRatio": 1,
-  "reference": "Blender Cycles, view transform applied as 67js applies it (ACES fit, gamma 2.2), 8 bit"
+  "reference": "Blender Cycles, view transform applied as Crucible applies it (ACES fit, gamma 2.2), 8 bit"
  },
  "variants": {
-  "67js-default": "67js defaults",
-  "67js-ao": "67js, ambient occlusion 0.5",
-  "67js-samples8": "67js, 8 samples",
-  "67js-hdr": "67js, hdr on",
+  "crucible-default": "Crucible defaults",
+  "crucible-ao": "Crucible, ambient occlusion 0.5",
+  "crucible-samples8": "Crucible, 8 samples",
+  "crucible-hdr": "Crucible, hdr on",
   "three-default": "three.js defaults",
   "three-aces": "three.js, ACES tone mapping"
  },
  "scores": {
   "shapes": {
    "eevee": 0.0411,
-   "67js-default": 0.0565,
-   "67js-ao": 0.061,
-   "67js-samples8": 0.0565,
-   "67js-hdr": 0.0563,
+   "crucible-default": 0.0565,
+   "crucible-ao": 0.061,
+   "crucible-samples8": 0.0565,
+   "crucible-hdr": 0.0563,
    "three-default": 0.1621,
    "three-aces": 0.1291
   },
   "corner": {
    "eevee": 0.0815,
-   "67js-default": 0.1064,
-   "67js-ao": 0.1253,
-   "67js-samples8": 0.1065,
-   "67js-hdr": 0.1062,
+   "crucible-default": 0.1064,
+   "crucible-ao": 0.1253,
+   "crucible-samples8": 0.1065,
+   "crucible-hdr": 0.1062,
    "three-default": 0.212,
    "three-aces": 0.1582
   },
   "material-row": {
    "eevee": 0.074,
-   "67js-default": 0.0991,
-   "67js-ao": 0.0994,
-   "67js-samples8": 0.0991,
-   "67js-hdr": 0.0993,
+   "crucible-default": 0.0991,
+   "crucible-ao": 0.0994,
+   "crucible-samples8": 0.0991,
+   "crucible-hdr": 0.0993,
    "three-default": 0.1861,
    "three-aces": 0.15
   },
   "colonnade": {
    "eevee": 0.0502,
-   "67js-default": 0.0513,
-   "67js-ao": 0.062,
-   "67js-samples8": 0.0513,
-   "67js-hdr": 0.0511,
+   "crucible-default": 0.0513,
+   "crucible-ao": 0.062,
+   "crucible-samples8": 0.0513,
+   "crucible-hdr": 0.0511,
    "three-default": 0.1846,
    "three-aces": 0.1327
   }
  },
  "means": {
-  "67js-default": 0.0783,
-  "67js-ao": 0.0869,
-  "67js-samples8": 0.0784,
-  "67js-hdr": 0.0782,
+  "crucible-default": 0.0783,
+  "crucible-ao": 0.0869,
+  "crucible-samples8": 0.0784,
+  "crucible-hdr": 0.0782,
   "three-default": 0.1862,
   "three-aces": 0.1425,
   "eevee": 0.0617

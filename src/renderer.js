@@ -687,7 +687,7 @@ function allFinite(values) {
   return true;
 }
 
-export class Renderer67 {
+export class CrucibleRenderer {
   constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false, background = null } = {}) {
     this.background = background ? resolveBackground(background) : null;
     this.canvas = canvas;
@@ -773,7 +773,7 @@ export class Renderer67 {
     this.assemblyAmount = 0;
     // `resolveCoplanar` is resolveFlushParts from the coplanar-overlap addon, passed in so the search stays out of the core bundle.
     // It ranks near-coplanar triangles (flushOrderOf in depth-layer.js) before the parts are grouped into batches.
-    if (resolveCoplanar && typeof resolveCoplanar !== 'function') throw new TypeError('resolveCoplanar is resolveFlushParts from 67js/addons/coplanar-overlap.');
+    if (resolveCoplanar && typeof resolveCoplanar !== 'function') throw new TypeError('resolveCoplanar is resolveFlushParts from crucible/addons/coplanar-overlap.');
     if (resolveCoplanar && !benchmark) resolveCoplanar(parts);
     this.fitParts = this.groundPart ? [...parts, this.groundPart] : parts;
     const groups = groupParts(this.fitParts, batching);
@@ -968,7 +968,7 @@ export class Renderer67 {
   }
 
   selectViewTransform(viewTransform, lookSource) {
-    if ((viewTransform !== 'aces' || lookSource) && !viewTransformShader.apply) throw new Error("viewTransform and look need their shader code: add import '@codepawlhq/67js/addons/view-transform-shader' (a recipe: await loadAgentSceneModules(recipe)).");
+    if ((viewTransform !== 'aces' || lookSource) && !viewTransformShader.apply) throw new Error("viewTransform and look need their shader code: add import '@codepawlhq/crucible/addons/view-transform-shader' (a recipe: await loadAgentSceneModules(recipe)).");
     this.viewTransform = viewTransform;
     this.lookSource = lookSource;
     this.look = lookSource ? viewTransformShader.resolveLook(lookSource) : null;
@@ -1107,7 +1107,7 @@ export class Renderer67 {
   // Re-uploads a descriptor's pixels: the whole image (update.image, or the descriptor image again) or update.region {x, y, width, height, data}.
   // The code is in the texture-update addon, so a scene that never updates a texture does not carry it.
   updateTexture(descriptor, update = {}) {
-    if (!textureUpdateSupport.update) throw new Error("updateTexture needs its code: add import '@codepawlhq/67js/addons/texture-update'.");
+    if (!textureUpdateSupport.update) throw new Error("updateTexture needs its code: add import '@codepawlhq/crucible/addons/texture-update'.");
     textureUpdateSupport.update(this, descriptor, update);
   }
 
@@ -2621,7 +2621,7 @@ export class Renderer67 {
   // A render pass draws raw material data instead of the lit image; the addon validates frame.pass and returns the shader mode.
   preparePass(frame) {
     if (frame.pass === undefined) return 0;
-    if (!this.passSupport) throw new Error('Render passes need installRenderPasses(renderer) from 67js/addons/render-passes.');
+    if (!this.passSupport) throw new Error('Render passes need installRenderPasses(renderer) from crucible/addons/render-passes.');
     return this.passSupport.prepare(frame);
   }
 
@@ -2860,5 +2860,7 @@ export class Renderer67 {
   }
 }
 
-// Glaze is the public name of the real-time renderer; Renderer67 stays for existing code.
-export { Renderer67 as Glaze };
+// Glaze is the public name of the real-time renderer; CrucibleRenderer stays for existing code.
+export { CrucibleRenderer as Glaze };
+/** Deprecated: the old name of CrucibleRenderer, removed in the release after 0.20.0. */
+export { CrucibleRenderer as Renderer67 };

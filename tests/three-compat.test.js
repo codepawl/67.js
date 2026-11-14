@@ -23,7 +23,7 @@ test('the addon does not import three or the core by name', async () => {
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../packages/three-compat/index.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /^\s*import\s/m, 'the addon has no import statement');
-  assert.throws(() => createThreeCompat({}), /needs the 67js export Renderer67/);
+  assert.throws(() => createThreeCompat({}), /needs the Crucible export CrucibleRenderer/);
 });
 
 test('every snippet that needs no browser builds parts, an environment and a frame', async () => {
@@ -71,7 +71,7 @@ test('Euler rotation XYZ turns a mesh like three.js does', () => {
   assert.ok(Math.abs(parts[0].matrix[4] + 1) < 1e-6);
 });
 
-test('MeshStandardMaterial and MeshPhysicalMaterial become 67js materials in linear colour', () => {
+test('MeshStandardMaterial and MeshPhysicalMaterial become Crucible materials in linear colour', () => {
   const standard = new THREE.MeshStandardMaterial({ color: 0xff8000, metalness: 0.7, roughness: 0.2, emissive: 0x00ff00, emissiveIntensity: 2, side: THREE.DoubleSide }).toMaterial();
   assert.ok(Math.abs(standard.color[0] - 1) < 1e-6);
   assert.ok(Math.abs(standard.color[1] - 0.2158605) < 1e-5, 'sRGB 0x80 is linear 0.2159');
@@ -146,7 +146,7 @@ test('OrbitControls moves the camera around its target', () => {
   assert.ok(Math.abs(camera.position.z) < 1e-6);
 });
 
-test('unsupported three.js names throw an error that names the 67js replacement', () => {
+test('unsupported three.js names throw an error that names the Crucible replacement', () => {
   const cases = [
     ['MeshBasicMaterial', /MeshStandardMaterial.*emission/],
     ['ShaderMaterial', /no custom shaders/],
@@ -169,8 +169,8 @@ test('unsupported three.js names throw an error that names the 67js replacement'
   assert.equal(THREE.then, undefined, 'lowercase names are plain properties');
 });
 
-test('every 67js call named by an error exists', () => {
-  const known = new Set([...Object.keys(core), ...Object.getOwnPropertyNames(core.Renderer67.prototype), 'loadGltf', 'createModel', 'box', 'sphere', 'cylinder', 'torus', 'canvas.toBlob', 'Texture']);
+test('every Crucible call named by an error exists', () => {
+  const known = new Set([...Object.keys(core), ...Object.getOwnPropertyNames(core.CrucibleRenderer.prototype), 'loadGltf', 'createModel', 'box', 'sphere', 'cylinder', 'torus', 'canvas.toBlob', 'Texture']);
   assert.ok(unsupportedNames.length >= 20);
   for (const name of unsupportedNames) {
     let message = '';
@@ -181,7 +181,7 @@ test('every 67js call named by an error exists', () => {
     }
     assert.ok(message, `${name} throws`);
     for (const [, call] of message.matchAll(/([A-Za-z_.]+)\(/g)) {
-      assert.ok(known.has(call) || known.has(call.split('.').at(-1)), `${name}: the error names ${call}, which is not a 67js export`);
+      assert.ok(known.has(call) || known.has(call.split('.').at(-1)), `${name}: the error names ${call}, which is not a Crucible export`);
     }
   }
 });

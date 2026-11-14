@@ -40,7 +40,7 @@ Motion blur (`effects.motionBlur.shutter`) needs camera tracks and this `motion`
 
 ## Shots, cuts and sound
 
-A recipe `timeline` (see `build-67js-scene`, `film-and-animation.md`) plays its shots, so the job takes `timeline`
+A recipe `timeline` (see `build-crucible-scene`, `film-and-animation.md`) plays its shots, so the job takes `timeline`
 and no `motion` or `animation`. `duration` defaults to the rest of the timeline.
 
 ```json

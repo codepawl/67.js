@@ -20,7 +20,7 @@ const transport = new PatientStdioClientTransport({
 });
 let errors = '';
 transport.stderr.on('data', chunk => { errors += chunk.toString(); });
-const client = new Client({ name: '67js-render-proof', version: '1' }, {
+const client = new Client({ name: 'crucible-render-proof', version: '1' }, {
   versionNegotiation: { mode: era === 'modern' ? { pin: '2026-07-28' } : 'legacy' },
 });
 let processId;
@@ -159,7 +159,7 @@ try {
 } finally {
   await client.close();
 }
-assert.match(errors, /67js preview resources closed\./);
+assert.match(errors, /crucible preview resources closed\./);
 assert.doesNotMatch(errors, /cleanup failed|shutdown failed/);
 assert.throws(() => process.kill(processId, 0), /ESRCH/);
 await writeFile(`artifacts/mcp-${backend}-${era}.json`, JSON.stringify(report, null, 2));

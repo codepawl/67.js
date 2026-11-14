@@ -1,6 +1,6 @@
 # Culling, levels of detail and adaptive resolution
 
-`Renderer67` skips what the camera can not see and can draw far copies of a model with fewer triangles. Both are decided on the CPU from the camera and the instance matrices alone. A scene that has no off-screen parts and no levels draws as before.
+`CrucibleRenderer` skips what the camera can not see and can draw far copies of a model with fewer triangles. Both are decided on the CPU from the camera and the instance matrices alone. A scene that has no off-screen parts and no levels draws as before.
 
 ## Culling
 
@@ -16,7 +16,7 @@ What is not culled, because its bounding sphere would not hold or because it dra
 - Alpha-blended, `liquid` and `foam` batches.
 - The shadow passes. A caster outside the view can still shadow the view, so shadow maps draw every caster.
 
-Pass `culling: false` to the `Renderer67` options to turn it off, for example to compare a picture.
+Pass `culling: false` to the `CrucibleRenderer` options to turn it off, for example to compare a picture.
 
 ## Levels of detail
 
@@ -25,7 +25,7 @@ Give a part `lods`, the array that `generateGeometryLods(geometry, { ratios })` 
 ```js
 const levels = generateGeometryLods(rock, { ratios: [0.25, 0.06] });
 const parts = positions.map((position, index) => ({ name: `rock-${index}`, geometry: rock, lods: levels, matrix: translate(position), material }));
-const renderer = new Renderer67(canvas, parts, { lodPixelError: 1 });
+const renderer = new CrucibleRenderer(canvas, parts, { lodPixelError: 1 });
 ```
 
 An instance uses the coarsest level whose `error` (the farthest its vertices lie from level 0, in geometry units, times the instance's largest scale) covers at most `lodPixelError` pixels on screen at its distance. The default is 1 pixel. Level 0 is always allowed, so a close instance is never reduced.
@@ -34,7 +34,7 @@ An instance uses the coarsest level whose `error` (the farthest its vertices lie
 
 ## Cross-fades and impostor levels
 
-`lods` switch a mesh by its pixel error and do not fade. The vegetation addon chooses its own levels by distance (`selectLevels`) and can fade between them: `selectLevels(instances, eye, { fade: 0.06 })` draws both levels near a threshold with complementary screen-door coverage (a mask material whose `opacityBias` carries the coverage; the code registers when the vegetation addon is imported), `pixelError: { pixels, height, fov }` sets the switch distances from an error in screen pixels (4 pixels on a 1080 pixel high view with a 60 degree field of view gives the default distances), and `impostors` adds a last level that draws one baked card per tree (material tag `impostor`), which shows a stochastic blend of the four baked views around the viewing direction. Culling treats the card as a rigid part: its bounding sphere holds the quad, and the sway is a few centimetres. These choices depend on the distance and the view only, so they keep the determinism below; see [Vegetation](https://67js.codepawl.com/vegetation.md#impostors-and-cross-fade).
+`lods` switch a mesh by its pixel error and do not fade. The vegetation addon chooses its own levels by distance (`selectLevels`) and can fade between them: `selectLevels(instances, eye, { fade: 0.06 })` draws both levels near a threshold with complementary screen-door coverage (a mask material whose `opacityBias` carries the coverage; the code registers when the vegetation addon is imported), `pixelError: { pixels, height, fov }` sets the switch distances from an error in screen pixels (4 pixels on a 1080 pixel high view with a 60 degree field of view gives the default distances), and `impostors` adds a last level that draws one baked card per tree (material tag `impostor`), which shows a stochastic blend of the four baked views around the viewing direction. Culling treats the card as a rigid part: its bounding sphere holds the quad, and the sway is a few centimetres. These choices depend on the distance and the view only, so they keep the determinism below; see [Vegetation](https://crucible.codepawl.com/vegetation.md#impostors-and-cross-fade).
 
 ## Determinism
 
@@ -42,7 +42,7 @@ The selection is a pure function of the geometry, the instance matrices, the cam
 
 ## GPU timing and adaptive resolution
 
-`createGpuTimer(context)` from `src/adaptive-quality.js` wraps `EXT_disjoint_timer_query_webgl2` (it returns `null` without the extension). Pass the function itself as the `createGpuTimer` option of `Renderer67` and the renderer times each frame. A result arrives a few frames late, so `renderer.gpuMilliseconds` holds the latest finished one, or `null` after a disjoint measurement. Without the option nothing is timed and the timer code is not bundled.
+`createGpuTimer(context)` from `src/adaptive-quality.js` wraps `EXT_disjoint_timer_query_webgl2` (it returns `null` without the extension). Pass the function itself as the `createGpuTimer` option of `CrucibleRenderer` and the renderer times each frame. A result arrives a few frames late, so `renderer.gpuMilliseconds` holds the latest finished one, or `null` after a disjoint measurement. Without the option nothing is timed and the timer code is not bundled.
 
 `createAdaptiveResolution({ exporting: false, targetMilliseconds, minimumScale, step, window })` from `src/adaptive-quality.js` returns a controller. Feed it one frame time per frame with `update(milliseconds)` and multiply the pixel ratio by the scale it returns. It lowers the scale by one `step` when the average of `window` frames is over the target, raises it only after a whole window under 0.6 of the target, and never goes below `minimumScale` (default 0.5). `createAdaptiveResolution({ exporting: true })` throws: exports keep full quality, and the live viewer in `src/main.js` builds a controller only when its `export` parameter is not `1`.
 

@@ -2,7 +2,7 @@
 
 ## Examples
 
-Each demo is a 67js scene with its source in the repository.
+Each demo is a Crucible scene with its source in the repository.
 
 ```cards
 Object studio | /object.html | Orbit, lighting looks, an exploded view and PNG export. | /previews/wall-e.webp
@@ -36,6 +36,6 @@ A contract is the exact rule set of one module: inputs, limits, memory and error
 ## Project
 
 - [Changelog](/changelog.html): every release and the unreleased changes. Agents can read [changelog.json](/changelog.json).
-- [npm package](https://www.npmjs.com/package/@codepawlhq/67js): `@codepawlhq/67js`.
-- [Source on GitHub](https://github.com/codepawl/67.js): issues, pull requests and the contributing guide.
+- [npm package](https://www.npmjs.com/package/@codepawlhq/crucible): `@codepawlhq/crucible`.
+- [Source on GitHub](https://github.com/codepawl/crucible): issues, pull requests and the contributing guide.
 - [Release metadata](/release.json): the published version, the browser module URL and the archive checksum.

@@ -27,12 +27,12 @@ const recipePath = valueAfter('--recipe', 'tests/fixtures/demo-room.recipe.json'
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 await mkdir(outputDirectory, { recursive: true });
-const workDirectory = await mkdtemp(join(tmpdir(), '67js-native-job-'));
+const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-native-job-'));
 const transport = new StdioClientTransport({ command: process.execPath,
-  args: [resolve('bin/67js-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(valueAfter('--browser', '') ? ['--browser', valueAfter('--browser', '')] : [])], cwd: workDirectory, stderr: 'pipe', env: { ...process.env } });
+  args: [resolve('bin/crucible-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(valueAfter('--browser', '') ? ['--browser', valueAfter('--browser', '')] : [])], cwd: workDirectory, stderr: 'pipe', env: { ...process.env } });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
-const client = new Client({ name: '67js-native-job-bench', version: '1' });
+const client = new Client({ name: 'crucible-native-job-bench', version: '1' });
 
 async function call(name, toolArguments = {}, timeout = 600000) {
   return client.callTool({ name, arguments: toolArguments }, { timeout });

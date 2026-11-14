@@ -12,7 +12,7 @@ const backend = process.argv[2] ?? 'cpu';
 assert.ok(['cpu', 'gpu'].includes(backend));
 await mkdir('artifacts', { recursive: true });
 const harness = `<!doctype html><html><head><style>html,body{margin:0}</style></head><body><script type="module">
-import {Renderer67} from '/src/renderer.js';
+import {CrucibleRenderer} from '/src/renderer.js';
 import '/src/replace-textured-parts.js';
 const identity = [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
 function quad(left, right) {
@@ -35,7 +35,7 @@ const textured = { name: 'textured', geometry: quad(0.2, 2), matrix: new Float32
 const canvas = document.createElement('canvas');
 canvas.width = canvas.height = 128;
 document.body.append(canvas);
-const renderer = new Renderer67(canvas, [plain], { ground: false, shadows: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 64 });
+const renderer = new CrucibleRenderer(canvas, [plain], { ground: false, shadows: false, samples: 1, pixelRatio: 1, memoryBudgetMiB: 64 });
 const context = renderer.context;
 const camera = { eye: [0, 0, 6], target: [0, 0, 0] };
 function greenPixels() {

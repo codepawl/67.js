@@ -11,7 +11,7 @@ const CAMERA = { fov: 34 };
 
 function baseRecipe({ geometries, materials, nodes, motion, cloth, camera, floorColor = [0.55, 0.55, 0.58], environment }) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [...geometries, { id: 'floor', type: 'box', bevel: 0 }],
     materials: [...materials, { id: 'stone', color: floorColor }],
     nodes: [...nodes, GROUND_NODE],

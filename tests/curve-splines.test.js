@@ -176,7 +176,7 @@ test('curve rejects bad splines with the field and what to pass', () => {
 
 test('a recipe curve geometry takes a shape, splines, kind and trim, and rejects mixing them', () => {
   const recipe = geometry => ({
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     materials: [{ id: 'metal', color: [0.6, 0.6, 0.65], metallic: 1, roughness: 0.3 }],
     geometries: [{ id: 'g', type: 'curve', ...geometry }],
@@ -193,7 +193,7 @@ test('a recipe curve geometry takes a shape, splines, kind and trim, and rejects
 
 function vineRecipe(grow = { name: 'vine', steps: 8 }, keyframes = [{ time: 0, value: 0 }, { time: 1, value: 1 }]) {
   return {
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     materials: [{ id: 'leaf', color: [0.2, 0.6, 0.2] }],
     geometries: [{ id: 'vine', type: 'curve', points: [[0, 0, 0], [2, 0, 0], [4, 1, 0], [6, 1, 0]], kind: 'poly', radius: 0.02, radialSegments: 4, grow }],
@@ -381,7 +381,7 @@ test('NURBS knots repeated beyond the order or leaving a zero-width last span ar
 
 test('a recipe curve geometry takes order and knots', () => {
   const recipe = geometry => ({
-    format: '67js.scene',
+    format: 'crucible.scene',
     schemaVersion: 1,
     materials: [{ id: 'metal', color: [0.6, 0.6, 0.65] }],
     geometries: [{ id: 'g', type: 'curve', kind: 'nurbs', points: [[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]], radius: 0.05, ...geometry }],

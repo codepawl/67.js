@@ -13,7 +13,7 @@ const EXAMPLE_TOOLS = ['scene_create', 'scene_apply', 'scene_create_asset', 'sce
 async function connect(context) {
   const runtime = { async close() {}, async capabilities() { return { scene: AGENT_SCENE_CAPABILITIES, phase: 'idle', availableIn: 'test' }; } };
   const server = createAgentMcpServer(runtime);
-  const client = new Client({ name: '67js-examples-test', version: '1' });
+  const client = new Client({ name: 'crucible-examples-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

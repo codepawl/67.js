@@ -167,7 +167,7 @@ test('the pillar court check rejects a grid with a wrong count or spacing', asyn
 });
 
 test('an invalid recipe fails every check with the reason', async () => {
-  const grade = await gradeRecipe(taskById('bolt'), { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [{ id: 'x', geometry: 'missing' }] });
+  const grade = await gradeRecipe(taskById('bolt'), { format: 'crucible.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [{ id: 'x', geometry: 'missing' }] });
   assert.equal(grade.passed, 0);
   assert.match(grade.results[0].detail, /recipe failed/);
 });
@@ -304,7 +304,7 @@ test('the plain overshoot task forbids easings in its prompt and grades the hand
 });
 
 const PAIRWISE_SIDES = {
-  a: { label: '67js MCP', pattern: 'renders/mcp/{attempt}/{task}.png' },
+  a: { label: 'Crucible MCP', pattern: 'renders/mcp/{attempt}/{task}.png' },
   b: { label: 'three.js by code', pattern: 'renders/code/{task}-{attempt}.png' },
 };
 
@@ -332,8 +332,8 @@ test('the pairwise win count follows a fixed set of answers and its exact p', as
     return { answer: pair.firstSide === wantedSide ? 'first' : 'second', costUsd: 0.01 };
   };
   const records = await judgePairs({ pairs, ask });
-  const summary = summarizePairing({ records, labels: { a: '67js MCP', b: 'three.js by code' }, control: false });
-  assert.deepEqual(summary.wins, { '67js MCP': 1, 'three.js by code': 5 });
+  const summary = summarizePairing({ records, labels: { a: 'Crucible MCP', b: 'three.js by code' }, control: false });
+  assert.deepEqual(summary.wins, { 'Crucible MCP': 1, 'three.js by code': 5 });
   assert.equal(summary.trials, 6);
   assert.ok(Math.abs(summary.pValue - 0.21875) < 1e-9, 'two-sided p of 5 of 6 is 14/64');
   assert.equal(summary.costUsd, 0.06);
@@ -354,11 +354,11 @@ test('the control pairs one render with itself and reports position bias', async
   assert.equal(pairs.length, 8);
   for (const pair of pairs) {
     assert.equal(pair.firstImage, pair.secondImage, 'identical input on both sides');
-    assert.equal(pair.firstLabel, '67js MCP');
-    assert.equal(pair.secondLabel, '67js MCP');
+    assert.equal(pair.firstLabel, 'Crucible MCP');
+    assert.equal(pair.secondLabel, 'Crucible MCP');
   }
   const records = await judgePairs({ pairs, ask: async () => ({ answer: 'first' }) });
-  const summary = summarizePairing({ records, labels: { a: '67js MCP', b: 'three.js by code' }, control: true });
+  const summary = summarizePairing({ records, labels: { a: 'Crucible MCP', b: 'three.js by code' }, control: true });
   assert.equal(summary.pickedFirst, 8);
   assert.equal(summary.pickedSecond, 0);
   assert.ok(summary.pBias < 0.01, 'always picking first is position bias');
@@ -379,7 +379,7 @@ test('runPairwise calls the judge once per pair and once per control pair, with 
 
 test('fix rounds count the writes after the first render, in both systems', () => {
   const mcpSteps = ['scene_create', 'scene_apply', 'scene_look', 'scene_apply', 'scene_look', 'scene_apply', 'scene_export_recipe']
-    .map(name => ({ name: `mcp__67js__${name}` }));
+    .map(name => ({ name: `mcp__crucible__${name}` }));
   assert.equal(countFixRounds(mcpSteps, { isRender: isMcpRender, isWrite: isMcpWrite }), 2);
   assert.equal(countFixRounds(mcpSteps.slice(0, 2), { isRender: isMcpRender, isWrite: isMcpWrite }), 0, 'never rendered');
 

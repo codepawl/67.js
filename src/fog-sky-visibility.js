@@ -51,7 +51,7 @@ function uploadGrid(context, grid, bounce) {
 }
 
 /**
- * The `fogSkyVisibility` option of `Renderer67`: a 3D texture of how much sky each point of the fog box sees and how much
+ * The `fogSkyVisibility` option of `CrucibleRenderer`: a 3D texture of how much sky each point of the fog box sees and how much
  * light the surfaces around it give back, which the fog's ambient follows. It lives outside the core entry like
  * `skyOpenness`, and a scene without the option compiles the sampling out of the post shader. The rays run once per scene and
  * fog box, not per frame. The renderer calls it every frame with its resolved `volume` and the frame's `environment` and

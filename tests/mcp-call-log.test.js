@@ -38,7 +38,7 @@ async function connect(context, callLogPath) {
 }
 
 async function temporaryLogPath(context) {
-  const directory = await mkdtemp(join(tmpdir(), '67js-call-log-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-call-log-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   return join(directory, 'calls.jsonl');
 }

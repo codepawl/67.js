@@ -13,7 +13,7 @@ All jobs start at once.
 | `unit` (12 shards balanced by measured time, `scripts/shard-test-files.mjs` and `config/test-timings.json`) | `npm run build:lib`, then `npm run test:coverage` on one twelfth of the test files; uploads its lcov and per-file timings |
 | `coverage` | merges the shard lcov files, writes the summary, compares with `config/coverage-baseline.json`, uploads `lcov` |
 | `package` | `prepare:release`, `check:links:package`, `smoke:package`, `smoke:mcp-package` |
-| `bun` | `smoke:mcp-package` with `MCP_SERVER_RUNTIME=bun`: the packed MCP server runs under bun, the way `bunx 67js-mcp` starts it |
+| `bun` | `smoke:mcp-package` with `MCP_SERVER_RUNTIME=bun`: the packed MCP server runs under bun, the way `bunx crucible-mcp` starts it |
 | `test` | waits for every job above and fails unless each one succeeded. Branch protection on `main` requires this name. |
 
 `node --test` runs each file in its own process (the Node 24 default, `--test-isolation=process`), so the unit pass is also the isolation check. `npm run test:isolated` stays as a local tool: it runs the same files four at a time and reruns a failure alone.

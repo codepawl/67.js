@@ -6,10 +6,10 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { BUNDLED_CUBE_LOOK_NAMES, BUNDLED_ENVIRONMENT_NAMES } from '../src/look-catalog.js';
 
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'cube', type: 'box', bevel: 0 }],
   materials: [{ id: 'blue', color: [0.1, 0.3, 0.8] }],
   nodes: [{ id: 'mesh', geometry: 'cube', material: 'blue' }],

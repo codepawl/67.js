@@ -11,7 +11,7 @@ import { createAgentMcpServer } from '../scripts/mcp-server.mjs';
 import { materialLayerState, MATERIAL_LAYER_STATE_LENGTH } from '../src/material-layers.js';
 
 const BASE_RECIPE = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'box', type: 'box' }],
   materials: [{ id: 'gray', color: [0.5, 0.5, 0.5] }],
   nodes: [{ id: 'block', geometry: 'box', material: 'gray' }],
@@ -106,7 +106,7 @@ test('installLineArt needs render passes first and leaves a frame without lines 
 
 test('the MCP scene_create schema accepts lines (or null) and a material toon', async () => {
   const server = createAgentMcpServer({ async close() {}, async capabilities() { return { scene: {}, phase: 'idle' }; } });
-  const client = new Client({ name: '67js-line-art-test', version: '1' });
+  const client = new Client({ name: 'crucible-line-art-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

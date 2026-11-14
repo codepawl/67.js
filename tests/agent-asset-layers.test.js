@@ -22,7 +22,7 @@ function clipIndex(asset, name) {
 }
 
 function assetScene(asset, motion) {
-  return createAgentAssetScene(asset, { format: '67js.asset', schemaVersion: 1, assetId: ASSET_ID, motion });
+  return createAgentAssetScene(asset, { format: 'crucible.asset', schemaVersion: 1, assetId: ASSET_ID, motion });
 }
 
 function walkAndWave(asset, extraWave = {}) {
@@ -208,7 +208,7 @@ test('layer input that is not bounded plain data is refused', async () => {
 test('a recipe without an imported asset refuses layers', async () => {
   const { createAgentScene } = await import('../src/agent-scene.js');
   const recipe = {
-    format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'box', type: 'box', bevel: 0 }], materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
+    format: 'crucible.scene', schemaVersion: 1, geometries: [{ id: 'box', type: 'box', bevel: 0 }], materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'cube', geometry: 'box', material: 'paint' }], motion: { duration: 1, layers: [{ clip: 0 }] },
   };
   assert.throws(() => createAgentScene(recipe), /imported asset|asset recipe/);

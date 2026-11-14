@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat3, mat4 } from 'gl-matrix';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { MATERIAL_LAYER_FIELDS, materialLayerState } from '../src/material-layers.js';
 import { SNAPSHOT_REFERENCE_FIELDS, SNAPSHOT_VALUE_FIELDS, MaterialSnapshot } from '../src/material-snapshot.js';
 
@@ -12,7 +12,7 @@ function createPart(name, material = {}) {
 }
 
 function createRenderer(parts) {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42), castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false, pass: 'opaque' };
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData() {} };
   renderer.partLocations = new Map(parts.map((part, index) => [part, {

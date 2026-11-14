@@ -88,7 +88,7 @@ async function validateJsonContent(kind, id, json, label, file, validateScene) {
   if (remote?.tooDeep) throw invalidField(`pack "${label}" ${file}`, `JSON nested over ${MAXIMUM_JSON_DEPTH} levels`, `at most ${MAXIMUM_JSON_DEPTH} levels of nested objects and lists; flatten ${remote.path}`);
   if (remote) throw invalidField(`pack "${label}" ${file} ${remote.path}`, remote.value, 'no remote URL: a pack is data only. Reference pack files by their catalog ID, and use data:image/png|jpeg|webp;base64 only for small images');
   if (!json || typeof json !== 'object' || Array.isArray(json)) throw invalidField(`pack "${label}" ${file}`, json, 'one JSON object');
-  if (kind === 'recipes' && json.format !== '67js.scene') throw invalidField(`pack "${label}" ${file} format`, json.format, '"67js.scene", the recipe format scene_create takes');
+  if (kind === 'recipes' && json.format !== 'crucible.scene') throw invalidField(`pack "${label}" ${file} format`, json.format, '"crucible.scene", the recipe format scene_create takes');
   if (!validateScene) return;
   try {
     await validateScene(kind, id, json);

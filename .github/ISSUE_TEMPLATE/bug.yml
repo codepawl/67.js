@@ -5,14 +5,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Search [open issues](https://github.com/codepawl/67.js/issues?q=is%3Aissue) first. Report a security problem [privately](https://github.com/codepawl/67.js/security/advisories/new), not here. Ask questions in [Discussions](https://github.com/codepawl/67.js/discussions/categories/q-a).
+        Search [open issues](https://github.com/codepawl/crucible/issues?q=is%3Aissue) first. Report a security problem [privately](https://github.com/codepawl/crucible/security/advisories/new), not here. Ask questions in [Discussions](https://github.com/codepawl/crucible/discussions/categories/q-a).
         Leave out local paths, tokens and personal data: issues are public.
   - type: dropdown
     id: surface
     attributes:
       label: Where it happens
       options:
-        - Library in my app (import from @codepawlhq/67js)
+        - Library in my app (import from @codepawlhq/crucible)
         - MCP server, driven by an agent
         - Render job or video export
         - The site or the docs
@@ -47,8 +47,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: 67js version
-      description: Run `npm ls @codepawlhq/67js` or `npx 67js-mcp --version`.
+      label: Crucible version
+      description: Run `npm ls @codepawlhq/crucible` or `npx crucible-mcp --version`.
       placeholder: 0.16.0
     validations:
       required: true
@@ -59,6 +59,6 @@ body:
       description: Operating system, browser and version, GPU, Node version. For the MCP server, also the agent client and the flags you start it with (`--backend`, `--memory`).
       placeholder: |
         Windows 11, Chrome 142, RTX 3060, Node 24
-        Claude Code, npx 67js-mcp --backend gpu --memory 192
+        Claude Code, npx crucible-mcp --backend gpu --memory 192
     validations:
       required: true

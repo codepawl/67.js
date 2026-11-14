@@ -4,7 +4,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Show what you made with 67js.
+        Show what you made with Crucible.
         Leave out local paths, tokens and personal data: discussions are public. Check the picture and the calls you paste before you post.
   - type: textarea
     id: picture
@@ -22,8 +22,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: 67js version
-      description: Run `npm ls @codepawlhq/67js`.
+      label: Crucible version
+      description: Run `npm ls @codepawlhq/crucible`.
       placeholder: 0.16.0
     validations:
       required: true

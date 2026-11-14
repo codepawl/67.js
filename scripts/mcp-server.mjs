@@ -690,7 +690,7 @@ const clothListed = listed('cloth', cloth, 'Baked cloth sheets: duration, gravit
 const armatureListed = listed('armatures', armature, 'A skeleton { id, parent, preset humanoid|quadruped, fit, bones [{name, parent, head, tail}], prefix, translation, rotation }; see scene_capabilities armatures.', { id: identifier });
 const gameReference = z.record(z.string(), z.unknown()).describe('Playable setup as plain JSON, never code: {player:{node}, camera, input, physics, ground, rules}. Fields and an example: scene_capabilities game.');
 const recipe = z.strictObject({
-  format: z.literal('67js.scene'),
+  format: z.literal('crucible.scene'),
   schemaVersion: z.literal(1),
   geometries: z.array(geometryListed).max(256).optional(),
   materials: z.array(materialListed(z.strictObject({ id: identifier, tag: materialTag, ...materialFields }), 'Material.', { id: identifier })).max(256).optional().describe('Omit for none.'),
@@ -710,7 +710,7 @@ const recipe = z.strictObject({
   game: gameReference.nullable().optional(),
 }).describe('Bounded scene recipe; the backend validates it.');
 const assetRecipe = z.strictObject({
-  format: z.literal('67js.asset'),
+  format: z.literal('crucible.asset'),
   schemaVersion: z.literal(1),
   assetId: z.string().regex(/^[a-f0-9]{64}$/).describe('SHA-256 asset ID from scene_asset_catalog.'),
   camera: z.strictObject(cameraFields).optional(),
@@ -854,7 +854,7 @@ export function readableErrorMessage(error) {
   if (!isEngineFault(readable)) {
     return readable;
   }
-  console.error(`67js internal error: ${readable}`);
+  console.error(`Crucible internal error: ${readable}`);
   return ENGINE_FAULT_ADVICE;
 }
 
@@ -862,7 +862,7 @@ export function readableErrorMessage(error) {
 // to the validation messages we write ourselves. They name no input the agent can change, so the agent gets advice and
 // the detail goes to the server log.
 const ENGINE_FAULT = /Cannot (?:read|set) propert(?:y|ies) of (?:undefined|null)|Cannot destructure|is not a function|is not iterable|is not defined|Cannot convert undefined or null/;
-const ENGINE_FAULT_ADVICE = 'Internal error in the 67js server, not caused by your input. Call scene_inspect to check the scene, retry once, and if it repeats, leave out the optional field you just added (for example labels) or report the tool name.';
+const ENGINE_FAULT_ADVICE = 'Internal error in the Crucible server, not caused by your input. Call scene_inspect to check the scene, retry once, and if it repeats, leave out the optional field you just added (for example labels) or report the tool name.';
 
 function isEngineFault(message) {
   return ENGINE_FAULT.test(message);
@@ -888,15 +888,15 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   const restoreCheckpointId = checkpointFields.checkpointId.optional();
   const branchInstructions = branches ? ' To try variants, give scene_apply a branch name for each (the scene stays put), compare them in one scene_review with a branch per shot, then keep the best with scene_restore and its branch.' : '';
   installVolumeGridFiles();
-  const server = new McpServer({ name: '67js-scene', version }, {
+  const server = new McpServer({ name: 'crucible-scene', version }, {
     instructions: 'Start with scene_capabilities. Create a procedural recipe with scene_create, or select a configured GLB digest from scene_asset_catalog and use scene_create_asset. Pass its sessionId to work on several open scenes; without it the last used scene is used. Inspect stable IDs and save a checkpoint before editing. Apply small batches with the current expectedRevision and check committed, revision and renderSucceeded. A committed edit can have a separate renderError; do not retry it with an old revision.'+branchInstructions+' Pass labels: true to scene_look or scene_review to match part names to the image. Use scene_look to judge the actual image, or scene_review with the current expectedRevision to compare independent camera and motion samples in one grid while preserving the source pose. When jobs are configured, scene_render_submit captures an immutable snapshot. Poll scene_render_status, cancel when needed, and retrieve verified local artifact metadata with scene_render_result after completion. Preview rendering and edits pause during a job; source revision and checkpoints survive. Release outputs with scene_render_release. Export the final recipe and dispose the scene when finished. No arbitrary JavaScript, remote URLs or caller-selected output paths are exposed.'+(newerVersion ? updateNoticeText(newerVersion) : ''),
   });
   let closePromise;
   server.server.onclose = () => {
     closePromise ??= Promise.resolve().then(() => runtime.close());
     closePromise.then(
-      () => console.error('67js preview resources closed.'),
-      error => console.error(`67js runtime cleanup failed: ${error.message}`),
+      () => console.error('Crucible preview resources closed.'),
+      error => console.error(`Crucible runtime cleanup failed: ${error.message}`),
     );
   };
   // A call that leaves sessionId out means the last used scene. A stale, evicted or invented ID is still
@@ -1009,7 +1009,7 @@ export async function runMcpCli({ argumentsValue = process.argv.slice(2),
     else options[name.slice(2)] = name === '--memory' ? Number(value) : value;
   }
   const addonSet = resolveAddons({ folder: options.addons, names: allowedAddonNames, version });
-  for (const { name, reason } of addonSet.skipped) console.error(`67js addon ${name} skipped: ${reason}`);
+  for (const { name, reason } of addonSet.skipped) console.error(`Crucible addon ${name} skipped: ${reason}`);
   options.addons = addonSet;
   if (!['cpu', 'gpu'].includes(options.backend) || !Number.isInteger(options.memory) || options.memory < 32 || options.memory > MAXIMUM_MEMORY_MIB) {
     throw new Error(`Backend must be cpu or gpu, and memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
@@ -1022,10 +1022,10 @@ export async function runMcpCli({ argumentsValue = process.argv.slice(2),
   const { createAgentRuntime } = await import('./agent-runtime.mjs');
   const handle = serveStdio(() => createAgentMcpServer(createAgentRuntime({ ...options, previewUrl }), { version, branches: options.branches !== 'off', relations: options.relations !== 'off', findings: options.findings !== 'off', updateAvailable: updateCheck.current }), {
     transport: new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 2 * 1024 * 1024 }),
-    onerror: error => console.error(`67js MCP error: ${error.message}`),
+    onerror: error => console.error(`Crucible MCP error: ${error.message}`),
   });
   for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.once(signal, () => handle.close().catch(error => console.error(`67js shutdown failed: ${error.message}`)));
+    process.once(signal, () => handle.close().catch(error => console.error(`Crucible shutdown failed: ${error.message}`)));
   }
 }
 

@@ -7,7 +7,7 @@ test('walkMap on an imported asset returns a grid and reuses the cached query', 
   const { preview } = previewHarness();
   const sessionId = 'walkmap-asset';
   await preview.createAsset({
-    sessionId, recipe: { format: '67js.asset', schemaVersion: 1, assetId: 'cd'.repeat(32) },
+    sessionId, recipe: { format: 'crucible.asset', schemaVersion: 1, assetId: 'cd'.repeat(32) },
     data: Buffer.from(carAsset()).toString('base64'), backend: 'cpu', memoryBudgetMiB: 64,
   });
   const region = { sessionId, min: [-3, -3], max: [3, 3], cellSize: 1, topY: 20, clearance: 1 };

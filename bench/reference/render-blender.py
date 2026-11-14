@@ -15,7 +15,7 @@
 #   ... -- <work directory> --print-materials [scene ids]  prints each material's Principled values as built, one JSON line per scene.
 # REFERENCE_WIDTH, REFERENCE_HEIGHT and REFERENCE_CYCLES_SAMPLES in the environment replace 960, 540 and 256 (the default look bench draws small).
 # Light units were measured on a white plane: sun strength equals irradiance, a point or spot light has 4 pi watts for each
-# unit of 67js intensity, and an area light has pi watts for each unit.
+# unit of Crucible intensity, and an area light has pi watts for each unit.
 import base64
 import json
 import math
@@ -35,9 +35,9 @@ EEVEE_SAMPLES = 64
 WATTS_PER_INTENSITY = 4 * math.pi
 WATTS_PER_AREA_INTENSITY = math.pi
 SUN_ANGLE = math.radians(1)
-# 67js is Y up, and Blender is Z up.
+# Crucible is Y up, and Blender is Z up.
 Y_UP_TO_Z_UP = Matrix(((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
-# The centre of an environment image looks toward -Z in 67js, which is +Y here. In Blender it looks toward -X.
+# The centre of an environment image looks toward -Z in Crucible, which is +Y here. In Blender it looks toward -X.
 ENVIRONMENT_ROTATION_Z = -math.pi / 2
 NUMPY_TYPES = {
     "Float32Array": np.float32,
@@ -145,7 +145,7 @@ def add_texture(material, principled, description, has_vertex_colors):
 
 
 def add_emissive_map(material, principled, description, emission_color):
-    """67js multiplies the emissive colour and strength by the emissive map (sRGB), so the map drives the Emission Color socket."""
+    """Crucible multiplies the emissive colour and strength by the emissive map (sRGB), so the map drives the Emission Color socket."""
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     texture = nodes.new("ShaderNodeTexImage")
@@ -182,7 +182,7 @@ def add_anisotropy(principled, description):
     principled.inputs["Anisotropic"].default_value = min((1 - alpha / alpha_tangent) / 0.9, 1)
     principled.inputs["Roughness"].default_value = (alpha * alpha_tangent) ** 0.25
     principled.inputs["Anisotropic Rotation"].default_value = description.get("anisotropyRotation", 0) / (2 * math.pi)
-    # 67js takes the grain along the U direction of the UV map; Blender's default tangent is a different field.
+    # Crucible takes the grain along the U direction of the UV map; Blender's default tangent is a different field.
     tree = principled.id_data
     tangent = tree.nodes.new("ShaderNodeTangent")
     tangent.direction_type = "UV_MAP"
@@ -198,7 +198,7 @@ def add_thin_film(principled, description):
 
 
 def add_subsurface(principled, description):
-    """Maps the 67js subsurface block onto the Principled BSDF subsurface inputs (random walk). Blender 4 and later takes the base color as the scatter color."""
+    """Maps the Crucible subsurface block onto the Principled BSDF subsurface inputs (random walk). Blender 4 and later takes the base color as the scatter color."""
     block = description.get("subsurface")
     if not block or block.get("weight", 0) <= 0:
         return
@@ -209,7 +209,7 @@ def add_subsurface(principled, description):
 
 
 def add_material_layers(material, principled, description):
-    """Maps the 67js material layers onto the Principled BSDF inputs of the same meaning."""
+    """Maps the Crucible material layers onto the Principled BSDF inputs of the same meaning."""
     principled.inputs["Coat Weight"].default_value = description.get("clearcoat", 0)
     principled.inputs["Coat Roughness"].default_value = description.get("clearcoatRoughness", 0)
     principled.inputs["Transmission Weight"].default_value = description.get("transmission", principled.inputs["Transmission Weight"].default_value)
@@ -219,7 +219,7 @@ def add_material_layers(material, principled, description):
         principled.inputs["Sheen Weight"].default_value = 1
         set_linear_color(principled.inputs["Sheen Tint"], sheen_color)
         principled.inputs["Sheen Roughness"].default_value = description.get("sheenRoughness", 0)
-    # Blender's specular level 0.5 is the 4 percent reflectance that 67js calls specular 1.
+    # Blender's specular level 0.5 is the 4 percent reflectance that Crucible calls specular 1.
     principled.inputs["Specular IOR Level"].default_value = 0.5 * description.get("specular", 1)
     set_linear_color(principled.inputs["Specular Tint"], description.get("specularColor", [1, 1, 1]))
     add_anisotropy(principled, description)
@@ -240,13 +240,13 @@ GRAPH_MATH_OPERATIONS = {
     "add": "ADD", "sub": "SUBTRACT", "mul": "MULTIPLY", "div": "DIVIDE", "min": "MINIMUM", "max": "MAXIMUM",
     "pow": "POWER", "abs": "ABSOLUTE", "floor": "FLOOR", "fract": "FRACT", "sqrt": "SQRT",
 }
-# The graph noise node of 67js is Blender's Noise Texture (2D, fBm, Roughness 0.5, Lacunarity 2, Normalize), value for
+# The graph noise node of Crucible is Blender's Noise Texture (2D, fBm, Roughness 0.5, Lacunarity 2, Normalize), value for
 # value (bench/reference/README.md, 2026-11-04) when it says "tile": false. A tiling noise (the default) wraps its lattice.
 GRAPH_BUMP_DISTANCE = 0.15
 
 
 class GraphTranslator:
-    """Builds the Blender nodes for a 67js material graph (src/material-graph.js). Values are a number, a socket,
+    """Builds the Blender nodes for a Crucible material graph (src/material-graph.js). Values are a number, a socket,
     {"color": socket or three numbers} or {"vector": three numbers or sockets}. Only the nodes the reference scenes use exist."""
 
     def __init__(self, material):
@@ -335,7 +335,7 @@ class GraphTranslator:
         node.inputs["Roughness"].default_value = 0.5
         seed = settings.get("seed", 0)
         scale = settings.get("scale", 4)
-        # 67js moves the lattice by whole cells per seed (NOISE seed shifts in src/material-graph.js), in scaled units.
+        # Crucible moves the lattice by whole cells per seed (NOISE seed shifts in src/material-graph.js), in scaled units.
         shifts = ((seed * 7919) % 1024 / scale, (seed * 104729) % 1024 / scale)
         combine = self.nodes.new("ShaderNodeCombineXYZ")
         for index, part in enumerate(self.position(settings)):
@@ -390,7 +390,7 @@ class GraphTranslator:
 
 
 def add_graph(material, principled, description):
-    """Builds the material from its graph, so Blender evaluates the same nodes 67js baked into textures."""
+    """Builds the material from its graph, so Blender evaluates the same nodes Crucible baked into textures."""
     translator = GraphTranslator(material)
     graph = description["graph"]
     links = material.node_tree.links
@@ -409,7 +409,7 @@ def add_graph(material, principled, description):
         principled.inputs["Emission Strength"].default_value = description.get("emission", 1)
 
 
-# The 67js foliage shader (CANOPY_TAG in src/shaders.js) is not a plain Principled leaf. Each term is rebuilt below with the
+# The Crucible foliage shader (CANOPY_TAG in src/shaders.js) is not a plain Principled leaf. Each term is rebuilt below with the
 # same constants, so both sides evaluate the same material:
 #   - the shading normal of a double-sided card keeps its direction on the back face (Blender flips it);
 #   - the colour is scaled by 0.78 + 0.16 * sin(13 x + sin(9 y)) * sin(11 z - 5 y) of the world position;
@@ -458,7 +458,7 @@ def add_canopy_leaf_model(material, principled):
     geometry = nodes.new("ShaderNodeNewGeometry")
     position = nodes.new("ShaderNodeSeparateXYZ")
     links.new(geometry.outputs["Position"], position.inputs[0])
-    # 67js (x, y, z) is Blender (X, Z, -Y).
+    # Crucible (x, y, z) is Blender (X, Z, -Y).
     world_x = position.outputs["X"]
     world_y = position.outputs["Z"]
     world_z = scalar_math("MULTIPLY", position.outputs["Y"], -1.0)
@@ -487,7 +487,7 @@ def add_canopy_leaf_model(material, principled):
     unflip = scalar_math("SUBTRACT", 1.0, scalar_math("MULTIPLY", geometry.outputs["Backfacing"], 2.0))
     stored_normal = vector_math("SCALE", geometry.outputs["Normal"], scale=unflip)
     jitter = nodes.new("ShaderNodeCombineXYZ")
-    # 67js (sin(12 z), sin(9 x), cos(11 y)) is Blender (X, Y, Z) = (sin(12 z), -cos(11 y), sin(9 x)).
+    # Crucible (sin(12 z), sin(9 x), cos(11 y)) is Blender (X, Y, Z) = (sin(12 z), -cos(11 y), sin(9 x)).
     links.new(scalar_math("SINE", scalar_math("MULTIPLY", world_z, 12.0)), jitter.inputs["X"])
     links.new(scalar_math("MULTIPLY", scalar_math("COSINE", scalar_math("MULTIPLY", world_y, 11.0)), -1.0), jitter.inputs["Y"])
     links.new(scalar_math("SINE", scalar_math("MULTIPLY", world_x, 9.0)), jitter.inputs["Z"])
@@ -537,7 +537,7 @@ def build_material(name, description, has_vertex_colors):
         principled.inputs["IOR"].default_value = description["liquid"]["ior"]
     add_material_layers(material, principled, description)
     if description.get("emission", 0) > 0 and "graph" not in description:
-        # 67js adds emissiveColor (the base colour when none is given) times emission to the pixel.
+        # Crucible adds emissiveColor (the base colour when none is given) times emission to the pixel.
         emission_color = description.get("emissiveColor", description["color"])
         set_linear_color(principled.inputs["Emission Color"], emission_color)
         # NO_EMISSION=1 draws the scene without its emission, to measure how much of a Cycles picture is light from emissive parts (issue #392).
@@ -562,7 +562,7 @@ def build_parts(scene, description):
     materials = {}
     cloth_part_name = (description.get("blenderCloth") or {}).get("part")
     for index, part in enumerate(description["parts"]):
-        # The sheet is drawn from Blender's own cloth bake (build_cloth), not from the 67js frame.
+        # The sheet is drawn from Blender's own cloth bake (build_cloth), not from the Crucible frame.
         if part["name"] == cloth_part_name:
             continue
         geometry_index = part["geometry"]
@@ -584,7 +584,7 @@ def build_parts(scene, description):
 
 
 def cloth_grid_object(settings):
-    """The 67js grid (rows from the top down, columns left to right) at the sheet's rest placement, in world space."""
+    """The Crucible grid (rows from the top down, columns left to right) at the sheet's rest placement, in world space."""
     segments = settings["segments"]
     column_major = settings["restMatrix"]
     placement = Y_UP_TO_Z_UP @ Matrix([[column_major[column * 4 + row] for column in range(4)] for row in range(4)])
@@ -697,7 +697,7 @@ def build_world(scene, world_description, root):
     mapping.inputs["Rotation"].default_value = (0, 0, ENVIRONMENT_ROTATION_Z)
     texture = nodes.new("ShaderNodeTexEnvironment")
     if world_description["type"] == "gradient":
-        # The same equirectangular gradient that grand-scenes.js hands to 67js, written as an image.
+        # The same equirectangular gradient that grand-scenes.js hands to Crucible, written as an image.
         texture.image = gradient_sky_image(world_description)
         links.new(coordinates.outputs["Generated"], mapping.inputs["Vector"])
         links.new(mapping.outputs["Vector"], texture.inputs["Vector"])
@@ -718,7 +718,7 @@ def build_world(scene, world_description, root):
 
 def link_receivers(light_object, names):
     # Light linking: a light with an affects list lights only those parts, as a receiver collection does. Shadows still
-    # come from every part, which is also what 67js does.
+    # come from every part, which is also what Crucible does.
     if names is None:
         return
     receivers = bpy.data.collections.new(f"{light_object.name}-receivers")
@@ -775,8 +775,8 @@ def build_spot_light(scene, index, spot):
 
 
 def build_area_light(scene, index, area):
-    # Measured on a white plane: a Blender area light of W watts matches a 67js area light of W / pi candela, and the
-    # 67js formula stays within about 1.2 percent on the axis from 0.2 m to 2 m for 1 m and 2 m squares.
+    # Measured on a white plane: a Blender area light of W watts matches a Crucible area light of W / pi candela, and the
+    # Crucible formula stays within about 1.2 percent on the axis from 0.2 m to 2 m for 1 m and 2 m squares.
     light = bpy.data.lights.new(f"Area-{index}", "AREA")
     light.energy = area["intensity"] * WATTS_PER_AREA_INTENSITY
     light.color = area["color"]
@@ -792,7 +792,7 @@ def build_area_light(scene, index, area):
         width_axis = Vector((1, 0, 0))
     width_axis.normalize()
     height_axis = width_axis.cross(normal)
-    # The light shines toward its local -Z, and the 67js rectangle faces along its direction.
+    # The light shines toward its local -Z, and the Crucible rectangle faces along its direction.
     rotation = Matrix((width_axis, height_axis, -normal)).transposed()
     area_object.rotation_mode = "QUATERNION"
     area_object.rotation_quaternion = rotation.to_quaternion()
@@ -891,7 +891,7 @@ def render_to_numpy(scene, work_directory, name):
 
 
 def render_with_view_transform(scene, work_directory, name, view_transform):
-    """Cycles with a Blender view transform (for example AgX) applied, saved as an 8-bit sRGB PNG, like the 67js picture: the picture a Blender user gets."""
+    """Cycles with a Blender view transform (for example AgX) applied, saved as an 8-bit sRGB PNG, like the Crucible picture: the picture a Blender user gets."""
     scene.view_settings.view_transform = view_transform
     scene.display_settings.display_device = "sRGB"
     scene.render.image_settings.file_format = "PNG"
@@ -931,13 +931,13 @@ def import_glb(root, glb_file):
 
 
 def scale_world_light(scene, scale):
-    """A measurement switch: the world's light times scale, like --ambient on the 67js side. The sky seen by the camera scales too."""
+    """A measurement switch: the world's light times scale, like --ambient on the Crucible side. The sky seen by the camera scales too."""
     background = scene.world.node_tree.nodes["Background"]
     background.inputs[1].default_value *= scale
 
 
 def scale_sun_light(scene, scale):
-    """A measurement switch: the sun's strength times scale, like --key on the 67js side."""
+    """A measurement switch: the sun's strength times scale, like --key on the Crucible side."""
     for light in scene.collection.all_objects:
         if light.type == "LIGHT" and light.data.type == "SUN":
             light.data.energy *= scale
@@ -989,7 +989,7 @@ def render_material_ids(scene, work_directory, name):
 
 
 def material_values():
-    """The Principled values of every material as built: what a material import check compares with the 67js description."""
+    """The Principled values of every material as built: what a material import check compares with the Crucible description."""
     values = {}
     for material in bpy.data.materials:
         if not material.use_nodes:

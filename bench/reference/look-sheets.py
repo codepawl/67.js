@@ -1,4 +1,4 @@
-"""Collects the 67js renders of the named looks into artifacts/look-168/<scene>/<option>.png and one contact sheet per scene.
+"""Collects the Crucible renders of the named looks into artifacts/look-168/<scene>/<option>.png and one contact sheet per scene.
 
 uv run --no-project --with pillow python -I bench/reference/look-sheets.py artifacts/reference-look artifacts/look-168
 

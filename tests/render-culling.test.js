@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mat4 } from 'gl-matrix';
 import { box, sphere } from '../src/geometry.js';
 import { generateGeometryLods } from '../src/mesh-lod.js';
-import { Renderer67 } from '../src/renderer.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { InstanceSelection, chooseLevel, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from '../src/render-culling.js';
 
 const STRIDE = 42;
@@ -86,7 +86,7 @@ test('selection depends only on its inputs, so any frame picks the same instance
 
 function drawingRenderer(parts) {
   const calls = [];
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.buffers = [];
   renderer.geometryBuffers = new Map();
   renderer.culling = true;
@@ -230,7 +230,7 @@ test('an instance smaller than minimumPixelRadius on screen is culled, and a nea
 
 test('the renderer lets the water mirror widen the level error, and a normal frame is unchanged', () => {
   const { projection, viewProjection, planes } = cameraMatrices();
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   Object.assign(renderer, { culling: true, canvas: { height: CANVAS_HEIGHT }, projection, viewProjection, frustumPlanes: planes, lodPixelError: 1, windState: { strength: 0 } });
   const batch = { cullable: true, selection: new InstanceSelection(2, 2), instanceData: instanceData([[0, -5, 0], [0, 1, 0]]), instanceCount: 2, bounds: { center: [0, 0, 0], radius: 1 }, swayReach: 0, levelErrors: [0, 0.02] };
   const levelOfSecond = () => {

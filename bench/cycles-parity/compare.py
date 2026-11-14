@@ -18,7 +18,7 @@ FLIP_NOISE_MARGIN = 0.02
 DISPLAY_GAMMA = 2.2
 
 
-def tone_map_like_67js(linear_rgb):
+def tone_map_like_crucible(linear_rgb):
     positive_color = numpy.maximum(linear_rgb, 0.0)
     numerator = positive_color * (2.51 * positive_color + 0.03)
     denominator = positive_color * (2.43 * positive_color + 0.59) + 0.14
@@ -31,8 +31,8 @@ def compute_flip_scores(reference_rgb, candidate_rgb):
         import flip_evaluator
     except ImportError as error:
         raise RuntimeError("flip_evaluator is required for FLIP scoring. Run via 'uv run --no-project --with flip-evaluator ...' or pass --no-flip.") from error
-    reference_ldr = tone_map_like_67js(reference_rgb)
-    candidate_ldr = tone_map_like_67js(candidate_rgb)
+    reference_ldr = tone_map_like_crucible(reference_rgb)
+    candidate_ldr = tone_map_like_crucible(candidate_rgb)
     _, mean_ldr, _ = flip_evaluator.evaluate(reference_ldr, candidate_ldr, "LDR", inputsRGB=True)
     reference_hdr = numpy.maximum(reference_rgb, 0.0).astype(numpy.float32)
     candidate_hdr = numpy.maximum(candidate_rgb, 0.0).astype(numpy.float32)

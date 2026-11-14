@@ -1,5 +1,5 @@
 export { VERSION } from './version.js';
-export { Renderer67, Glaze, shaderFeatureRepresentatives } from './renderer.js';
+export { CrucibleRenderer, Renderer67, Glaze, shaderFeatureRepresentatives } from './renderer.js';
 export { box, cylinder, sphere, torus } from './geometry.js';
 export { exportGlb } from './export.js';
 export { createAnimationMixer } from './animation-mixer.js';

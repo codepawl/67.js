@@ -102,7 +102,7 @@ function boatRecipe(wake, velocity) {
   const boat = { thrust: 6, controls: [{ time: 0, throttle: 1 }] };
   if (wake) boat.wake = wake;
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'hull', type: 'box' },
       { id: 'sea', type: 'mesh', base: { type: 'grid', segments: 40 }, edits: [{ op: 'set_position', position: { mul: [{ attr: 'position' }, [24, 1, 24]] } }], stack: [{ op: 'ocean', windSpeed: 3, choppiness: 0, size: 30, seed: 2, resolution: 4 }] },

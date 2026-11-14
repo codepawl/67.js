@@ -1,4 +1,4 @@
-name: Set up 67js
+name: Set up Crucible
 description: Install Node 24, the pinned npm and the locked dependencies. Run actions/checkout first, a local action cannot be found before it.
 
 inputs:

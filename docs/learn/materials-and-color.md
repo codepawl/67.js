@@ -1,6 +1,6 @@
 # Materials and color
 
-A material tells the renderer how light hits a part. 67js uses physically based shading (PBR), the model of Blender, Unreal and the glTF format. So the values from those tools mean the same thing here.
+A material tells the renderer how light hits a part. Crucible uses physically based shading (PBR), the model of Blender, Unreal and the glTF format. So the values from those tools mean the same thing here.
 
 ## The four basic fields
 
@@ -15,7 +15,7 @@ A material tells the renderer how light hits a part. 67js uses physically based 
 The chart below has a dielectric row in front and a metal row behind. Roughness goes from 0 on the left to 1 on the right. Drag to turn it.
 
 ```js live poster=materials-chart
-import { Renderer67, sphere } from '67js';
+import { CrucibleRenderer, sphere } from 'crucible';
 
 const ball = sphere(48, 24);
 const parts = [];
@@ -34,7 +34,7 @@ for (let column = 0; column < 5; column++) {
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 let turn = 0;
 
 function draw() {
@@ -74,7 +74,7 @@ const material = { color: linearColor('#d94f2b'), metallic: 0, roughness: 0.5 };
 A texture is a descriptor: an object with an `image` and a `colorSpace`. The image can be an `HTMLImageElement`, an `ImageBitmap` or a canvas. Textures sample `geometry.uvs`, so the geometry needs two UV values for each vertex. `sphere()` and `torus()` have UVs.
 
 ```js live poster=materials-texture
-import { Renderer67, sphere } from '67js';
+import { CrucibleRenderer, sphere } from 'crucible';
 
 // Draw a checkerboard on a 2D canvas and use it as the color map.
 const pattern = document.createElement('canvas');
@@ -96,7 +96,7 @@ const globe = {
 };
 
 const canvas = document.querySelector('#scene');
-const renderer = new Renderer67(canvas, [globe]);
+const renderer = new CrucibleRenderer(canvas, [globe]);
 new ResizeObserver(() => {
   renderer.resize();
   renderer.render({ eye: [2.2, 1.6, 3], target: [0, 0.75, 0] });
@@ -113,7 +113,7 @@ new ResizeObserver(() => {
 | `occlusionMap` | `'linear'` | Darkens indirect light by R. `occlusionStrength` sets its strength. |
 | `emissiveMap` | `'srgb'` | Multiplies `emissiveColor * emission`. |
 
-The glTF addon makes these descriptors for you when it loads a GLB file. Reuse one descriptor object for many parts, because each new descriptor uploads a new texture. To change the pixels of an uploaded texture, import `@codepawlhq/67js/addons/texture-update` and call `renderer.updateTexture(descriptor, { image, region })`. The [material maps contract](https://github.com/codepawl/67.js/blob/main/docs/material-maps.md) lists the sampler settings and the limits.
+The glTF addon makes these descriptors for you when it loads a GLB file. Reuse one descriptor object for many parts, because each new descriptor uploads a new texture. To change the pixels of an uploaded texture, import `@codepawlhq/crucible/addons/texture-update` and call `renderer.updateTexture(descriptor, { image, region })`. The [material maps contract](https://github.com/codepawl/crucible/blob/main/docs/material-maps.md) lists the sampler settings and the limits.
 
 ## Transparency and both sides
 
@@ -139,7 +139,7 @@ The glTF addon makes these descriptors for you when it loads a GLB file. Reuse o
 | `terrain`, `moss` | Surface variation for ground. |
 | `fire`, `smoke` | Effects for films. |
 
-A renderer that draws a `water`, `foliage`, `grass`, `terrain`, `moss`, `fire` or `smoke` part needs `import '@codepawlhq/67js/addons/world-material-shader'` first. A renderer that draws a transmissive, `liquid` or `foam` part needs `import '@codepawlhq/67js/addons/liquid-shader'`. The terrain, vegetation, grass, clutter and film addons and the MCP server import them for you.
+A renderer that draws a `water`, `foliage`, `grass`, `terrain`, `moss`, `fire` or `smoke` part needs `import '@codepawlhq/crucible/addons/world-material-shader'` first. A renderer that draws a transmissive, `liquid` or `foam` part needs `import '@codepawlhq/crucible/addons/liquid-shader'`. The terrain, vegetation, grass, clutter and film addons and the MCP server import them for you.
 
 The `color` of a `liquid` is the light that one meter of liquid lets through, so `[0.56, 0.84, 0.88]` is clear blue-green water. Tune liquid and foam with `frame.liquid` or `environment.liquid`: `{ thickness: 0.5, ior: 1.33, refraction: 1, scattering: 1, foamOpacity: 0.55, foamSoftness: 1 }`. A liquid refracts opaque parts only.
 

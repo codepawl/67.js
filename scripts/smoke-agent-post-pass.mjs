@@ -18,15 +18,15 @@ const HEIGHT = 240;
 const SCALE = 0.25;
 const LEVELS = 4;
 const BLOCK = 4;
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-post-pass-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-post-pass-'));
 const jobs = join(directory, 'jobs');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 let diagnostics = '';
 
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', 'cpu', '--memory', '128', '--jobs', jobs], cwd: directory, stderr: 'pipe' });
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-post-pass-proof', version: '1' });
+const client = new Client({ name: 'crucible-post-pass-proof', version: '1' });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 60000 });

@@ -1,40 +1,40 @@
 {
   "screw-quad-full-turn": {
-    "volume": "The swept strips are an open surface, so its volume depends only on which way each strip is wound. 67js winds every strip from the lower to the higher vertex index of its edge. Counts, area and positions match."
+    "volume": "The swept strips are an open surface, so its volume depends only on which way each strip is wound. Crucible winds every strip from the lower to the higher vertex index of its edge. Counts, area and positions match."
   },
   "screw-quad-lift": {
-    "volume": "The swept strips are an open surface, so its volume depends only on which way each strip is wound. 67js winds every strip from the lower to the higher vertex index of its edge. Counts, area and positions match."
+    "volume": "The swept strips are an open surface, so its volume depends only on which way each strip is wound. Crucible winds every strip from the lower to the higher vertex index of its edge. Counts, area and positions match."
   },
   "bevel-cube-all-round": {
-    "vertexCount": "Where three rounded edges meet, 67js fills the corner with a triangular patch and Blender uses a quad grid with one centre triangle per corner.",
-    "faceCount": "The triangular corner patch of 67js has more faces than the quad grid of Blender.",
-    "faceSizes": "The corner patch of 67js is all triangles. The strips are quads in both.",
+    "vertexCount": "Where three rounded edges meet, Crucible fills the corner with a triangular patch and Blender uses a quad grid with one centre triangle per corner.",
+    "faceCount": "The triangular corner patch of Crucible has more faces than the quad grid of Blender.",
+    "faceSizes": "The corner patch of Crucible is all triangles. The strips are quads in both.",
     "area": "The two corner fills are different surfaces. The area differs by 0.3%.",
     "positions": "The strips match. The inner corner points differ, because the two corner fills are different surfaces."
   },
   "bevel-cube-one-edge-profile": {
-    "positions": "Both place points on the same superellipse. 67js steps by equal angle, and Blender spaces them differently when the profile is not 0.5."
+    "positions": "Both place points on the same superellipse. Crucible steps by equal angle, and Blender spaces them differently when the profile is not 0.5."
   },
   "bevel-cube-clamped": {
-    "volume": "67js clamps at 49% of an edge, because at 50% faces collapse to zero area. Blender clamps at 50% and keeps coincident vertices.",
-    "area": "The 49% clamp of 67js leaves a slightly larger solid than the 50% clamp of Blender.",
-    "positions": "The 49% clamp of 67js moves each point 0.014 from where the 50% clamp of Blender puts it."
+    "volume": "Crucible clamps at 49% of an edge, because at 50% faces collapse to zero area. Blender clamps at 50% and keeps coincident vertices.",
+    "area": "The 49% clamp of Crucible leaves a slightly larger solid than the 50% clamp of Blender.",
+    "positions": "The 49% clamp of Crucible moves each point 0.014 from where the 50% clamp of Blender puts it."
   },
   "mirror-touching-plane": {
-    "faceCount": "67js removes the wall left on the mirror plane, so the result is one solid. Blender merges the vertices and keeps one inner face.",
-    "faceSizes": "67js has one quad fewer, because it removes the inner wall on the mirror plane.",
-    "area": "Blender counts the inner wall on the mirror plane in the area, and 67js has no such wall."
+    "faceCount": "Crucible removes the wall left on the mirror plane, so the result is one solid. Blender merges the vertices and keeps one inner face.",
+    "faceSizes": "Crucible has one quad fewer, because it removes the inner wall on the mirror plane.",
+    "area": "Blender counts the inner wall on the mirror plane in the area, and Crucible has no such wall."
   },
   "array-relative-merged": {
-    "faceCount": "67js removes the walls between merged copies, so the result is one solid. Blender merges the vertices and keeps the walls.",
-    "faceSizes": "67js has three quads fewer, because it removes the walls between merged copies.",
-    "volume": "The walls that Blender keeps have no single winding, so its signed volume of 5.5 is not the volume of the solid. The 67js value of 4 is the volume of the solid.",
-    "area": "Blender counts the walls between copies in the area, and 67js has no such walls."
+    "faceCount": "Crucible removes the walls between merged copies, so the result is one solid. Blender merges the vertices and keeps the walls.",
+    "faceSizes": "Crucible has three quads fewer, because it removes the walls between merged copies.",
+    "volume": "The walls that Blender keeps have no single winding, so its signed volume of 5.5 is not the volume of the solid. The Crucible value of 4 is the volume of the solid.",
+    "area": "Blender counts the walls between copies in the area, and Crucible has no such walls."
   },
   "boolean-through-hole": {
-    "edgeCount": "67js has no face with a hole, so it splits a holed face into triangles and quads. Blender keeps one polygon with a seam.",
-    "faceCount": "A holed face becomes many faces in 67js and one polygon in Blender. Volume, area and vertices match.",
-    "faceSizes": "A holed face becomes triangles and quads in 67js and a 12-sided polygon in Blender."
+    "edgeCount": "Crucible has no face with a hole, so it splits a holed face into triangles and quads. Blender keeps one polygon with a seam.",
+    "faceCount": "A holed face becomes many faces in Crucible and one polygon in Blender. Volume, area and vertices match.",
+    "faceSizes": "A holed face becomes triangles and quads in Crucible and a 12-sided polygon in Blender."
   },
   "subdivide-cube-level-1": {
     "volume": "The refined quads are bent, and the measure splits each quad from its first corner, so the volume depends on which corner a quad starts at. Counts, area and every vertex match Blender; the volume differs from Blender by under 1%."
@@ -49,14 +49,14 @@
     "volume": "The refined quads are bent, and the measure splits each quad from its first corner, so the volume depends on which corner a quad starts at. Counts, area and every vertex match Blender; the volume differs from Blender by under 1%."
   },
   "knife-project-cube-line": {
-    "edgeCount": "Blender's check here is a plane through the line that holds the projection direction, which also cuts the two faces that run along that direction. 67js cuts only faces the projection can see side-on to the line, so those two faces keep their edges and gain the cut points as corners.",
-    "faceCount": "The two faces that run along the projection direction are not split by the knife, so 67js has two faces fewer than the plane cut.",
+    "edgeCount": "Blender's check here is a plane through the line that holds the projection direction, which also cuts the two faces that run along that direction. Crucible cuts only faces the projection can see side-on to the line, so those two faces keep their edges and gain the cut points as corners.",
+    "faceCount": "The two faces that run along the projection direction are not split by the knife, so Crucible has two faces fewer than the plane cut.",
     "faceSizes": "Those two faces stay whole with the cut points inserted, so they become hexagons where Blender has four quads."
   },
   "remesh-sphere": {
-    "faceCount": "Both build a quad surface on a grid of the same voxel size, but the grids start at different points and Blender's OpenVDB mesher and the surface nets of 67js cut the surface into different cells, so the counts differ by 2.2%. Volume, area and Hausdorff distance agree."
+    "faceCount": "Both build a quad surface on a grid of the same voxel size, but the grids start at different points and Blender's OpenVDB mesher and the surface nets of Crucible cut the surface into different cells, so the counts differ by 2.2%. Volume, area and Hausdorff distance agree."
   },
   "remesh-torus": {
-    "faceCount": "Both build a quad surface on a grid of the same voxel size, but the grids start at different points and Blender's OpenVDB mesher and the surface nets of 67js cut the surface into different cells, so 67js has 6.6% fewer quads. Volume, area and Hausdorff distance agree."
+    "faceCount": "Both build a quad surface on a grid of the same voxel size, but the grids start at different points and Blender's OpenVDB mesher and the surface nets of Crucible cut the surface into different cells, so Crucible has 6.6% fewer quads. Volume, area and Hausdorff distance agree."
   }
 }

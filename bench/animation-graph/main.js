@@ -3,7 +3,7 @@
 // the graph takes it out again, the character controller moves the body by it and the feet do not slide.
 // Open bench/animation-graph/index.html with `npm run dev`. W or the up arrow walks, Shift runs; ?speed=3.5 pins the speed
 // and ?demo=1 ramps it up and down on its own.
-import { Renderer67 } from '/src/index.js';
+import { CrucibleRenderer } from '/src/index.js';
 import { createAssetPose } from '/src/skeleton-pose.js';
 import { createLocomotionGraph, loadRobot, RUN_SPEED, WALK_SPEED } from './robot-graph.js';
 import { createCharacterController } from '/src/player.js';
@@ -57,7 +57,7 @@ const controller = createCharacterController({
 });
 
 const canvas = document.querySelector('canvas');
-const renderer = new Renderer67(canvas, asset.parts, { ground: true, hdr: false, samples: 4, memoryBudgetMiB: 512 });
+const renderer = new CrucibleRenderer(canvas, asset.parts, { ground: true, hdr: false, samples: 4, memoryBudgetMiB: 512 });
 renderer.resize();
 
 function buildFrame(context) {

@@ -177,7 +177,7 @@ try {
     }
   }
   report.fallback = await page.evaluate(async () => {
-    const { Renderer67, box } = await import('/src/index.js');
+    const { CrucibleRenderer, box } = await import('/src/index.js');
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'width:128px;height:128px';
     document.body.append(canvas);
@@ -185,7 +185,7 @@ try {
     const extension = context.getExtension.bind(context);
     context.getExtension = name => name === 'EXT_color_buffer_float' ? null : extension(name);
     const part = { name: 'Fallback cube', geometry: box(), matrix: new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]), material: { color: [0.2,0.5,0.3], metallic: 0, roughness: 0.5 } };
-    const renderer = new Renderer67(canvas, [part], { ground: false, hdr: true, samples: 2, pixelRatio: 1, memoryBudgetMiB: 32 });
+    const renderer = new CrucibleRenderer(canvas, [part], { ground: false, hdr: true, samples: 2, pixelRatio: 1, memoryBudgetMiB: 32 });
     renderer.render({ eye: [3,2,4], target: [0,0,0] });
     const result = { capabilities: renderer.capabilities, error: context.getError() };
     renderer.dispose();

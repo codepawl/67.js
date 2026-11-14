@@ -5,13 +5,13 @@
 // classifyZeroCalls(output, { exitCode, errors, toolCalls }) returns null when the run made scene calls, else
 // { kind: 'infra' | 'model', cause, detail }.
 //   infra  start-up-failure      no init event, or no result event, or a non-zero exit without a result
-//   infra  mcp-server-failed     the init event lists the 67js server as not connected
+//   infra  mcp-server-failed     the init event lists the Crucible server as not connected
 //   infra  timeout               the run was killed by the timeout (no result, exit signal)
-//   infra  toolsearch-empty      ToolSearch ran but returned no 67js tool, so the model never saw the tools
-//   model  toolsearch-then-quit  ToolSearch returned the 67js tools and the model ended without calling one
+//   infra  toolsearch-empty      ToolSearch ran but returned no Crucible tool, so the model never saw the tools
+//   model  toolsearch-then-quit  ToolSearch returned the Crucible tools and the model ended without calling one
 //   model  refusal               the model declined (stop reason refusal, or a refusal in the result text)
 //   model  no-tool-use           the model answered without ToolSearch or any tool call
-const MCP_SERVER_NAME = '67js';
+const MCP_SERVER_NAME = 'crucible';
 const REFUSAL_PATTERN = /\b(i can(?:'|’)?t (?:help|assist|do)|i(?:'|’)m (?:unable|not able) to|i (?:cannot|won(?:'|’)t)|i must decline)\b/i;
 
 function textOf(content) {
@@ -61,7 +61,7 @@ export function classifyZeroCalls(output, { exitCode = 0, errors = '', toolCalls
   const facts = readRunFacts(output);
   const stderrNote = String(errors ?? '').trim().split('\n')[0].slice(0, 120);
   if (!facts.initialized) return { kind: 'infra', cause: 'start-up-failure', detail: stderrNote || `no init event, exit ${exitCode}` };
-  if (facts.serverStatus !== 'connected') return { kind: 'infra', cause: 'mcp-server-failed', detail: `67js server ${facts.serverStatus}` };
+  if (facts.serverStatus !== 'connected') return { kind: 'infra', cause: 'mcp-server-failed', detail: `Crucible server ${facts.serverStatus}` };
   if (!facts.result) {
     return exitCode === null || exitCode === undefined
       ? { kind: 'infra', cause: 'timeout', detail: 'killed before a result' }
@@ -72,7 +72,7 @@ export function classifyZeroCalls(output, { exitCode = 0, errors = '', toolCalls
     return { kind: 'model', cause: 'refusal', detail: resultText.slice(0, 120) };
   }
   if (facts.toolSearchCalls > 0 && !facts.toolSearchSawSceneTools) {
-    return { kind: 'infra', cause: 'toolsearch-empty', detail: `${facts.toolSearchCalls} ToolSearch calls returned no 67js tool` };
+    return { kind: 'infra', cause: 'toolsearch-empty', detail: `${facts.toolSearchCalls} ToolSearch calls returned no Crucible tool` };
   }
   if (facts.toolSearchCalls > 0) return { kind: 'model', cause: 'toolsearch-then-quit', detail: `${facts.toolSearchCalls} ToolSearch calls, then no scene call` };
   return { kind: 'model', cause: 'no-tool-use', detail: resultText.slice(0, 120) };

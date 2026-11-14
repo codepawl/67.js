@@ -1,7 +1,7 @@
 # Scores the default look renders (issue #988) against the Cycles render of each scene with FLIP, and writes the committed reference images and a contact sheet per scene.
 #   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/reference/default-look-score.py <work directory> <output directory> <scene ids> <variant names>
 # The work directory holds <scene>-<variant>.png from default-look.mjs and, after a Blender run, <scene>-cycles.npy and <scene>-eevee.npy.
-# A new <scene>-cycles.npy is tone mapped like 67js (the ACES fit and gamma 2.2 of score.py), rounded to 8 bits and saved as <output directory>/<scene>-cycles.png,
+# A new <scene>-cycles.npy is tone mapped like Crucible (the ACES fit and gamma 2.2 of score.py), rounded to 8 bits and saved as <output directory>/<scene>-cycles.png,
 # which is what gets committed. Without a .npy the committed PNG is the reference, so a score run needs no Blender.
 # It prints one JSON object, {scene: {variant: FLIP}}. FLIP is 0 for identical images and larger for a larger visible difference.
 import json
@@ -19,7 +19,7 @@ LABEL_HEIGHT = 18
 SHEET_COLUMNS = 4
 
 
-def tone_map_like_67js(linear):
+def tone_map_like_crucible(linear):
     """The same curve and gamma as score.py, so every image meets in one display space."""
     color = np.maximum(linear, 0)
     mapped = np.clip((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0, 1)
@@ -46,7 +46,7 @@ def reference_path(output_directory, scene_id):
 def write_reference(work_directory, output_directory, scene_id):
     cycles_path = work_directory / f"{scene_id}-cycles.npy"
     if cycles_path.exists():
-        image = Image.fromarray(to_eight_bit(tone_map_like_67js(np.load(cycles_path))))
+        image = Image.fromarray(to_eight_bit(tone_map_like_crucible(np.load(cycles_path))))
         image.save(reference_path(output_directory, scene_id), optimize=True)
 
 
@@ -76,7 +76,7 @@ def main():
         panels = [("Cycles (reference)", Image.open(reference_path(output_directory, scene_id)).convert("RGB"))]
         eevee_path = work_directory / f"{scene_id}-eevee.npy"
         if eevee_path.exists():
-            eevee = to_eight_bit(tone_map_like_67js(np.load(eevee_path)))
+            eevee = to_eight_bit(tone_map_like_crucible(np.load(eevee_path)))
             scene_scores["eevee"] = flip_score(reference, eevee.astype(np.float32) / 255)
         for variant_name in variant_names:
             rendered = Image.open(work_directory / f"{scene_id}-{variant_name}.png").convert("RGB")

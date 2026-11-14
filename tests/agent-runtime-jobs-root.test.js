@@ -11,7 +11,7 @@ const createdDirectories = [];
 after(() => Promise.all(createdDirectories.map(directory => rm(directory, { recursive: true, force: true }))));
 
 async function temporaryDirectory() {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), '67js-jobs-root-')));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'crucible-jobs-root-')));
   createdDirectories.push(directory);
   return directory;
 }

@@ -11,7 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 // End to end: a real render job through the MCP server on a SwiftShader runtime, asked for the native backend while the
 // package is switched off (JS67_NATIVE_TRACER=off, the same answer as a missing package or an adapter without ray queries).
 // The job must run the cpu backend and give the bytes and report fields of a job that asked for cpu.
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const recipeUrl = new URL('./fixtures/demo-room.recipe.json', import.meta.url);
 const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
@@ -56,7 +56,7 @@ async function renderDemoRoom(requestedBackend, workDirectory) {
 
 test('a native job without the native tracer runs the cpu backend with the same image and report fields',
   { skip: (!hasBuild && 'run npm run build:lib first') || (!hasBrowser && 'no Chrome'), timeout: 600000 }, async context => {
-    const workDirectory = await mkdtemp(join(tmpdir(), '67js-native-fallback-'));
+    const workDirectory = await mkdtemp(join(tmpdir(), 'crucible-native-fallback-'));
     context.after(() => rm(workDirectory, { recursive: true, force: true }));
     // The two renders share nothing (own server, own job folder, own image file), so they run side by side.
     const [cpu, native] = await Promise.all([renderDemoRoom('cpu', workDirectory), renderDemoRoom('native', workDirectory)]);

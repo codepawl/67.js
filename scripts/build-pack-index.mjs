@@ -113,7 +113,7 @@ async function describePack(folder, outputDirectory) {
   return {
     name: pack.name,
     version: pack.version,
-    engines: manifest.engines['67js'],
+    engines: manifest.engines['crucible'],
     license: pack.license,
     author: pack.author,
     description: pack.description,

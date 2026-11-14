@@ -81,7 +81,7 @@ export async function uploadTextureInSlices(context, texture, internalFormat, im
   }
 }
 
-/** Renderer67.preloadTextures: uploads each descriptor larger than maximumBytes in bands, then records it where createTexture looks. */
+/** CrucibleRenderer.preloadTextures: uploads each descriptor larger than maximumBytes in bands, then records it where createTexture looks. */
 export async function preloadRendererTextures(renderer, descriptors, { maximumBytes = TEXTURE_SLICE_BYTES, checkpoint = createSlicer() } = {}) {
   const context = renderer.context;
   const maximumSize = context.getParameter(context.MAX_TEXTURE_SIZE);

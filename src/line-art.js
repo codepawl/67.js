@@ -516,7 +516,7 @@ void main() { outputColor = texelFetch(sourceTexture, ivec2(gl_FragCoord.xy), 0)
  */
 export function installLineArt(renderer) {
   if (renderer.lineArt) return renderer;
-  if (!renderer.passSupport) throw new Error('Line art needs installRenderPasses(renderer) from 67js/addons/render-passes first.');
+  if (!renderer.passSupport) throw new Error('Line art needs installRenderPasses(renderer) from crucible/addons/render-passes first.');
   const state = { lines: null };
   const stage = createLineArtStage(state);
   renderer.postStages.push(stage);

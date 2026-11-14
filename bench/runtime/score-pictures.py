@@ -18,7 +18,7 @@ def main():
     scores = {}
     for reference in sorted(work_directory.glob("*-three.png")):
         name = reference.name.removesuffix("-three.png")
-        test = work_directory / f"{name}-67js.png"
+        test = work_directory / f"{name}-crucible.png"
         _, mean_error, _ = flip_evaluator.evaluate(load(reference), load(test), "LDR", inputsRGB=True)
         scores[name] = round(float(mean_error), 4)
     (work_directory / "pictures.json").write_text(json.dumps(scores, indent=1), encoding="utf-8")

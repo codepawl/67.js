@@ -2,7 +2,7 @@
 
 Calls follow the conventions in `look.md`. `tests/skill-examples.test.js` applies every block, so they stay valid.
 Everything here is deterministic: a seek to a time gives the same pixels as playing to it. Export is the
-`render-67js-media` skill.
+`render-crucible-media` skill.
 
 ## Motion record
 
@@ -93,7 +93,7 @@ before you finish.
 
 A metro film once shipped all of these as "texture glitches". Check each one in the preview:
 
-- Crop 4 consecutive full-size frames of every textured floor, tread, rail and metal surface seen at a steep angle. Speckles that move between them are specular sparkle (67.js#588), not a missing mipmap.
+- Crop 4 consecutive full-size frames of every textured floor, tread, rail and metal surface seen at a steep angle. Speckles that move between them are specular sparkle (Crucible#588), not a missing mipmap.
 - When you drop a material's base colour map, also drop or soften its normal and metallic-roughness maps (`normalScale` 0.2 to 0.35). Paint is a dielectric (`metallic: 0`).
 - Thin shiny metal boxes such as handrails and posts mirror a bright ceiling as jagged shapes. Make painted rails matte.
 - Dust motes outside the depth of field blur into hollow rings. Fade them by circle of confusion.

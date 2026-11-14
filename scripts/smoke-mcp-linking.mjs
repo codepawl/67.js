@@ -17,7 +17,7 @@ function streetRecipe() {
     id: `building-${index}`, geometry: 'box', material: 'wall', translation: [index % 2 === 0 ? -6 : 6, 3, -index * 14], scale: [4, 6, 10],
   }));
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'wall', color: [0.75, 0.7, 0.62], roughness: 0.9 }, { id: 'paint', color: [0.7, 0.1, 0.08], roughness: 0.4 }],
     nodes: [
@@ -44,7 +44,7 @@ const transport = new PatientStdioClientTransport({
   stderr: 'pipe',
   cwd: process.cwd(),
 });
-const client = new Client({ name: '67js-linking-proof', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+const client = new Client({ name: 'crucible-linking-proof', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 120000 });

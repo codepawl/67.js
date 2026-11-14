@@ -11,7 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 const FRAME = { kind: 'image', width: 128, height: 72 };
 const recipe = {
-  format: '67js.scene', schemaVersion: 1,
+  format: 'crucible.scene', schemaVersion: 1,
   geometries: [{ id: 'box', type: 'box' }],
   materials: [{ id: 'red', color: [0.7, 0.2, 0.2] }],
   nodes: [{ id: 'cube', geometry: 'box', material: 'red' }],
@@ -23,10 +23,10 @@ let client;
 let sessionId;
 
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), '67js-quality-submit-'));
+  directory = await mkdtemp(join(tmpdir(), 'crucible-quality-submit-'));
   const transport = new StdioClientTransport({ command: process.execPath,
-    args: [resolve('bin/67js-mcp.mjs'), '--backend', 'cpu', '--memory', '96', '--jobs', join(directory, 'jobs')], cwd: directory, stderr: 'pipe' });
-  client = new Client({ name: '67js-quality-submit-test', version: '1' });
+    args: [resolve('bin/crucible-mcp.mjs'), '--backend', 'cpu', '--memory', '96', '--jobs', join(directory, 'jobs')], cwd: directory, stderr: 'pipe' });
+  client = new Client({ name: 'crucible-quality-submit-test', version: '1' });
   await client.connect(transport, { timeout: 240000 });
   sessionId = (await client.callTool({ name: 'scene_create', arguments: { recipe } }, { timeout: 120000 })).structuredContent.sessionId;
 });

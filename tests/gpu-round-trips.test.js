@@ -8,7 +8,7 @@ import { withDevServerPage } from './helpers/dev-server-browser.js';
 async function countRoundTrips(page) {
   const task = async () => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
     const material = { tag: 'surface', color: [0.5, 0.5, 0.5], metallic: 0, roughness: 0.5, emission: 0 };
     const part = { name: 'box', geometry: box(0, 1), matrix: identity, material };
@@ -16,7 +16,7 @@ async function countRoundTrips(page) {
     canvas.width = 32;
     canvas.height = 32;
     document.body.append(canvas);
-    const renderer = new Renderer67(canvas, [part], { samples: 1, pixelRatio: 1 });
+    const renderer = new CrucibleRenderer(canvas, [part], { samples: 1, pixelRatio: 1 });
     const context = renderer.context;
     const counts = { framebufferChecks: 0, anisotropyReads: 0 };
     const checkFramebufferStatus = context.checkFramebufferStatus.bind(context);

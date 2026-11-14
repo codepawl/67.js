@@ -1,14 +1,14 @@
 # Terrain and splat ground
 
-`67js/addons/terrain` and `67js/addons/texture-set` are available from version `0.10.0`.
+`crucible/addons/terrain` and `crucible/addons/texture-set` are available from version `0.10.0`.
 Together they replace a flat, noise-tinted ground with a chunked heightfield and a four-layer ground material made from real scanned textures.
 
 ```js
-import { Renderer67 } from '67js';
-import { loadHdri } from '67js/addons/hdri';
-import { createTerrain } from '67js/addons/terrain';
-import { loadTextureSet } from '67js/addons/texture-set';
-import { scatterVegetation } from '67js/addons/vegetation';
+import { CrucibleRenderer } from 'crucible';
+import { loadHdri } from 'crucible/addons/hdri';
+import { createTerrain } from 'crucible/addons/terrain';
+import { loadTextureSet } from 'crucible/addons/texture-set';
+import { scatterVegetation } from 'crucible/addons/vegetation';
 
 const terrain = createTerrain({ size: 600, chunks: 10, resolution: 32, levels: 4, seed: 11 });
 const [grass, forest, mud, rock] = await Promise.all(
@@ -30,11 +30,11 @@ const material = {
 for (const part of terrain.parts) part.material = material;
 
 const trees = scatterVegetation({ area, terrainHeight: terrain.heightAt, slopeLimit: 24, leaves: 'cards' });
-const renderer = new Renderer67(canvas, [...terrain.parts, ...treeParts], { world: true, ground: false, hdr: true, environment: { map: await loadHdri('/hdri/sky.hdr') } });
+const renderer = new CrucibleRenderer(canvas, [...terrain.parts, ...treeParts], { world: true, ground: false, hdr: true, environment: { map: await loadHdri('/hdri/sky.hdr') } });
 ```
 
 Each frame, `if (terrain.update(eye).length) renderer.replaceParts(sceneParts)` swaps the chunks whose level of detail changed.
-Textured parts such as leaf cards can be added and removed in `replaceParts` after `import '@codepawlhq/67js/addons/replace-textured-parts'`; their textures are freed once no part uses them.
+Textured parts such as leaf cards can be added and removed in `replaceParts` after `import '@codepawlhq/crucible/addons/replace-textured-parts'`; their textures are freed once no part uses them.
 
 ## loadTextureSet
 
@@ -96,7 +96,7 @@ A terrain near water needs nothing set. When `applyWaterReflection` finds a wate
 
 ## Heightfield from rasters
 
-`67js/addons/heightfield` builds a mesh from georeferenced rasters (heights, a mask, a photo) when `createTerrain` does not fit, such as a shoreline cut from a sea mask. A raster is `{ values, width, height, box: { x_min, x_max, y_min, y_max } }`, pixel centres on the box, row 0 at the north edge.
+`crucible/addons/heightfield` builds a mesh from georeferenced rasters (heights, a mask, a photo) when `createTerrain` does not fit, such as a shoreline cut from a sea mask. A raster is `{ values, width, height, box: { x_min, x_max, y_min, y_max } }`, pixel centres on the box, row 0 at the north edge.
 
 - `sampleRasterGrid(raster, { columns, rows, eastAt, northAt, cellSize, samplesPerSide, scale })` returns a `Float64Array` with the mean of the raster over a square cell around each vertex (`cellSize` 0 with one sample reads the raster at the vertex). The mean of bilinear samples is a weighted sum of pixels, so it runs as two passes over the pixels, not 16 bilinear reads and an allocation per vertex.
 - `createHeightfieldGeometry({ columns, rows, eastAt, northAt, heights, uvBox, keepCell })` returns `{ positions, normals, uvs, indices }` in one pass over typed arrays, with `keepCell(column, row)` dropping cells a finer tier covers.
@@ -128,7 +128,7 @@ Where the rest of the port's load goes (marks in a scratch copy, ms from navigat
 `addons/navmesh` finds walking routes over any triangle ground, so a character can go around holes, steep slopes and obstacles. It is pure JavaScript and gives the same path for the same input.
 
 ```js
-import { createNavmesh } from '67js/addons/navmesh';
+import { createNavmesh } from 'crucible/addons/navmesh';
 const { positions, indices } = terrain.parts[0].geometry; // world space, Y up
 const navmesh = createNavmesh({ positions, indices, agentRadius: 0.3, maxSlopeDegrees: 40, obstacles: [{ min: [4, 4], max: [6, 6] }] });
 const { points, length, searchNodes } = navmesh.findPath([-15, -15], [15, 15], { spacing: 1.5 });

@@ -1,26 +1,26 @@
-# 67js
+# Crucible
 
 > A 3D engine that AI agents drive. Glaze draws real-time scenes on WebGL2, and Cook path traces stills on the CPU or WebGL2, and on Vulkan with the optional Cook package. PNG, MP4 and GLB output comes from the same scene.
 
-67js has an MCP server (`67js-mcp`, 25 tools) that builds, edits, looks at and renders scenes from JSON recipes.
+Crucible has an MCP server (`crucible-mcp`, 25 tools) that builds, edits, looks at and renders scenes from JSON recipes.
 The same engine is a JavaScript library for pages and Node. The library API is in the guide below.
 Scenes are plain data with stable IDs, so an agent can edit by ID and check each change with a rendered image.
 
 ## Renderers
 
-- Glaze (`Renderer67`) is the real-time rasterizer. It runs on WebGL2 only.
+- Glaze (`CrucibleRenderer`) is the real-time rasterizer. It runs on WebGL2 only.
 - Cook is the path tracer. Its backends are cpu (the default), gpu (WebGL2), webgpu (a software BVH in WGSL compute) and native (Vulkan ray queries, from the optional Cook package, `@codepawlhq/cook`).
 - An experimental real-time path tracer runs on WebGPU with a WebGL2 fallback. The MCP server does not expose it. MCP render jobs take the cpu, gpu and native backends of Cook.
 - In the MCP server, `--backend gpu` means hardware WebGL2 in Chrome, and `--backend cpu` means software rendering.
-- Planned, not shipped: a `quality` setting that picks a tier (draft, realtime, realtime-high, final), and Glaze on WebGPU. Do not call either one. The roadmap is [issue 890](https://github.com/codepawl/67.js/issues/890).
+- Planned, not shipped: a `quality` setting that picks a tier (draft, realtime, realtime-high, final), and Glaze on WebGPU. Do not call either one. The roadmap is [issue 890](https://github.com/codepawl/crucible/issues/890).
 
 ## Connect
 
-- npm package: `@codepawlhq/67js`. The MCP server is its `67js-mcp` binary. Node.js 20.19 or newer and an installed Chrome are required.
-- Claude Code plugin, which adds the server and both skills: `/plugin marketplace add codepawl/67.js`, then `/plugin install 67js@67js`.
-- Any other MCP client: `npm install 67js@npm:@codepawlhq/67js`, then run Node on `node_modules/67js/bin/67js-mcp.mjs --backend gpu --memory 192` over stdio. Use the absolute path.
-- Setup, flags and client notes: [mcp.md](https://67js.codepawl.com/mcp.md).
-- Skills in the package: `skills/build-67js-scene` (build and light) and `skills/render-67js-media` (stills and video).
+- npm package: `@codepawlhq/crucible`. The MCP server is its `crucible-mcp` binary. Node.js 20.19 or newer and an installed Chrome are required.
+- Claude Code plugin, which adds the server and both skills: `/plugin marketplace add codepawl/crucible`, then `/plugin install crucible@crucible`.
+- Any other MCP client: `npm install crucible@npm:@codepawlhq/crucible`, then run Node on `node_modules/crucible/bin/crucible-mcp.mjs --backend gpu --memory 192` over stdio. Use the absolute path.
+- Setup, flags and client notes: [mcp.md](https://crucible.codepawl.com/mcp.md).
+- Skills in the package: `skills/build-crucible-scene` (build and light) and `skills/render-crucible-media` (stills and video).
 
 ## Start
 
@@ -30,20 +30,20 @@ Scenes are plain data with stable IDs, so an agent can edit by ID and check each
 
 ## To do X, call Y
 
-- Create a scene: `scene_capabilities`, then `scene_create` with a JSON recipe, or `scene_asset_catalog` and `scene_create_asset` for a GLB. [Docs](https://67js.codepawl.com/agent-scene.md)
-- Edit parts, transforms and the camera: `scene_inspect` for stable IDs and the revision, then `scene_apply` with `expectedRevision`. [Docs](https://67js.codepawl.com/agent-scene.md)
-- Shape geometry: `mesh_inspect`, `mesh_edit`, `mesh_stack`. [Docs](https://67js.codepawl.com/mesh.md)
-- Materials, looks, HDRI, fog, effects: `scene_apply` with `set-material`, `set-environment`, `set-effects`, `set-shadow`; `scene_asset_catalog` lists HDRI and look IDs. [Docs](https://67js.codepawl.com/agent-look.md)
-- Lights and shadows: `scene_apply` with `set-environment` (sun, sky, point lights) and `set-shadow`. [Docs](https://67js.codepawl.com/lighting.md)
-- Camera and lens: `scene_apply` with `set-camera`; check the framing with `scene_look` or `scene_review`. [Docs](https://67js.codepawl.com/camera-path.md)
-- Animation: `scene_apply` with `set-motion`; preview with `scene_look` and `motionTime`. [Docs](https://67js.codepawl.com/agent-motion.md)
-- Imported character motion: `scene_inspect` with `kind: hierarchy`, then `scene_apply` with `set-asset-node`. [Docs](https://67js.codepawl.com/agent-character-motion.md)
-- Bake light: Put `bakes` in the recipe; `scene_capabilities` lists the fields. [Docs](https://67js.codepawl.com/light-bake.md)
-- Review the result: `scene_look` for one PNG, `scene_review` for a labeled grid of up to four views. [Docs](https://67js.codepawl.com/agent-review.md)
-- Render a still or a video: `scene_render_submit`, poll `scene_render_status`, read `scene_render_result`, then `scene_render_release`. [Docs](https://67js.codepawl.com/agent-render-jobs.md)
-- Export a model: `scene_export_glb`, or `scene_export_recipe` for the JSON recipe. [Docs](https://67js.codepawl.com/export-glb.md)
-- Make a playable game: `scene_apply` with `set-game` (topic `game` in `scene_capabilities`), then `scene_export_web` for a static folder. [Docs](https://67js.codepawl.com/game.md)
-- Recover from an error: `scene_restore` to a `scene_checkpoint`, or `scene_inspect` for the current revision and retry; every error names its next step. [Docs](https://67js.codepawl.com/mcp.md)
+- Create a scene: `scene_capabilities`, then `scene_create` with a JSON recipe, or `scene_asset_catalog` and `scene_create_asset` for a GLB. [Docs](https://crucible.codepawl.com/agent-scene.md)
+- Edit parts, transforms and the camera: `scene_inspect` for stable IDs and the revision, then `scene_apply` with `expectedRevision`. [Docs](https://crucible.codepawl.com/agent-scene.md)
+- Shape geometry: `mesh_inspect`, `mesh_edit`, `mesh_stack`. [Docs](https://crucible.codepawl.com/mesh.md)
+- Materials, looks, HDRI, fog, effects: `scene_apply` with `set-material`, `set-environment`, `set-effects`, `set-shadow`; `scene_asset_catalog` lists HDRI and look IDs. [Docs](https://crucible.codepawl.com/agent-look.md)
+- Lights and shadows: `scene_apply` with `set-environment` (sun, sky, point lights) and `set-shadow`. [Docs](https://crucible.codepawl.com/lighting.md)
+- Camera and lens: `scene_apply` with `set-camera`; check the framing with `scene_look` or `scene_review`. [Docs](https://crucible.codepawl.com/camera-path.md)
+- Animation: `scene_apply` with `set-motion`; preview with `scene_look` and `motionTime`. [Docs](https://crucible.codepawl.com/agent-motion.md)
+- Imported character motion: `scene_inspect` with `kind: hierarchy`, then `scene_apply` with `set-asset-node`. [Docs](https://crucible.codepawl.com/agent-character-motion.md)
+- Bake light: Put `bakes` in the recipe; `scene_capabilities` lists the fields. [Docs](https://crucible.codepawl.com/light-bake.md)
+- Review the result: `scene_look` for one PNG, `scene_review` for a labeled grid of up to four views. [Docs](https://crucible.codepawl.com/agent-review.md)
+- Render a still or a video: `scene_render_submit`, poll `scene_render_status`, read `scene_render_result`, then `scene_render_release`. [Docs](https://crucible.codepawl.com/agent-render-jobs.md)
+- Export a model: `scene_export_glb`, or `scene_export_recipe` for the JSON recipe. [Docs](https://crucible.codepawl.com/export-glb.md)
+- Make a playable game: `scene_apply` with `set-game` (topic `game` in `scene_capabilities`), then `scene_export_web` for a static folder. [Docs](https://crucible.codepawl.com/game.md)
+- Recover from an error: `scene_restore` to a `scene_checkpoint`, or `scene_inspect` for the current revision and retry; every error names its next step. [Docs](https://crucible.codepawl.com/mcp.md)
 
 ## All tools
 
@@ -77,12 +77,12 @@ Call `scene_capabilities` for field detail. This list is generated from the serv
 
 ## If you know three.js
 
-Models write three.js from memory. The section "If you know three.js" of the [complete guide](https://67js.codepawl.com/guide.md) maps each common three.js idiom to the 67js call. The optional addon `@codepawlhq/67js-three-compat` (folder `packages/three-compat`) accepts the common three.js shapes (`Scene`, `Mesh`, `MeshStandardMaterial`, `PerspectiveCamera`, the light classes, `GLTFLoader`, `setAnimationLoop`) and builds 67js parts from them. It throws an error that names the 67js call when you use a name it does not support.
+Models write three.js from memory. The section "If you know three.js" of the [complete guide](https://crucible.codepawl.com/guide.md) maps each common three.js idiom to the Crucible call. The optional addon `@codepawlhq/crucible-three-compat` (folder `packages/three-compat`) accepts the common three.js shapes (`Scene`, `Mesh`, `MeshStandardMaterial`, `PerspectiveCamera`, the light classes, `GLTFLoader`, `setAnimationLoop`) and builds Crucible parts from them. It throws an error that names the Crucible call when you use a name it does not support.
 
 ## Docs
 
-- [Complete plain-text guide](https://67js.codepawl.com/guide.md): renderer, parts, materials, cameras, animation, export and troubleshooting.
-- [MCP server](https://67js.codepawl.com/mcp.md), [scene recipes](https://67js.codepawl.com/agent-scene.md), [look and lighting](https://67js.codepawl.com/agent-look.md), [motion](https://67js.codepawl.com/agent-motion.md), [review](https://67js.codepawl.com/agent-review.md), [render jobs](https://67js.codepawl.com/agent-render-jobs.md), [imported assets](https://67js.codepawl.com/agent-asset.md).
-- [GLB contract](https://67js.codepawl.com/gltf.md): supported assets and conversion limits.
-- [Release metadata](https://67js.codepawl.com/release.json): package name, version, install command and commit.
-- [Changelog data](https://67js.codepawl.com/changelog.json): every release and the unreleased changes with issue numbers and breaking flags. Read it before relying on a feature the docs describe.
+- [Complete plain-text guide](https://crucible.codepawl.com/guide.md): renderer, parts, materials, cameras, animation, export and troubleshooting.
+- [MCP server](https://crucible.codepawl.com/mcp.md), [scene recipes](https://crucible.codepawl.com/agent-scene.md), [look and lighting](https://crucible.codepawl.com/agent-look.md), [motion](https://crucible.codepawl.com/agent-motion.md), [review](https://crucible.codepawl.com/agent-review.md), [render jobs](https://crucible.codepawl.com/agent-render-jobs.md), [imported assets](https://crucible.codepawl.com/agent-asset.md).
+- [GLB contract](https://crucible.codepawl.com/gltf.md): supported assets and conversion limits.
+- [Release metadata](https://crucible.codepawl.com/release.json): package name, version, install command and commit.
+- [Changelog data](https://crucible.codepawl.com/changelog.json): every release and the unreleased changes with issue numbers and breaking flags. Read it before relying on a feature the docs describe.

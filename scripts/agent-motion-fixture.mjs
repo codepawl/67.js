@@ -45,7 +45,7 @@ export function createAgentMotionFixture() {
     return [Math.cos(angle) * 0.05, index / 96 * 0.7, Math.sin(angle) * 0.05];
   });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'box', type: 'box', bevel: 0.14, subdivisions: 3 },
       { id: 'cylinder', type: 'cylinder', segments: 48, bevel: 0.04, bevelSegments: 4 },

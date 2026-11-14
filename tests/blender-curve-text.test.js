@@ -5,7 +5,7 @@ import { curve } from '../src/modeling.js';
 import { text } from '../src/text-geometry.js';
 
 // Curve and text objects are compared by volume, area and bounds, because Blender merges the seam vertices that
-// 67js keeps for its UVs, so vertex counts differ by design. Cases and results come from tests/fixtures/blender,
+// Crucible keeps for its UVs, so vertex counts differ by design. Cases and results come from tests/fixtures/blender,
 // written by scripts/blender-golden.py.
 const FIXTURE_DIRECTORY = new URL('./fixtures/blender/', import.meta.url);
 const readFixture = name => JSON.parse(readFileSync(new URL(name, FIXTURE_DIRECTORY), 'utf8'));

@@ -1,6 +1,6 @@
 # Models and AI agents
 
-An AI agent can build a 67js scene in two ways. With the MCP server, the agent calls tools that take JSON and return pictures, and it writes no engine code. Without MCP, the agent writes JavaScript like the code in these docs and renders it in a browser.
+An AI agent can build a Crucible scene in two ways. With the MCP server, the agent calls tools that take JSON and return pictures, and it writes no engine code. Without MCP, the agent writes JavaScript like the code in these docs and renders it in a browser.
 
 Three pages cover the details:
 
@@ -35,7 +35,7 @@ These guides cover the parts of a recipe:
 Start with a short brief: the subject, references, the camera, the output size, the interaction, the GPU or CPU backend and the memory budget. Ask for the smallest trial first. A prompt can look like this:
 
 ```text
-Use 67js to build an interactive mechanical study. Reuse meshes, use a 256 MiB
+Use Crucible to build an interactive mechanical study. Reuse meshes, use a 256 MiB
 render budget, provide orbit and keyboard controls, pause hidden playback, and
 capture a real wide and mobile preview. List unsupported features. Do not claim
 speed superiority without a comparable benchmark.

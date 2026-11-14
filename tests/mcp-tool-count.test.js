@@ -13,7 +13,7 @@ const numberWords = new Map([
 
 async function listedToolCount() {
   const server = createAgentMcpServer({ async close() {} });
-  const client = new Client({ name: '67js-tool-count-test', version: '1' });
+  const client = new Client({ name: 'crucible-tool-count-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

@@ -10,7 +10,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const backend = process.argv[2] ?? 'cpu';
-const directory = await mkdtemp(join(tmpdir(), '67js-glb-export-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-glb-export-'));
 const assets = join(directory, 'assets');
 const jobs = join(directory, 'jobs');
 await mkdir(assets);
@@ -27,7 +27,7 @@ let diagnostics = '';
 transport.stderr.on('data', chunk => {
   diagnostics += chunk.toString();
 });
-const client = new Client({ name: '67js-glb-export-smoke', version: '1' });
+const client = new Client({ name: 'crucible-glb-export-smoke', version: '1' });
 
 async function call(name, argumentsValue = {}) {
   const result = await client.callTool({ name, arguments: argumentsValue }, { timeout: 180000 });
@@ -57,7 +57,7 @@ try {
   await client.connect(transport);
 
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'cube', type: 'box', bevel: 0.05 }, { id: 'ball', type: 'sphere' }],
     materials: [{ id: 'oak', pattern: { type: 'wood', size: 0.6, axis: 'z' }, roughness: 0.8 }, { id: 'red', color: [0.8, 0.1, 0.1] }],
     nodes: [{ id: 'crate', geometry: 'cube', material: 'oak' }, { id: 'ball', geometry: 'ball', material: 'red', translation: [1.6, 0, 0], scale: [0.5, 0.5, 0.5] }],
@@ -72,7 +72,7 @@ try {
   await call('scene_dispose', { sessionId: scene.sessionId });
 
   const catalog = await call('scene_asset_catalog');
-  const assetRecipe = { format: '67js.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId };
+  const assetRecipe = { format: 'crucible.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId };
   const posed = await call('scene_create_asset', { recipe: assetRecipe });
   const nodes = [];
   for (let offset = 0; ; offset += 64) {

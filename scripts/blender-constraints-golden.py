@@ -3,10 +3,10 @@
 Run from Bash:
   PATH="/c/Program Files/Blender Foundation/Blender 5.2:$PATH" blender -b --factory-startup --python scripts/blender-constraints-golden.py
 
-Each case lists nodes (empties with a parent, location, Euler XYZ degrees and scale), one constraint written in 67js's
+Each case lists nodes (empties with a parent, location, Euler XYZ degrees and scale), one constraint written in Crucible's
 recipe form, and optionally a `pose` that moves a node after the constraint is set up (child_of binds at the rest pose
 and then follows the target). The script builds the same scene in Blender, reads the owner's evaluated world matrix and
-writes it column-major, the layout 67js uses. The numbers come from Blender's own evaluation; nothing is copied from it.
+writes it column-major, the layout Crucible uses. The numbers come from Blender's own evaluation; nothing is copied from it.
 """
 import json
 import math

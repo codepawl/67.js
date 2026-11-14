@@ -1,17 +1,17 @@
 # Gaussian splats
 
-`67js/addons/gaussian-splats` draws 3D Gaussian splats, the format that captured rooms, streets and products ship in, behind or among the parts of a scene. It is in the current source and not yet published. It is an optional package: the core renderer has no code for it, so the core bundle does not change, and a scene without splats never loads it. Recipes and the MCP server do not reach it yet: the local asset catalog reads GLB files only, and what the addon costs is recorded below first.
+`crucible/addons/gaussian-splats` draws 3D Gaussian splats, the format that captured rooms, streets and products ship in, behind or among the parts of a scene. It is in the current source and not yet published. It is an optional package: the core renderer has no code for it, so the core bundle does not change, and a scene without splats never loads it. Recipes and the MCP server do not reach it yet: the local asset catalog reads GLB files only, and what the addon costs is recorded below first.
 
 ```js
-import { Renderer67 } from '67js';
-import { attachGaussianSplats, createGaussianSplats, parseGaussianSplatPly } from '67js/addons/gaussian-splats';
+import { CrucibleRenderer } from 'crucible';
+import { attachGaussianSplats, createGaussianSplats, parseGaussianSplatPly } from 'crucible/addons/gaussian-splats';
 
 const bytes = await (await fetch('/scene.ply')).arrayBuffer();
 const data = parseGaussianSplatPly(bytes, { maximumCount: 1_000_000 });
 // Many captures are y-down: this matrix turns the scene upside down and puts it 3 m behind the origin.
 const splats = createGaussianSplats(data, { matrix: [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, -3, 1] });
 
-const renderer = new Renderer67(canvas, scene.parts, { ground: false });
+const renderer = new CrucibleRenderer(canvas, scene.parts, { ground: false });
 const detach = attachGaussianSplats(renderer, splats);
 renderer.render(camera); // parts first, then the splats, farthest first
 detach();               // or renderer.dispose()

@@ -36,7 +36,7 @@ for stage in "$@"; do
       for tree in "$here" "$base_tree"; do
         label="$(basename "$tree")"
         echo "--- $label"
-        node bench/job-materials/job-run.mjs "$tree/bin/67js-mcp.mjs" "$out/identity-$label" 256 room textured shared glass --browser "$chrome_wrapper" 2>&1 | tail -12
+        node bench/job-materials/job-run.mjs "$tree/bin/crucible-mcp.mjs" "$out/identity-$label" 256 room textured shared glass --browser "$chrome_wrapper" 2>&1 | tail -12
       done
       ;;
     parity)

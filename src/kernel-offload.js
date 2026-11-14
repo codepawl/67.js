@@ -42,7 +42,7 @@ function recordFallback(kernel, reason) {
     statistics.fallbacks.push({ kernel, reason });
   }
   if (kernelWorkersAvailable()) {
-    console.warn(`67js kernel fallback: ${kernel} ran inline (${reason}).`);
+    console.warn(`Crucible kernel fallback: ${kernel} ran inline (${reason}).`);
   }
 }
 

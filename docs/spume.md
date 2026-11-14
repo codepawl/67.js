@@ -1,15 +1,15 @@
 # Spume liquid playback
 
-`67js/addons/spume` plays back a liquid bake from [Spume](https://github.com/codepawl/spume), the CodePawl GPU liquid solver.
-Spume bakes offline on an NVIDIA GPU with Python and NVIDIA Warp. The browser never runs the solver: this addon reads the baked cache folder and turns each frame into ordinary rigid 67js parts.
+`crucible/addons/spume` plays back a liquid bake from [Spume](https://github.com/codepawl/spume), the CodePawl GPU liquid solver.
+Spume bakes offline on an NVIDIA GPU with Python and NVIDIA Warp. The browser never runs the solver: this addon reads the baked cache folder and turns each frame into ordinary rigid Crucible parts.
 
 ```js
-import { Renderer67 } from '67js';
-import { loadSpumeCache, createSpumePlayer } from '67js/addons/spume';
+import { CrucibleRenderer } from 'crucible';
+import { loadSpumeCache, createSpumePlayer } from 'crucible/addons/spume';
 
 const cache = await loadSpumeCache('/caches/geyser/');
 const player = createSpumePlayer(cache, { loop: true });
-const renderer = new Renderer67(canvas, [...sceneParts, ...player.partsAt(0)], { hdr: true, samples: 4 });
+const renderer = new CrucibleRenderer(canvas, [...sceneParts, ...player.partsAt(0)], { hdr: true, samples: 4 });
 
 function draw(seconds) {
   renderer.replaceParts([...sceneParts, ...player.partsAt(seconds)]);
@@ -19,7 +19,7 @@ function draw(seconds) {
 
 ## Baking a cache
 
-Bake from a Spume checkout. Units are metres, +Y up, the floor at y = 0, which matches 67js.
+Bake from a Spume checkout. Units are metres, +Y up, the floor at y = 0, which matches Crucible.
 
 ```bash
 uv run python run.py --out out/geyser --name geyser --pressure cg --iterations 20
@@ -40,7 +40,7 @@ Spume's README lists inflows, obstacles, outflow boxes and every solver option.
 It validates `meta.json`, reads every frame file and keeps frames int16-packed until they are played, which is about a fifth of the decoded size.
 Caches from Spume 0.1 have no `spray_kinds.bin`; their points count as spray.
 
-The frame files are not general glTF. Positions are int16 spread over each frame's own min..max box, so standard loaders, including `67js/addons/gltf`, read them at the wrong scale. Use `decodeSpumeFrame(bytes)` for one frame: it returns `{ positions, normals, indices }` as `Float32Array`, `Float32Array` and `Uint32Array` in metres.
+The frame files are not general glTF. Positions are int16 spread over each frame's own min..max box, so standard loaders, including `crucible/addons/gltf`, read them at the wrong scale. Use `decodeSpumeFrame(bytes)` for one frame: it returns `{ positions, normals, indices }` as `Float32Array`, `Float32Array` and `Uint32Array` in metres.
 
 ## Playing
 

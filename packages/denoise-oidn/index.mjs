@@ -1,5 +1,5 @@
 // Calls Intel Open Image Denoise (OIDN, Apache-2.0) through its official `oidnDenoise` command line tool, with
-// the colour, albedo and normal images the 67js path tracer already writes. The binary is not in this package:
+// the colour, albedo and normal images the Crucible path tracer already writes. The binary is not in this package:
 // `npm run fetch` (fetch-oidn.mjs) downloads the official release into ./vendor, and OIDN_DENOISE_PATH points
 // at another copy.
 import { spawn } from 'node:child_process';
@@ -75,7 +75,7 @@ function runTool(binary, toolArguments) {
 export async function denoiseWithOidn({ width, height, color, albedo, normal, device = 'cpu', quality = 'high', threads = 0, cleanAux = false }) {
   const binary = findOidnBinary();
   if (!binary) throw new Error('The oidnDenoise tool is not installed: run `npm run fetch` in the denoise package, or set OIDN_DENOISE_PATH.');
-  const directory = await mkdtemp(join(tmpdir(), '67js-oidn-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-oidn-'));
   try {
     await Promise.all([
       writeFile(join(directory, 'color.pfm'), encodePfm(color, width, height)),

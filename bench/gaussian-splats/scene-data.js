@@ -1,4 +1,4 @@
-// Splat data shared by the 67js and three.js pages of the benchmark, so both draw the same splats.
+// Splat data shared by the Crucible and three.js pages of the benchmark, so both draw the same splats.
 
 function seededRandom(seed) {
   let state = seed >>> 0;

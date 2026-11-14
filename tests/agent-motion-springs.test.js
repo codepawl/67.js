@@ -12,7 +12,7 @@ function tailRecipe(springs, extraMotion = {}) {
   const bone = (id, parent) => ({ id, parent, translation: [0, 0, -0.3] });
   const marker = (id, parent) => ({ id: `${id}-mesh`, parent, geometry: 'box', material: 'paint', scale: [0.02, 0.02, 0.02] });
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
     nodes: [

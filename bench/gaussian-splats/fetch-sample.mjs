@@ -1,5 +1,5 @@
 // Downloads the sample splat of the Gaussian splat benchmark into bench/gaussian-splats/data/ (git ignores that folder) and
-// writes it as a standard 3DGS PLY, which is the file both 67js and three.js then load.
+// writes it as a standard 3DGS PLY, which is the file both Crucible and three.js then load.
 //   node bench/gaussian-splats/fetch-sample.mjs
 // The sample is "millipede spec." by Fabian Plum, CC BY 4.0, from https://superspl.at/scene/3d5482d4, the file that the
 // three.js repository ships in examples/models/splat/millipede.splat (MIT-licensed repository, per-file licence next to it).

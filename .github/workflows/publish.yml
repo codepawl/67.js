@@ -1,4 +1,4 @@
-name: Publish 67js
+name: Publish Crucible
 
 on:
   workflow_dispatch:

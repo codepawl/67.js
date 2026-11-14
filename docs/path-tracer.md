@@ -1,9 +1,9 @@
 # Cook (path tracer)
 
-**Cook** (`67js/addons/path-tracer`) is the 67js offline path tracer (a nod to both the Cook-Torrance microfacet BSDF and *"let it cook"*). Alongside `Glaze` (`Renderer67`) for real-time WebGL2, `Cook` draws one still by following light paths on the CPU or GPU. It loads only when a render job asks for it, so a normal scene pays nothing (issue #57).
+**Cook** (`crucible/addons/path-tracer`) is the Crucible offline path tracer (a nod to both the Cook-Torrance microfacet BSDF and *"let it cook"*). Alongside `Glaze` (`CrucibleRenderer`) for real-time WebGL2, `Cook` draws one still by following light paths on the CPU or GPU. It loads only when a render job asks for it, so a normal scene pays nothing (issue #57).
 
 ```js
-import { Cook, renderPathTracedImage } from '67js/addons/path-tracer';
+import { Cook, renderPathTracedImage } from 'crucible/addons/path-tracer';
 
 const { rgba, linear, report } = await renderPathTracedImage(
   { parts, environment, camera },        // the same objects the rasterizer takes
@@ -149,7 +149,7 @@ The 1920 by 1080 still of `tests/fixtures/demo-room.recipe.json` at `samples: 64
 
 ## Open Image Denoise (optional)
 
-`settings.renderer.denoise: "oidn"` filters the still with [Intel Open Image Denoise](https://github.com/RenderKit/oidn) 2.5.1 (Apache-2.0), the denoiser Cycles uses, fed the colour, albedo and normal images the tracer writes. It is the package `@codepawlhq/67js-denoise-oidn` (`packages/denoise-oidn`), not part of the core archive: install it beside `67js` and run its `fetch` script, which downloads the official release binary for the platform after a SHA-256 check. The job runner calls the `oidnDenoise` tool on the CPU. A source checkout also finds the package in `packages/denoise-oidn`. On the native backend `denoise: true` means OIDN when it is installed. Without the package or the binary the job runs the wavelet filter and says why in `metrics.pathTracer.denoiserNote`; `metrics.pathTracer.denoiser` always names the filter that ran. Only the native build is shipped. The browser port (`denoiser` 0.0.11 on tensorflow.js) is a 134 MB install; its scores are not in the table because the GPU it needs was not free for this comparison (`bench/reference/denoise-browser.mjs` is the script to run it), and the job runner already has Node.
+`settings.renderer.denoise: "oidn"` filters the still with [Intel Open Image Denoise](https://github.com/RenderKit/oidn) 2.5.1 (Apache-2.0), the denoiser Cycles uses, fed the colour, albedo and normal images the tracer writes. It is the package `@codepawlhq/crucible-denoise-oidn` (`packages/denoise-oidn`), not part of the core archive: install it beside `crucible` and run its `fetch` script, which downloads the official release binary for the platform after a SHA-256 check. The job runner calls the `oidnDenoise` tool on the CPU. A source checkout also finds the package in `packages/denoise-oidn`. On the native backend `denoise: true` means OIDN when it is installed. Without the package or the binary the job runs the wavelet filter and says why in `metrics.pathTracer.denoiserNote`; `metrics.pathTracer.denoiser` always names the filter that ran. Only the native build is shipped. The browser port (`denoiser` 0.0.11 on tensorflow.js) is a 134 MB install; its scores are not in the table because the GPU it needs was not free for this comparison (`bench/reference/denoise-browser.mjs` is the script to run it), and the job runner already has Node.
 
 Compared on 960 by 540 captures of six reference scenes, FLIP against Cycles, lower is better (`bench/reference/denoise.json`, made by `denoise-capture.mjs`, `denoise-compare.mjs` and `denoise-score.py`). The unfiltered tracer, the wavelet filter and OIDN all land within 0.01 of each other on every scene except `metal`, because most of the score is the difference between the tracer and Cycles, not noise:
 
@@ -195,7 +195,7 @@ npm run render:file-cook -- --config scene.json --out out/frame --width 1280 --h
 | `--patch-materials "<regex>={json}"` | | Change the matching materials before packing (repeatable), to test a scene fix such as `"glass={\"alphaMode\":\"OPAQUE\"}"`. |
 | `--help` | | Print the options. |
 
-Files written: `<prefix>.png` (ACES tone map and gamma, the 67js view transform), `<prefix>.linear.f32` (width x height x 3 little-endian floats, after the denoiser), `<prefix>.raw.png` and `<prefix>.raw.linear.f32` (before the denoiser, with `--write-raw`), `<prefix>.parts.json` (with `--list-parts`) and `<prefix>.json`, the report, which is also printed as one `FILE_NATIVE {json}` line.
+Files written: `<prefix>.png` (ACES tone map and gamma, the Crucible view transform), `<prefix>.linear.f32` (width x height x 3 little-endian floats, after the denoiser), `<prefix>.raw.png` and `<prefix>.raw.linear.f32` (before the denoiser, with `--write-raw`), `<prefix>.parts.json` (with `--list-parts`) and `<prefix>.json`, the report, which is also printed as one `FILE_NATIVE {json}` line.
 
 The report holds everything `traceFrameNative` reports (adapter, kernel, samples, `tracedSeconds`, denoiser, `triangles`, `instances`, `ignored`) plus:
 
@@ -224,7 +224,7 @@ Scores and times are in the table of `bench/reference/README.md`. Cycles used 25
 
 ## Progressive preview, blue noise and light choice (issue #623)
 
-`67js/addons/path-tracer-progressive` (`createProgressiveTracer(scene, options)`) draws the GPU tracer one sample per pixel per `step()`. The first two steps draw at a quarter and a half of the size, one sample each, then every step adds a sample at full size; `update({ camera, parts, environment })` starts the image over, and `snapshot()` reads the image back (filtered unless `denoise` is off). It shares the WebGL2 context of the GPU still, so one render at a time owns it. The core bundle does not carry it.
+`crucible/addons/path-tracer-progressive` (`createProgressiveTracer(scene, options)`) draws the GPU tracer one sample per pixel per `step()`. The first two steps draw at a quarter and a half of the size, one sample each, then every step adds a sample at full size; `update({ camera, parts, environment })` starts the image over, and `snapshot()` reads the image back (filtered unless `denoise` is off). It shares the WebGL2 context of the GPU still, so one render at a time owns it. The core bundle does not carry it.
 
 Three options (`samplingPattern: "blue-noise-first"` and `lightSelection: "importance"` need the GPU backend, `lightSelection: "tree"` runs on the CPU reference, the WebGL2 GPU and the WebGPU tracer). `samplingPattern` and `importance` are off by default; `lightSelection` defaults to `"auto"`, which is `"tree"` for a scene with more than 8 local lights and `"uniform"` for the rest, so scenes with a handful of lights draw the same pixels as before:
 
@@ -276,7 +276,7 @@ Proof of the three checks of issue #623 on 2026-11-11 (`node bench/reference/pro
 
 ## Real-time hybrid view (issue #624)
 
-`67js/addons/path-tracer-realtime` (`createRealtimeTracer(scene, { width, height, bounces, ... })`, then `frame(camera)` for every picture) draws the WebGL2 tracer fast enough to move the camera. It shares the WebGL2 context of the GPU still, so one render at a time owns it, and it draws to `canvas` (an `OffscreenCanvas` or a canvas element, 8 bit, ACES view transform). `readFrame()` returns the same picture as bytes. The pieces, each in its own module so they can move to the WebGPU backend:
+`crucible/addons/path-tracer-realtime` (`createRealtimeTracer(scene, { width, height, bounces, ... })`, then `frame(camera)` for every picture) draws the WebGL2 tracer fast enough to move the camera. It shares the WebGL2 context of the GPU still, so one render at a time owns it, and it draws to `canvas` (an `OffscreenCanvas` or a canvas element, 8 bit, ACES view transform). `readFrame()` returns the same picture as bytes. The pieces, each in its own module so they can move to the WebGPU backend:
 
 - **Half-size tracing.** One path per pixel and frame at half the output size (`resolutionDivisor`, 2), two bounces (`bounces`, 2). The first hit picks one light by importance instead of tracing a shadow ray to every light, which the denoiser averages over frames.
 - **Radiance cache** (`src/path-tracer-radiance-cache.js`, SHaRC style). A cell is the quantized position (cells double in size each time the distance from the eye doubles past 64 cells) and the quantized normal of a surface point, hashed into 2^20 slots with no collision check (about 0.4% of 7,500 test cells collided). The last hit of a path reads its cell instead of tracing on; the hit before it writes what the rest of the path brought back, and a point pass adds the records into the cells with additive blending (WebGL2 has no atomics), as a running average of up to 128 records. The cache reads as diffuse. It needs the scene to rest: a new scene empties it.

@@ -30,7 +30,7 @@ function countingFetch(inner) {
 }
 
 async function withCacheFolder(run) {
-  const folder = await mkdtemp(join(tmpdir(), '67js-update-'));
+  const folder = await mkdtemp(join(tmpdir(), 'crucible-update-'));
   try {
     await run(join(folder, 'nested', 'update-check.json'));
   } finally {
@@ -175,7 +175,7 @@ test('every off switch makes no request and no cache file', async () => {
 
 test('--check-update text names current and latest', async () => {
   assert.equal(await describeUpdateCheck({ currentVersion: '0.19.0', fetchImpl: registryAnswer('0.20.0') }),
-    'current 0.19.0\nlatest 0.20.0\nupdate available: https://github.com/codepawl/67.js/releases/tag/v0.20.0');
+    'current 0.19.0\nlatest 0.20.0\nupdate available: https://github.com/codepawl/crucible/releases/tag/v0.20.0');
   assert.match(await describeUpdateCheck({ currentVersion: '0.19.0', fetchImpl: registryAnswer('0.19.0') }), /up to date$/);
   assert.match(await describeUpdateCheck({ currentVersion: '0.19.0', fetchImpl: async () => { throw new Error('offline'); } }), /latest unknown/);
 });
@@ -201,7 +201,7 @@ async function connect(context, options) {
 
 test('an older running version puts the notice in instructions and the first scene_capabilities result only', async context => {
   const client = await connect(context, { updateAvailable: () => buildUpdateAvailable('0.19.0', '0.20.0') });
-  assert.match(client.getInstructions(), /A newer 67js is out \(running 0\.19\.0, latest 0\.20\.0/);
+  assert.match(client.getInstructions(), /A newer Crucible is out \(running 0\.19\.0, latest 0\.20\.0/);
   const first = (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent;
   assert.equal(first.updateAvailable.latest, '0.20.0');
   assert.equal(first.updateAvailable.current, '0.19.0');
@@ -212,18 +212,18 @@ test('an older running version puts the notice in instructions and the first sce
 
 test('without a newer version the instructions and results carry no notice', async context => {
   const client = await connect(context, {});
-  assert.doesNotMatch(client.getInstructions(), /newer 67js/);
+  assert.doesNotMatch(client.getInstructions(), /newer crucible/);
   const result = (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent;
   assert.equal('updateAvailable' in result, false);
 });
 
-const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const serverEntry = new URL('../bin/crucible-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
 
 // The real bin in a child process: the cache file is seeded through XDG_CACHE_HOME and is fresh, so no request is made.
 test('the started server reads a seeded cache and reports the newer version in instructions and the first scene_capabilities', { skip: !hasBuild && 'run npm run build:mcp first' }, async () => {
-  const cacheHome = await mkdtemp(join(tmpdir(), '67js-update-cli-'));
-  const cacheFile = join(cacheHome, '67js', 'update-check.json');
+  const cacheHome = await mkdtemp(join(tmpdir(), 'crucible-update-cli-'));
+  const cacheFile = join(cacheHome, 'crucible', 'update-check.json');
   await mkdir(dirname(cacheFile), { recursive: true });
   await writeFile(cacheFile, JSON.stringify({ checkedAt: Date.now(), latest: '99.0.0' }));
   const { CI, NO_UPDATE_NOTIFIER, SIXTYSEVENJS_NO_UPDATE_CHECK, ...inheritedEnvironment } = process.env;
@@ -236,7 +236,7 @@ test('the started server reads a seeded cache and reports the newer version in i
   const client = new Client({ name: 'update-check-cli-test', version: '1' });
   try {
     await client.connect(transport);
-    assert.match(client.getInstructions(), /A newer 67js is out \(running \d+\.\d+\.\d+, latest 99\.0\.0/);
+    assert.match(client.getInstructions(), /A newer Crucible is out \(running \d+\.\d+\.\d+, latest 99\.0\.0/);
     const first = (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent;
     assert.equal(first.updateAvailable.latest, '99.0.0');
     const second = (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent;

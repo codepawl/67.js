@@ -1,6 +1,6 @@
 import './motion-style.css';
 import './brand.js';
-import { Renderer67 } from './renderer.js';
+import { CrucibleRenderer } from './renderer.js';
 import { createMotionScene, MOTION_DURATION } from './motion.js';
 import { EFFECT_PRESETS } from './effects.js';
 
@@ -77,7 +77,7 @@ function advance(timestamp) {
 }
 
 function initializeRenderer() {
-  renderer = new Renderer67(canvas, scene.parts, {
+  renderer = new CrucibleRenderer(canvas, scene.parts, {
     ground: false, hdr: true, pixelRatio: exporting ? 1 : 1.25,
     samples: option('samples', 4, 1, 8), memoryBudgetMiB: option('memory', 256, 32, 1024),
   });
@@ -93,7 +93,7 @@ document.querySelector('#motion-save').addEventListener('click', () => {
   canvas.toBlob(blob => {
     if (!blob) { showError(new Error('Image capture failed')); return; }
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = '67js-clockwork.png'; link.click();
+    const link = document.createElement('a'); link.href = url; link.download = 'crucible-clockwork.png'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, 'image/png');
 });

@@ -97,7 +97,7 @@ function runProcess(binary, toolArguments) {
 /** One tool call, timed phase by phase with the same steps denoiseWithOidn takes. */
 async function timeToolCall(binary, frame, device) {
   const { width, height, color, albedo, normal } = frame;
-  const directory = await mkdtemp(join(tmpdir(), '67js-oidn-cost-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-oidn-cost-'));
   try {
     let started = performance.now();
     const encoded = [encodePfm(color, width, height), encodePfm(albedo, width, height), encodePfm(normal, width, height)];
@@ -132,7 +132,7 @@ async function measureTool(binary, frame, device, warmCount) {
   const bare = [];
   for (let call = 0; call < warmCount; call++) bare.push((await runProcess(binary, ['--version'])).seconds);
   // Verbose output shows where the tool spends its time on this machine; a flag the tool rejects is recorded, not fatal.
-  const directory = await mkdtemp(join(tmpdir(), '67js-oidn-cost-'));
+  const directory = await mkdtemp(join(tmpdir(), 'crucible-oidn-cost-'));
   let verbose;
   try {
     await Promise.all([

@@ -7,7 +7,7 @@ An assembly lets you take an object apart for inspection. Each part keeps its as
 Three layers sit in a stack. Drag the slider to separate them, drag the picture to orbit, and use the wheel to zoom. The console prints each part's offset from `assemblyOffset`.
 
 ```js live poster=assembly-explode
-import { Renderer67, box, assemblyOffset } from '67js';
+import { CrucibleRenderer, box, assemblyOffset } from 'crucible';
 
 function placeAt(x, y, z, sx, sy, sz) {
   return new Float32Array([sx, 0, 0, 0, 0, sy, 0, 0, 0, 0, sz, 0, x, y, z, 1]);
@@ -33,7 +33,7 @@ const parts = [
 
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
-const renderer = new Renderer67(canvas, parts);
+const renderer = new CrucibleRenderer(canvas, parts);
 const orbit = { yaw: 0.7, pitch: 0.4, distance: 7, amount: 0.6 };
 function draw() {
   const flat = Math.cos(orbit.pitch) * orbit.distance;

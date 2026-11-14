@@ -10,15 +10,15 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const directory = await mkdtemp(join(tmpdir(), '67js-mcp-passes-'));
+const directory = await mkdtemp(join(tmpdir(), 'crucible-mcp-passes-'));
 const jobs = join(directory, 'jobs');
-const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
+const cli = resolve(process.argv[2] ?? 'bin/crucible-mcp.mjs');
 const backend = process.argv[3] ?? 'cpu';
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [cli, '--backend', backend, '--memory', '128', '--jobs', jobs], cwd: directory, stderr: 'pipe' });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-8192); });
-const client = new Client({ name: '67js-passes-proof', version: '1' });
+const client = new Client({ name: 'crucible-passes-proof', version: '1' });
 const ALL_PASSES = ['albedo', 'normal', 'emission', 'depth', 'objectId'];
 const SIZE = 160;
 
@@ -55,7 +55,7 @@ async function runJob(sessionId, settings, expectedRevision = 0) {
 
 function recipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }, { id: 'sphere', type: 'sphere', segments: 24, rings: 16 }],
     materials: [
       { id: 'red', color: [0.8, 0.1, 0.1], roughness: 0.6 },

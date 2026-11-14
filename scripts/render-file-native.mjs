@@ -2,7 +2,7 @@
 // tracer in the @codepawlhq/cook package. A headless Chrome page loads the GLB with the glTF loader (textures included), packs the
 // scene into native tables with the same code the MCP render job uses, and this process traces them.
 //   node scripts/render-file-native.mjs --config <scene.json> --out <prefix> [options]   (--help lists the options)
-// Writes <prefix>.png (ACES + gamma, 67js tone map), <prefix>.linear.f32 (width*height*3 little-endian floats) and <prefix>.json.
+// Writes <prefix>.png (ACES + gamma, Crucible tone map), <prefix>.linear.f32 (width*height*3 little-endian floats) and <prefix>.json.
 // Exit code 2: the native addon is not built. Exit code 1: any other failure.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';

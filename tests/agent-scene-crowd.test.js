@@ -17,7 +17,7 @@ async function loadRobot() {
 
 function recipe(crowd, nodes = []) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'ground', type: 'box' }],
     materials: [{ id: 'grass', color: [0.2, 0.5, 0.2] }],
     camera: { eye: [0, 3, 14], target: [0, 1, 0] },

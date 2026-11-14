@@ -1,13 +1,13 @@
 {
-  "format": "67js.pack",
+  "format": "crucible.pack",
   "schemaVersion": 1,
   "name": "example-starter",
   "version": "1.0.0",
   "engines": {
-    "67js": ">=0.19.0"
+    "crucible": ">=0.19.0"
   },
   "license": "CC0-1.0",
-  "author": "67js contributors",
+  "author": "Crucible contributors",
   "description": "Two materials, a warm look and a small crate recipe to copy from.",
   "contents": {
     "looks": [

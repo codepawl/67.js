@@ -217,7 +217,7 @@ test('the ID output is a registered shader feature with a checksum and an explic
 
 test('a recipe node takes blend and keeps it through export and set-node', () => {
   const recipe = {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'box', type: 'box' }],
     materials: [{ id: 'gray', color: [0.5, 0.5, 0.5] }],
     nodes: [{ id: 'rock', geometry: 'box', material: 'gray', blend: { radius: 0.15 } }, { id: 'ground', geometry: 'box', material: 'gray' }],

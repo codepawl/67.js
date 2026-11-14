@@ -28,7 +28,7 @@ async function startServer(port) {
 async function drawInChrome(page, scenarios) {
   const task = async (list) => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     await import('/src/fog-shader.js');
     const canvas = document.createElement('canvas');
     canvas.width = 64;
@@ -43,7 +43,7 @@ async function drawInChrome(page, scenarios) {
     const room = { name: 'room', visible: false, geometry: box(0, 1), matrix: new Float32Array([0, 0, -1, 0, 0, 2, 0, 0, 3, 0, 0, 0, 0, 0, 2, 1]), material };
     const results = [];
     for (const localVolumes of list) {
-      const renderer = new Renderer67(canvas, [wall, room], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+      const renderer = new CrucibleRenderer(canvas, [wall, room], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
       const environment = { keyIntensity: 0, fillIntensity: 0, ambientIntensity: 0, localVolumes };
       let message = null;
       try {

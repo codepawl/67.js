@@ -1,16 +1,16 @@
 # glTF asset bridge
 
-`src/gltf.js` converts glTF 2.0 assets into Renderer67 parts.
+`src/gltf.js` converts glTF 2.0 assets into CrucibleRenderer parts.
 It decodes GLB and glTF files with its own parser (`src/gltf-decode.js`), so the addon does not import Three.js.
 A box with the addon is 67,467 bytes gzip, against 159,422 when it used `GLTFLoader`.
 The core renderer does not import this addon.
 
 ```js
-import { loadGltf } from '67js/addons/gltf';
-import { Renderer67 } from '67js';
+import { loadGltf } from 'crucible/addons/gltf';
+import { CrucibleRenderer } from 'crucible';
 
 const asset = await loadGltf('/models/object.glb');
-const renderer = new Renderer67(canvas, asset.parts, {
+const renderer = new CrucibleRenderer(canvas, asset.parts, {
   ground: false,
   samples: 4,
   memoryBudgetMiB: 256,
@@ -111,11 +111,11 @@ Building a renderer on a big asset blocks the page while the driver links the sh
 Three pieces split that work across frames:
 
 ```js
-import { Renderer67, shaderFeatureRepresentatives } from '67js';
-import '67js/addons/replace-textured-parts';
+import { CrucibleRenderer, shaderFeatureRepresentatives } from 'crucible';
+import 'crucible/addons/replace-textured-parts';
 
 // 1. Start on a few parts that need the same shader features as the whole scene, and do not wait for the link.
-const renderer = new Renderer67(canvas, shaderFeatureRepresentatives(asset.parts), { deferProgramLink: true });
+const renderer = new CrucibleRenderer(canvas, shaderFeatureRepresentatives(asset.parts), { deferProgramLink: true });
 // 2. Upload textures in short slices: renderer.createTexture(descriptor) caches each one, then yield to the page.
 // 3. Wait for the program with a poll that leaves the main thread free, then take the whole scene.
 await renderer.programsReady();
@@ -146,11 +146,11 @@ renderer.render(camera);
 Translation, rotation, and scale tracks are supported.
 The importer rejects animation poses that become singular or change triangle winding.
 
-The current source supports four-influence [GPU skinning](https://67js.codepawl.com/skinning.md). GPU skinning is available from version `0.4.0`.
-The current source also supports relative POSITION/NORMAL morph targets and weight animations. See [morph import](https://67js.codepawl.com/gltf-morph.md).
+The current source supports four-influence [GPU skinning](https://crucible.codepawl.com/skinning.md). GPU skinning is available from version `0.4.0`.
+The current source also supports relative POSITION/NORMAL morph targets and weight animations. See [morph import](https://crucible.codepawl.com/gltf-morph.md).
 A morph primitive without an authored base NORMAL loads with normals generated from its triangles; its morph NORMAL deltas are dropped, with a warning. TANGENT targets remain unsupported.
 
-The caller owns the Renderer67 instance.
+The caller owns the CrucibleRenderer instance.
 `asset.dispose()` releases importer textures, image bitmaps, parser resources, and temporary object URLs.
 It does not dispose the renderer.
 Disposal is idempotent, and subsequent animation calls fail explicitly.
@@ -168,7 +168,7 @@ Quantized positions load exactly as stored, so their precision is set when the f
 
 Alpha masking, alpha blending and double-sided materials import onto `alphaMode`, `alphaCutoff`, `opacity` and `doubleSided` (see the material maps guide). Vertex alpha is not drawn: an RGBA `COLOR_0` loads with its RGB, and `warnings` names the meshes whose alpha was below one and was dropped.
 It supports base-color, normal, metallic-roughness, occlusion and emissive texture channels.
-An optional extension that 67js does not read is ignored and named in `warnings`, as the glTF specification allows. An extension listed in `extensionsRequired` that 67js does not read still fails the load with `Unsupported glTF extension`.
+An optional extension that Crucible does not read is ignored and named in `warnings`, as the glTF specification allows. An extension listed in `extensionsRequired` that Crucible does not read still fails the load with `Unsupported glTF extension`.
 `KHR_materials_pbrSpecularGlossiness` (also when listed in `extensionsRequired`) is converted to metallic-roughness: the diffuse color and texture become the base color, metallic is 0, roughness is 1 minus `glossinessFactor`. The specular color and `specularGlossinessTexture` are not read, and `warnings` says so. A base color or layer map cannot read `TEXCOORD_1`. If every map of a material reads `TEXCOORD_1` (Blender writes this when the only UV map is the second one), the primitives take that set as `TEXCOORD_0` and the maps move with it, with a warning naming the material. If the material also has maps on `TEXCOORD_0`, the base color and layer maps on `TEXCOORD_1` are dropped instead, with a warning naming the material. A light bake skips a part whose maps read `TEXCOORD_1` and names its material in `report.skipped`, because the bake replaces that set with the lightmap atlas. A texture on a primitive without the UV set it reads is dropped from that primitive with a warning that names the materials, and the mesh still loads. A negative `texCoord` (Blender writes -1 for a map on a mesh without UVs) drops that map, and a `metallicFactor` or `roughnessFactor` outside 0..1 is clamped, each with a warning naming the material, the way three.js reads such files.
 A triangle primitive that cannot be drawn is skipped with one warning that names its mesh, its index and the reason, and the rest of the file loads: a missing or short POSITION accessor (fewer than 3 vertices), an index accessor with fewer than 3 indices or a count that is not a multiple of 3, an index outside the POSITION range, or only zero-area triangles. A file with no primitive left, no skin and no animation throws, and the error repeats those warnings.
 Repairs keep the file loading and add one warning each: authored vertex normals of zero length are rebuilt from the triangles ("Repaired primitive ..."), and a mesh on a node whose world transform is singular or non-finite (a zero scale, for example) is skipped ("Skipped node ..."). A pose that later makes a node singular still throws.
@@ -183,10 +183,10 @@ POINTS, LINES, LINE_LOOP and LINE_STRIP primitives are skipped with a warning th
 | `KHR_texture_transform` | Offset, rotation and scale are baked into `geometry.uvs`. The maps of one material share one baked transform. A normal map may differ by an offset and a positive scale (same rotation), which the shader applies on top of the baked UVs (`normalMapTransform` in `material-layer-shaders`). Any other map that differs is resampled at load into the shared UV space and named in `warnings`: the loader keeps the transform most maps have and tiles the rest, so it must differ by whole-number tilings (a tiled base color beside an untransformed emissive map). A resampled map grows to at most 4 times the pixels of its source and never past `maxTextureImagePixels`. A map that cannot be resampled (a clamped or mirrored sampler, a compressed texture, a non-integer ratio such as scale 2 against scale 3) fails the import with the material named. `texCoord` overrides are rejected. |
 | `EXT_mesh_gpu_instancing` | The node expands into one part per instance and primitive. Parts of one primitive share one geometry object, so the renderer batches them. Skinned or morphed instancing is rejected. |
 | `KHR_materials_unlit` | The material gets the renderer's `unlit` tag and shows its base color and base color map alone. Emissive, normal, occlusion and metallic-roughness maps and layers are dropped. |
-| `KHR_lights_punctual` | Point and spot lights (up to the renderer limits of 16 point and 8 spot lights, in candela like the renderer) and the first directional light become `asset.lights`, a partial `environment`: `pointLights`, `spotLights`, and `keyColor` (color times lux), `lightDirection` and `keyIntensity` for the key light. Pass it as `Renderer67`'s `environment` option or a `frame.environment`. A spot's `penumbra` is `(outer - inner) / outer`. A light over the limits, a second directional light and an invalid light are skipped with a warning. The renderer has no calibrated photometric units, so judge the level by eye. |
+| `KHR_lights_punctual` | Point and spot lights (up to the renderer limits of 16 point and 8 spot lights, in candela like the renderer) and the first directional light become `asset.lights`, a partial `environment`: `pointLights`, `spotLights`, and `keyColor` (color times lux), `lightDirection` and `keyIntensity` for the key light. Pass it as `CrucibleRenderer`'s `environment` option or a `frame.environment`. A spot's `penumbra` is `(outer - inner) / outer`. A light over the limits, a second directional light and an invalid light are skipped with a warning. The renderer has no calibrated photometric units, so judge the level by eye. |
 | `KHR_materials_variants`, `KHR_materials_dispersion`, `KHR_materials_diffuse_roughness`, `EXT_materials_bump`, `EXT_texture_avif` and any other optional extension | Ignored, named in `warnings`. |
 | `KHR_draco_mesh_compression` | Needs `options.decoders.draco`. |
-| `EXT_meshopt_compression` | Decoded by 67js: attribute, triangle and index modes with the NONE, OCTAHEDRAL, QUATERNION and EXPONENTIAL filters. The decoder is a separate chunk that loads only when `extensionsUsed` or `extensionsRequired` lists the extension. The fallback buffer is never read, so it may be absent, zero-filled or an unreachable `uri`, and it does not count against `maxBytes`. A buffer view that fails to decode throws a named error. `options.decoders.meshopt` still replaces the built-in decoder. |
+| `EXT_meshopt_compression` | Decoded by Crucible: attribute, triangle and index modes with the NONE, OCTAHEDRAL, QUATERNION and EXPONENTIAL filters. The decoder is a separate chunk that loads only when `extensionsUsed` or `extensionsRequired` lists the extension. The fallback buffer is never read, so it may be absent, zero-filled or an unreachable `uri`, and it does not count against `maxBytes`. A buffer view that fails to decode throws a named error. `options.decoders.meshopt` still replaces the built-in decoder. |
 | `KHR_texture_basisu` | Needs `options.decoders.ktx2`. |
 | `EXT_texture_webp` | The WebP source is decoded by the browser like PNG and JPEG. When the texture also has a PNG or JPEG `source` and the browser cannot decode WebP, that source is used instead. |
 | `KHR_materials_clearcoat`, `_transmission`, `_ior`, `_specular`, `_sheen`, `_volume`, `_anisotropy`, `_iridescence` | Read as factors and rendered as material layers, see `docs/material-maps.md`. The textures `clearcoatTexture`, `clearcoatRoughnessTexture`, `clearcoatNormalTexture`, `anisotropyTexture`, `sheenColorTexture` and `sheenRoughnessTexture` are read too, into `material.layerMaps` (their GLSL loads with `material-layer-shaders`); a renderer draws at most three different ones, and none beside splat layers. The transmission, iridescence and specular textures are not read: their factors are used. `specularColorFactor` may be any value up to 1000 (Blender writes 10): the reflectance is capped at 1 after the IOR term, so size beyond that point changes nothing. `occlusionTexture`, `emissiveTexture` and `metallicRoughnessTexture` may use TEXCOORD_1 (the mesh's `lightUvs`, which a light bake also uses); the normal texture may use TEXCOORD_1 too (its tangent frame is built from that set); the base color and layer maps read TEXCOORD_0 (a material whose maps all read TEXCOORD_1 is rewritten, see the text above), and a texture left on TEXCOORD_1 cannot carry `KHR_texture_transform`. Their textures are ignored, and an iridescent film takes the thickness maximum. Export writes them back. |
@@ -198,13 +198,13 @@ Without the matching decoder, a file that uses Draco or KTX2 fails with `Unsuppo
 
 ### Decoders
 
-The Draco and KTX2 decoders are the Three.js loaders, and they stay yours: only an application that passes one imports Three.js. 67js does not bundle or fetch their wasm files, so you choose where they are served.
+The Draco and KTX2 decoders are the Three.js loaders, and they stay yours: only an application that passes one imports Three.js. Crucible does not bundle or fetch their wasm files, so you choose where they are served.
 A Draco loader needs `decodeDracoFile(buffer, onLoad, attributeIds, attributeTypes, colorSpace, onError)`, and a KTX2 loader needs `load(url, onLoad, onProgress, onError)`.
 
 ```js
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
-import { loadGltf, ktx2WorkerConfigFor } from '67js/addons/gltf';
+import { loadGltf, ktx2WorkerConfigFor } from 'crucible/addons/gltf';
 
 const draco = new DRACOLoader().setDecoderPath('/vendor/draco/');   // copy three/examples/jsm/libs/draco/
 const ktx2 = new KTX2Loader().setTranscoderPath('/vendor/basis/');  // copy three/examples/jsm/libs/basis/
@@ -251,7 +251,7 @@ The Khronos KTX2 files hold no mip chain, so the 5.3x saving mixes the format (4
 
 `maxInstances` (default 65,536) caps the instances of one node, and `maxParts` still caps the total number of parts.
 Both are checked from the accessor counts before any data is decoded.
-The bridge does not import cameras or scene environments into Renderer67. The caller supplies its own camera and base lighting.
+The bridge does not import cameras or scene environments into CrucibleRenderer. The caller supplies its own camera and base lighting.
 Lights from `KHR_lights_punctual` come back in `asset.lights` and are applied only when the caller passes them on (see the extension table).
 
 ## Verification

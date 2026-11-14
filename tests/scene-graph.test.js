@@ -64,7 +64,7 @@ test('pivot conjugation places the pivot correctly under parent translation, rot
   assert.ok(Math.abs(transformedPivot[1] - 12) < 1e-5);
 });
 
-test('roots, empty graphs and multiple render meshes keep a stable Renderer67 part shape', () => {
+test('roots, empty graphs and multiple render meshes keep a stable CrucibleRenderer part shape', () => {
   const geometry = box(0, 1);
   const sharedMaterial = material();
   const graph = createSceneGraph([

@@ -95,7 +95,7 @@ export function encodeVolumeGrid({ resolution, channels, size }) {
 /** Reads a grid file into `{ resolution, size, channels: { density: Uint16Array, ... } }`. Throws an error that says what is wrong with the bytes. */
 export function decodeVolumeGrid(source, label = 'volume grid') {
   const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
-  if (bytes.length < 12 || MAGIC.some((value, index) => bytes[index] !== value)) throw new TypeError(`${label} is not a 67js grid file (it must start with "67VG"); make one with scripts/vdb-to-grid.py`);
+  if (bytes.length < 12 || MAGIC.some((value, index) => bytes[index] !== value)) throw new TypeError(`${label} is not a Crucible grid file (it must start with "67VG"); make one with scripts/vdb-to-grid.py`);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint32(4, true);
   if (version !== VOLUME_GRID_VERSION) throw new RangeError(`${label} is grid file version ${version}; this build reads version ${VOLUME_GRID_VERSION}`);

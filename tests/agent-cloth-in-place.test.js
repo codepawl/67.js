@@ -7,7 +7,7 @@ import { isLiveClothGeometry } from '../src/agent-cloth.js';
 
 function flagRecipe() {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [{ id: 'sheet', type: 'grid', segments: 10 }],
     materials: [{ id: 'fabric', color: [0.7, 0.2, 0.2], doubleSided: true }],
     nodes: [{ id: 'flag', geometry: 'sheet', material: 'fabric', translation: [0, 2, 0], scale: [2, 1.5, 1] }],

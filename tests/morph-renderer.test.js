@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4, mat3 } from 'gl-matrix';
 import { box } from '../src/geometry.js';
-import { Renderer67, groupParts } from '../src/renderer.js';
+import { CrucibleRenderer, groupParts } from '../src/renderer.js';
 import { createMorphPose, validateMorphGeometry } from '../src/morph.js';
 import { materialLayerState } from '../src/material-layers.js';
 
@@ -18,7 +18,7 @@ function makeGeometry(delta = 0.5) {
 }
 
 function retainedRenderer(parts) {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   const writes = [];
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData() { writes.push(true); } };
   renderer.updateSkins = new Set();
@@ -87,7 +87,7 @@ test('shared morph consumers outside update list reject unsafe weights before an
 });
 
 test('main and shadow draws upload the retained morph weights and disable morphs for rigid batches', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.hasMorphs = true;
   renderer.benchmark = true;
   renderer.uniforms = { morphEnabled: 'color enabled', morphVertexCount: 'vertices', morphTargetCount: 'targets', 'morphWeights[0]': 'color weights' };
@@ -107,7 +107,7 @@ test('main and shadow draws upload the retained morph weights and disable morphs
 });
 
 test('a batch with more than 64 targets uploads its 64 largest weights with their target indices', () => {
-  const renderer = Object.create(Renderer67.prototype);
+  const renderer = Object.create(CrucibleRenderer.prototype);
   renderer.hasMorphs = true;
   renderer.benchmark = true;
   renderer.uniforms = { morphEnabled: 'enabled', morphVertexCount: 'vertices', morphTargetCount: 'count', 'morphWeights[0]': 'weights', 'morphSlotTargets[0]': 'targets' };

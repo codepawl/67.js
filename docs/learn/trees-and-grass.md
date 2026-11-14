@@ -1,14 +1,14 @@
 # Trees and grass
 
-`67js/addons/vegetation` grows seeded trees with real branches and leaf cards, plus grass and flowers. It is available from version `0.10.0`. It scatters instances with Poisson-disk spacing, shares a few variants per species so the renderer can batch them, and picks a level of detail per instance from the camera.
+`crucible/addons/vegetation` grows seeded trees with real branches and leaf cards, plus grass and flowers. It is available from version `0.10.0`. It scatters instances with Poisson-disk spacing, shares a few variants per species so the renderer can batch them, and picks a level of detail per instance from the camera.
 
 ## Scatter, then pick detail by distance
 
 The example calls `scatterVegetation` for a seeded scatter with a slope limit and an exclusion zone, then `selectLevels` for the detail of each tree from the camera. Drag to orbit and scroll to move closer: the near trees get the detailed crown, the far ones a coarse one. The slider changes the density. The console prints what the two calls return: counts per species, level counts, culled instances and triangles. Leaf cards use the built-in 128 px sprites here, because the docs host has no scanned leaf textures.
 
 ```js live poster=trees-scatter
-import { Renderer67 } from '67js';
-import { scatterVegetation, selectLevels } from '67js/addons/vegetation';
+import { CrucibleRenderer } from 'crucible';
+import { scatterVegetation, selectLevels } from 'crucible/addons/vegetation';
 
 const terrainHeight = (x, z) => 1.5 * Math.sin(x * 0.18) * Math.cos(z * 0.15);
 const exclusion = (x, z) => Math.hypot(x, z) < 3.5;
@@ -35,7 +35,7 @@ function eye() {
 const canvas = document.querySelector('#scene');
 canvas.style.touchAction = 'none';
 let view = selectLevels(forest.instances, eye());
-const renderer = new Renderer67(canvas, view.parts, { world: true });
+const renderer = new CrucibleRenderer(canvas, view.parts, { world: true });
 console.log('first view:', { levelCounts: view.levelCounts, culled: view.culled, triangles: view.triangles });
 
 function draw() {
@@ -90,7 +90,7 @@ Levels change only after a distance passes a threshold by `hysteresis`, so a tre
 The scanned leaf cards need the CC0 files, which the docs host does not serve, so this call stays a plain block. It is the example above with `leafTextures` added:
 
 ```js
-import { loadLeafTextures } from '67js/addons/texture-set';
+import { loadLeafTextures } from 'crucible/addons/texture-set';
 
 const forest = scatterVegetation({
   area: { minX: -60, maxX: 60, minZ: -60, maxZ: 60 },
@@ -105,7 +105,7 @@ const forest = scatterVegetation({
 
 1. Scatter with `scatterVegetation({ area, density, terrainHeight, slopeLimit, exclusion, mix, leaves })`.
 2. Pick detail per camera with `selectLevels(forest.instances, eye)`.
-3. Pass `view.parts` to `Renderer67` and rebuild when `view.changed` is true.
+3. Pass `view.parts` to `CrucibleRenderer` and rebuild when `view.changed` is true.
 
 Cards (`leaves: 'cards'`, the default) are single-sided, alpha-masked, double-sided `foliage` textures that sway with the wind. `'mesh'` leaves cost about twice the triangles. Pass `barkTextures` for scanned bark and `leafTextures: await loadLeafTextures('/textures/leaves')` for scanned leaf cards.
 
@@ -128,7 +128,7 @@ Cards (`leaves: 'cards'`, the default) are single-sided, alpha-masked, double-si
 
 ## Cost
 
-On the demo clearing (125 trees and bushes, 1,941 grass clumps and 129 flower patches, camera at the clearing edge, headless Chrome with a GPU), `mesh` leaves with level of detail drew 2.28M triangles in 65 draws, against 3.78M without level of detail. `cards` drew 1.15M. Building the scene took about 1 s and a frame took under 0.2 s (docs/vegetation.md). The [vegetation contract](https://github.com/codepawl/67.js/blob/main/docs/vegetation.md) lists species, triangle budgets and limits.
+On the demo clearing (125 trees and bushes, 1,941 grass clumps and 129 flower patches, camera at the clearing edge, headless Chrome with a GPU), `mesh` leaves with level of detail drew 2.28M triangles in 65 draws, against 3.78M without level of detail. `cards` drew 1.15M. Building the scene took about 1 s and a frame took under 0.2 s (docs/vegetation.md). The [vegetation contract](https://github.com/codepawl/crucible/blob/main/docs/vegetation.md) lists species, triangle budgets and limits.
 
 ## Common mistakes
 

@@ -6,7 +6,7 @@ const article = document.querySelector('#doc-article');
 const versionList = document.querySelector('#doc-toc');
 const topicMenu = document.querySelector('#doc-topic-menu');
 const desktopTopics = matchMedia('(min-width: 1051px)');
-const issueBase = 'https://github.com/codepawl/67.js/issues/';
+const issueBase = 'https://github.com/codepawl/crucible/issues/';
 topicMenu.open = desktopTopics.matches;
 desktopTopics.addEventListener('change', () => { topicMenu.open = desktopTopics.matches; });
 

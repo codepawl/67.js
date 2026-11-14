@@ -1,4 +1,4 @@
-// Procedural vegetation for 67js: branching trees, bushes, grass, Poisson-disk scattering
+// Procedural vegetation for Crucible: branching trees, bushes, grass, Poisson-disk scattering
 // on terrain and distance level of detail.
 //
 // Trees use a parametric recursive branching model (not space colonization): every branch

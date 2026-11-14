@@ -42,5 +42,5 @@ Every tool error names what failed and what to do next, so read the message befo
 ## When it is the tool
 
 If an error looks like an engine bug (a failed call that the message cannot explain, a crash, a wrong picture from a
-valid recipe), stop retrying. File an issue at `codepawl/67.js` with the tool call, the recipe from
+valid recipe), stop retrying. File an issue at `codepawl/crucible` with the tool call, the recipe from
 `scene_export_recipe` and a `scene_look` still. Do not include local paths.

@@ -152,7 +152,7 @@ test('a slice that shares geometries and keys with earlier parts joins their bat
 });
 
 test('batches a renderer copied earlier stay equal to their prefix grouping after later appends', () => {
-  // Renderer67.uploadBatch keeps `[...parts]`; those copies must not change when the grouping grows in place.
+  // CrucibleRenderer.uploadBatch keeps `[...parts]`; those copies must not change when the grouping grows in place.
   const heldCopies = [];
   let state = null;
   for (let end = 5; end <= worldParts.length; end += 5) {

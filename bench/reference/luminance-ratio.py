@@ -1,9 +1,9 @@
-# Mean and 20th percentile of linear luminance of the 67js panel divided by the Cycles panel, read from reference sheets.
+# Mean and 20th percentile of linear luminance of the Crucible panel divided by the Cycles panel, read from reference sheets.
 #   uv run --no-project --python 3.12 --with pillow --with numpy python -I bench/reference/luminance-ratio.py <sheet.jpg> [<sheet.jpg> ...]
 #   uv run --no-project --python 3.12 --with pillow --with numpy python -I bench/reference/luminance-ratio.py --renders <directory> <scene id> [...]
-# The second form takes the Cycles panel from images/<scene id>.jpg and the 67js picture from <directory>/<scene id>-gpu.png
+# The second form takes the Cycles panel from images/<scene id>.jpg and the Crucible picture from <directory>/<scene id>-gpu.png
 # (what render-gpu.mjs writes), scaled to the panel's size.
-# A sheet is two columns by two rows of panels under 22 px headers: Cycles top left, the 67js panel bottom left.
+# A sheet is two columns by two rows of panels under 22 px headers: Cycles top left, the Crucible panel bottom left.
 import os
 import sys
 

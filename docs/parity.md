@@ -1,6 +1,6 @@
 # Blender parity ledger
 
-This ledger compares 67js with each feature in the [Blender 5.2 manual](https://docs.blender.org/manual/en/latest/).
+This ledger compares Crucible with each feature in the [Blender 5.2 manual](https://docs.blender.org/manual/en/latest/).
 It is the record for the goal in `docs/goal.md`. Use `npm run parity` to print the coverage of each section.
 
 Modifier coverage (rows under `Modeling > Modifiers`, from `npm run parity`): 12 done, 25 partial, 23 missing and 1 out of scope, 8 of the done rows compared with Blender, 20% of the in-scope rows done.
@@ -9,20 +9,20 @@ Modifier coverage (rows under `Modeling > Modifiers`, from `npm run parity`): 12
 
 | Status | Meaning |
 | --- | --- |
-| `done` | 67js covers the purpose of the feature, and the Evidence column links to a test. |
+| `done` | Crucible covers the purpose of the feature, and the Evidence column links to a test. |
 | `partial` | Some of the feature works. The note says what exists and what does not. |
-| `missing` | The feature is in scope, and 67js does not have it. |
+| `missing` | The feature is in scope, and Crucible does not have it. |
 | `out of scope` | The goal does not include the feature. The note gives the reason. |
 
-Agents are the user of 67js, so a row judges the purpose of a Blender feature and not its interface. A row covers the pages below it unless a finer row exists.
+Agents are the user of Crucible, so a row judges the purpose of a Blender feature and not its interface. A row covers the pages below it unless a finer row exists.
 
 `done` does not mean equal to Blender. A test shows that the feature works, and it does not show that the result matches. `npm run parity` counts a row as compared only when its evidence is in `tests/fixtures/blender/` or `bench/reference/`.
 
-`bench/reference/` scores 67js renders against Cycles and EEVEE on 8 scenes. Its README gives the scores and the largest gap in each scene.
+`bench/reference/` scores Crucible renders against Cycles and EEVEE on 8 scenes. Its README gives the scores and the largest gap in each scene.
 
 `tests/blender-golden.test.js` compares mesh operations with results from Blender. A compared row can still differ, and `tests/fixtures/blender/differences.json` gives the reason for each difference.
 
-Rows differ in size: `Modeling > Modifiers > Generate > Weld Modifier` and `Rendering > Render Engines > Cycles` each count as one. Do not quote the percentage as a measure of how close 67js is to Blender.
+Rows differ in size: `Modeling > Modifiers > Generate > Weld Modifier` and `Rendering > Render Engines > Cycles` each count as one. Do not quote the percentage as a measure of how close Crucible is to Blender.
 
 To change a row, change its status and its evidence in the same pull request as the feature. `tests/parity-ledger.test.js` fails if a `done` row has no evidence, if a link is broken or if a manual page has no row.
 
@@ -198,7 +198,7 @@ To move to a new Blender release, run `node scripts/parity-manual-snapshot.mjs`.
 | Rendering > Materials > Assignment | done | A node names one material. | [agent-scene](../tests/agent-scene.test.js) | |
 | Rendering > Materials > Preview | out of scope | Interface for a person. Agents use `scene_look`. | | |
 | Rendering > Materials > Settings | partial | Opaque and blend in recipes, and mask on imported assets, with double-sided support. | [gltf-extensions](../tests/gltf-extensions.test.js) | #51 |
-| Rendering > Materials > Line Art | partial | `toon` on a material bands the light. Outlines come from screen-space guides (object ID, normal, depth) at a fixed pixel width. Line Art modifier options (occlusion levels, intersections, chaining, hatching) do not exist. On a reference scene the edge mask overlaps a Blender Freestyle render with an IoU of 0.50 (Blender Line Art gives no strokes in background mode); 67js draws extra contact lines. | [line-art](../tests/line-art.test.js), [guide](line-art.md), [reference script](../bench/reference/line-art.mjs) | |
+| Rendering > Materials > Line Art | partial | `toon` on a material bands the light. Outlines come from screen-space guides (object ID, normal, depth) at a fixed pixel width. Line Art modifier options (occlusion levels, intersections, chaining, hatching) do not exist. On a reference scene the edge mask overlaps a Blender Freestyle render with an IoU of 0.50 (Blender Line Art gives no strokes in background mode); Crucible draws extra contact lines. | [line-art](../tests/line-art.test.js), [guide](line-art.md), [reference script](../bench/reference/line-art.mjs) | |
 | Rendering > Materials > Legacy Textures | out of scope | Blender keeps these for old files. | | |
 | Rendering > Shader Nodes > Input | partial | `uv` coordinates only. There is no object, geometry, camera or light-path input. | [material-graph](../tests/material-graph.test.js) | #50 |
 | Rendering > Shader Nodes > Output | partial | A graph makes base colour, roughness, metallic, emission and height. It is baked to textures on the CPU, so it can not react to light, view or position. The `brick-graph` reference scene scores 0.2269 against Cycles; its `brick-flat` control (the graph's average colour, no maps) is the baseline it is compared with, and a bump of 0 would score 0.2065, so the bump is stronger than Blender's, not weaker. | [material-graph](../tests/material-graph.test.js), [brick-graph scene](../bench/reference/scenes.js) | #50 |
@@ -231,7 +231,7 @@ To move to a new Blender release, run `node scripts/parity-manual-snapshot.mjs`.
 | Add-ons > glTF 2.0 | partial | Import is broad. Export writes the five texture channels as PNG, skins with joints, morph targets and node clips, and bakes pattern materials with box projected UVs; Blender 5.2 and three.js open the RobotExpressive export with its 43 bones and 14 clips. Morph weight clips export, and the `scene_export_glb` MCP tool writes the current pose or an imported clip as a GLB file, checked in Blender 5.2 for a patterned recipe, the robot with IK and its Walking action. Not yet: recipe motion tracks as clips, a clip together with IK or node overrides. | [gltf](../tests/gltf.test.js), [export](../tests/export.test.js), [round trip](../tests/export-roundtrip.test.js), [MCP contract](../tests/mcp-tools.test.js) | #49 |
 | Add-ons > Manage UI Translations | out of scope | Blender interface work. | | |
 | Add-ons > VR Scene Inspection | out of scope | Interface for a person. | | |
-| Advanced | out of scope | Decided in `docs/goal.md`: 67js does not run agent code. MCP and the JavaScript API take the place of `bpy`. | | |
+| Advanced | out of scope | Decided in `docs/goal.md`: Crucible does not run agent code. MCP and the JavaScript API take the place of `bpy`. | | |
 
 ## Work outside the manual
 
@@ -241,7 +241,7 @@ The goal also needs this work, and no page in the Blender manual covers it.
 | --- | --- | --- | --- |
 | Parity evidence | partial | This ledger exists. The Blender comparisons do not. | #24, #25, #26 |
 | Bundle size | partial | `npm run size` checks a budget for each entry, and the package has a 1 MiB limit. three.js is gone from the library; only the benchmark page imports it. | #27, #33, #34, #35, #36 |
-| Runtime speed | partial | `bench/runtime` compares 8 scenes, and three.js wins most of the 7 older ones. Frustum culling per part and per instance group is on by default, `lods` from `generateGeometryLods` pick a level per instance by pixel error (`docs/culling-lod.md`), and `createGpuTimer` plus `createAdaptiveResolution` give live viewers GPU timing and a bounded resolution scale. On `large-outdoor` 67js is 1.55 ms against 6.0 ms for three.js on an RTX 3060. Part of #37: recipes have no way to declare `lods` yet and shadow passes are not culled. Part of #38: the MCP preview builds `scene_create` with the light bake, cloth, `uv_unwrap` and pattern kernels on a worker (`src/kernel-offload.js`); `scene_apply` edits, the browser site are not done. Measured in Chrome: longest unresponsive stretch of `scene_create` on the demo room 11.8 s to 1.6 s, build time 10.9 s to 12.4 s. | #28, #37, #38, #74 |
+| Runtime speed | partial | `bench/runtime` compares 8 scenes, and three.js wins most of the 7 older ones. Frustum culling per part and per instance group is on by default, `lods` from `generateGeometryLods` pick a level per instance by pixel error (`docs/culling-lod.md`), and `createGpuTimer` plus `createAdaptiveResolution` give live viewers GPU timing and a bounded resolution scale. On `large-outdoor` Crucible is 1.55 ms against 6.0 ms for three.js on an RTX 3060. Part of #37: recipes have no way to declare `lods` yet and shadow passes are not culled. Part of #38: the MCP preview builds `scene_create` with the light bake, cloth, `uv_unwrap` and pattern kernels on a worker (`src/kernel-offload.js`); `scene_apply` edits, the browser site are not done. Measured in Chrome: longest unresponsive stretch of `scene_create` on the demo room 11.8 s to 1.6 s, build time 10.9 s to 12.4 s. | #28, #37, #38, #74 |
 | Agent measurement | partial | A task suite runs on one model and reads recipes only. | #29, #30, #31, #69 |
 | Pull request checks | partial | The `Test` workflow reports a status and does not block a merge. | #32 |
 | Relations between parts | partial | The agent version of snapping: node `relations` (`attach`, `gap`, `flush`, `align`, `centered`) over world bounds or a tagged region, solved again on every edit, cycles rejected. Tests in [part-relations](../tests/part-relations.test.js); suite tasks `kettle-resize` and `desk-resize` with plain twins (no gain in calls measured on Sonnet). No snapping to edges or vertices, no relation on the part's own tagged region. | #44 |

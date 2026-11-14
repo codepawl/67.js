@@ -80,7 +80,7 @@ THE SOFTWARE.
 
 ## WALL-E character
 
-The 67js license covers the authored source code. WALL-E character rights belong to Disney/Pixar. No ownership of that character is claimed.
+The Crucible license covers the authored source code. WALL-E character rights belong to Disney/Pixar. No ownership of that character is claimed.
 
 ## Built files
 
@@ -108,7 +108,7 @@ The npm, pnpm, Yarn and Bun SVG marks are sourced from Simple Icons and distribu
 The mesh addon loads `manifold-3d` as a separate dependency for booleans.
 Manifold is distributed under the Apache License, Version 2.0.
 Its dependency package includes the complete license text.
-Manifold's JavaScript and WASM code are not bundled into the 67js library archive.
+Manifold's JavaScript and WASM code are not bundled into the Crucible library archive.
 The MCP runtime serves them to its preview page from the installed peer dependency.
 Source and license: https://github.com/elalish/manifold.
 
@@ -117,7 +117,7 @@ Source and license: https://github.com/elalish/manifold.
 The physics addon loads `@dimforge/rapier3d-compat` as a separate dependency.
 Rapier is distributed under the Apache License, Version 2.0.
 Its dependency package includes the complete license text.
-Rapier's JavaScript and WASM code are not bundled into the 67js library archive.
+Rapier's JavaScript and WASM code are not bundled into the Crucible library archive.
 Source and license: https://github.com/dimforge/rapier.js.
 
 ## DejaVu Sans 2.37 (3D text outlines, `src/font-default.js`)
@@ -161,4 +161,4 @@ Source: https://dejavu-fonts.github.io/ (version 2.37).
 
 ## HDRI environments in assets/looks
 
-`sky-clouds.hdr` and `studio-softbox.hdr` are 128 x 64 area averages of the 1k Poly Haven HDRIs `kloofendal_48d_partly_cloudy_puresky` and `studio_small_03`, published under CC0 1.0 (https://polyhaven.com/license). `teal-orange.cube` and `noir.cube` were made for 67js and are CC0.
+`sky-clouds.hdr` and `studio-softbox.hdr` are 128 x 64 area averages of the 1k Poly Haven HDRIs `kloofendal_48d_partly_cloudy_puresky` and `studio_small_03`, published under CC0 1.0 (https://polyhaven.com/license). `teal-orange.cube` and `noir.cube` were made for Crucible and are CC0.

@@ -91,7 +91,7 @@ export function registerEnvironmentSupport(functions) {
 
 export function requireEnvironmentSupport() {
   if (!environmentSupport.createResources) {
-    throw new Error("An environment map needs its code: add import '@codepawlhq/67js/addons/hdri' or import createEnvironmentMap from the package entry.");
+    throw new Error("An environment map needs its code: add import '@codepawlhq/crucible/addons/hdri' or import createEnvironmentMap from the package entry.");
   }
   return environmentSupport;
 }

@@ -1,8 +1,8 @@
 # Render engines
 
-A render job can ask for the native backend (`settings.renderer.backend: "native"`), which traces the scene with hardware ray queries on the GPU. 67js does not contain that tracer. It is a render engine: a separate package that 67js looks for when a job asks for it. The engine 67js knows is Cook, `@codepawlhq/cook`.
+A render job can ask for the native backend (`settings.renderer.backend: "native"`), which traces the scene with hardware ray queries on the GPU. Crucible does not contain that tracer. It is a render engine: a separate package that Crucible looks for when a job asks for it. The engine Crucible knows is Cook, `@codepawlhq/cook`.
 
-If no engine is installed, nothing breaks. The job runs on the `gpu` backend (or `cpu` on a runtime without a GPU) and its report says why. The same happens when the engine has no built binary, when its pack format does not fit this 67js, or when the machine has no Vulkan ray query adapter.
+If no engine is installed, nothing breaks. The job runs on the `gpu` backend (or `cpu` on a runtime without a GPU) and its report says why. The same happens when the engine has no built binary, when its pack format does not fit this Crucible, or when the machine has no Vulkan ray query adapter.
 
 ## Install Cook
 
@@ -15,7 +15,7 @@ npm run build   # run inside the installed package; it compiles the binary with 
 
 ## What an engine module exports
 
-67js imports the module once per process and checks it (`requireRenderEngine` in `scripts/render-engine.mjs`). A module that fails the check gives one reason in the job report and the job falls back; nothing throws.
+Crucible imports the module once per process and checks it (`requireRenderEngine` in `scripts/render-engine.mjs`). A module that fails the check gives one reason in the job report and the job falls back; nothing throws.
 
 Always required:
 
@@ -48,8 +48,8 @@ A time limit failure carries `error.code === "COOK_TIME_LIMIT"`.
 }
 ```
 
-- `packFormat.revision` is the revision of the scene packer that ships with the engine. `readsRevisions` is the oldest and newest revision the engine reads. The scene packer used by 67js comes from the same package, so its revision must sit inside that range; if it does not, the reason names both revisions.
-- `limits` are the most the engine takes. `null` means no limit is declared and the card decides. 67js has its own defaults for the triangle and instance counts of a job, and the job uses the lower of the two for every limit the engine declares (`clampLimitsByEngine`).
+- `packFormat.revision` is the revision of the scene packer that ships with the engine. `readsRevisions` is the oldest and newest revision the engine reads. The scene packer used by Crucible comes from the same package, so its revision must sit inside that range; if it does not, the reason names both revisions.
+- `limits` are the most the engine takes. `null` means no limit is declared and the card decides. Crucible has its own defaults for the triangle and instance counts of a job, and the job uses the lower of the two for every limit the engine declares (`clampLimitsByEngine`).
 
 ## Environment switches
 
@@ -69,4 +69,4 @@ A time limit failure carries `error.code === "COOK_TIME_LIMIT"`.
 
 ## Updating the pinned Cook commit
 
-67js installs Cook from one commit of its repository, named in `package.json` (`devDependencies["@codepawlhq/cook"]`). To move to a newer Cook, replace the commit after `#` with the full hash of the new one, run `npm install --package-lock-only --ignore-scripts` so `package-lock.json` follows, and open a pull request with both files. `.npmrc` sets `allow-git=root`, which npm 12 needs before it fetches a git dependency.
+Crucible installs Cook from one commit of its repository, named in `package.json` (`devDependencies["@codepawlhq/cook"]`). To move to a newer Cook, replace the commit after `#` with the full hash of the new one, run `npm install --package-lock-only --ignore-scripts` so `package-lock.json` follows, and open a pull request with both files. `.npmrc` sets `allow-git=root`, which npm 12 needs before it fetches a git dependency.

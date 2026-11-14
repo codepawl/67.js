@@ -68,7 +68,7 @@ const SIZE = 64;
 async function drawInChrome(page, scenarios) {
   const task = async (list) => {
     const { box } = await import('/src/geometry.js');
-    const { Renderer67 } = await import('/src/renderer.js');
+    const { CrucibleRenderer } = await import('/src/renderer.js');
     const { createFloatOutput, readFloatPixels } = await import('/src/float-output.js');
     await import('/src/fog-shader.js');
     const canvas = document.createElement('canvas');
@@ -84,7 +84,7 @@ async function drawInChrome(page, scenarios) {
     for (const scenario of list.scenarios) {
       const geometry = { positions: new Float32Array(scenario.mesh.positions), normals: new Float32Array(scenario.mesh.positions.length), indices: new Uint32Array(scenario.mesh.indices) };
       const room = { name: 'room', visible: false, geometry, matrix: new Float32Array(scenario.matrix), material };
-      const renderer = new Renderer67(canvas, [ground, wall, room], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+      const renderer = new CrucibleRenderer(canvas, [ground, wall, room], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
       const output = createFloatOutput(renderer.context, renderer.canvas.width, renderer.canvas.height);
       const draw = (localVolumes) => {
         const environment = { keyIntensity: 0, fillIntensity: 0, ambientIntensity: 0, localVolumes };

@@ -7,7 +7,7 @@ import { bakeCloth, sampleClothFrames, weldVertices, CLOTH_LIMITS } from '../src
 
 function flagRecipe(cloth, extraNodes = [], segments = 12) {
   return {
-    format: '67js.scene', schemaVersion: 1,
+    format: 'crucible.scene', schemaVersion: 1,
     geometries: [
       { id: 'sheet', type: 'grid', segments },
       { id: 'ball', type: 'sphere' },

@@ -10,11 +10,11 @@ try {
   await page.route('**/volume-smoke.html', route => route.fulfill({ contentType: 'text/html', body: '<canvas style="width:960px;height:540px;display:block"></canvas>' }));
   await page.goto('http://127.0.0.1:5173/volume-smoke.html');
   const report = await page.evaluate(async () => {
-    const { Renderer67, box } = await import('/build/67.module.js');
+    const { CrucibleRenderer, box } = await import('/build/67.module.js');
     await import('/build/fog-shader.js');
     const canvas = document.querySelector('canvas');
     const part = { geometry: box(), matrix: new Float32Array([4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 1]), material: { tag: 'unlit', color: [0.5, 0.5, 0.5], metallic: 0, roughness: 1, emission: 0 } };
-    const renderer = new Renderer67(canvas, [part], { hdr: true, depth: true, samples: 4, pixelRatio: 1, ground: false });
+    const renderer = new CrucibleRenderer(canvas, [part], { hdr: true, depth: true, samples: 4, pixelRatio: 1, ground: false });
     const depthTexture = renderer.depthTexture;
     const colorTexture = renderer.frameTexture;
     const frame = { eye: [0, 0, 5], target: [0, 0, 0], fov: 40, time: 0, environment: { keyIntensity: 0, fillIntensity: 0, ambientIntensity: 0, volumeFog: { density: 0.5, minimum: [-3, -3, 1], maximum: [3, 3, 3], ambient: [0, 0, 0], noiseAmount: 0, steps: 24 } } };
@@ -53,7 +53,7 @@ try {
     function scatteringSample(castShadow) {
       const background = { ...part, material: { ...part.material, color: [0, 0, 0] } };
       const blocker = { ...background, castShadow, matrix: new Float32Array([0.1, 0, 0, 0, 0, 6, 0, 0, 0, 0, 4, 0, 2.5, 0, 2, 1]) };
-      const scatteringRenderer = new Renderer67(canvas, [background, blocker], {
+      const scatteringRenderer = new CrucibleRenderer(canvas, [background, blocker], {
         hdr: true, depth: true, samples: 4, pixelRatio: 1, ground: false,
         shadowBounds: { eye: [10, 0, 2], target: [0, 0, 2], extent: 5, near: 0.1, far: 20 },
       });
@@ -72,7 +72,7 @@ try {
     canvas.style.width = '1px';
     canvas.style.height = '1px';
     const parallelPart = { ...part, matrix: new Float32Array([2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0.2, 0, 0.0003, 0, -6000, 1]) };
-    const parallelRenderer = new Renderer67(canvas, [parallelPart], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
+    const parallelRenderer = new CrucibleRenderer(canvas, [parallelPart], { hdr: true, depth: true, samples: 1, pixelRatio: 1, ground: false });
     const parallelFrame = { eye: [0, 0, 0], target: [5e-8, 0, -1], projection: 'orthographic', orthographicHeight: 1, near: 0.1, far: 10000,
       environment: { keyIntensity: 0, fillIntensity: 0, ambientIntensity: 0, volumeFog: {
         density: 0.0005, minimum: [0.0001, -1, -5000], maximum: [0.0002, 1, -2000], ambient: [0, 0, 0], noiseAmount: 0, maxDistance: 10000,

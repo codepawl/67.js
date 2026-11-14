@@ -1,6 +1,6 @@
 // Page of the Gaussian splat benchmark for three.js: the GaussianSplat object (installed three version, WebGPURenderer on its
 // WebGL 2 backend) draws the same splats, as the same PLY bytes, from the same camera as harness.js. No recipe part: three.js has
-// no 67js scene, so the comparison is splats alone against splats alone (the "millipede-alone" case of harness.js).
+// no Crucible scene, so the comparison is splats alone against splats alone (the "millipede-alone" case of harness.js).
 import * as THREE from 'three/webgpu';
 import { GaussianSplatPLYLoader } from 'three/addons/loaders/GaussianSplatPLYLoader.js';
 import { GaussianSplat } from 'three/addons/objects/GaussianSplat.js';

@@ -1,7 +1,7 @@
-// Runs in the page: draws one bare scene with 67js and with three.js, each at its own defaults, for the default look bench (issue #988).
+// Runs in the page: draws one bare scene with Crucible and with three.js, each at its own defaults, for the default look bench (issue #988).
 // three.js is a devDependency used by bench/ only. It is never imported by src/.
 import * as THREE from 'three';
-import { Renderer67 } from '/src/renderer.js';
+import { CrucibleRenderer } from '/src/renderer.js';
 import { DEFAULT_LOOK_SCENES } from './default-look-scenes.js';
 import { DEFAULT_LOOK_VARIANTS, IMAGE_HEIGHT, IMAGE_WIDTH, SKY_RADIANCE } from './default-look-variants.js';
 
@@ -17,10 +17,10 @@ function pngOf(canvas) {
   return canvas.toDataURL('image/png').split(',')[1];
 }
 
-// 67js with the options a variant names, and every other option left at the constructor's default.
-function drawWith67js(scene, variant) {
+// Crucible with the options a variant names, and every other option left at the constructor's default.
+function drawWithCrucible(scene, variant) {
   const canvas = createCanvas();
-  const renderer = new Renderer67(canvas, scene.parts, {
+  const renderer = new CrucibleRenderer(canvas, scene.parts, {
     ground: false, world: true, pixelRatio: 1, environment: scene.environment, shadowBounds: scene.shadow, ...variant.rendererOptions,
   });
   renderer.resize();
@@ -116,7 +116,7 @@ async function renderDefaultLook(sceneId, variantName) {
   const variant = DEFAULT_LOOK_VARIANTS[variantName];
   if (!variant) throw new Error(`Unknown variant ${variantName}. Pass one of ${Object.keys(DEFAULT_LOOK_VARIANTS).join(', ')}.`);
   const scene = await DEFAULT_LOOK_SCENES[sceneId]();
-  const image = variant.engine === 'three' ? drawWithThree(scene, variant) : drawWith67js(scene, variant);
+  const image = variant.engine === 'three' ? drawWithThree(scene, variant) : drawWithCrucible(scene, variant);
   return { image };
 }
 

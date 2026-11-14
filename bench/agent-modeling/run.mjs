@@ -1,4 +1,4 @@
-// Runs the agent modeling suite: one fresh, non-interactive Claude Code session per task, with only the 67js MCP
+// Runs the agent modeling suite: one fresh, non-interactive Claude Code session per task, with only the Crucible MCP
 // server, then grades the recipe the agent exported.
 //
 // node bench/agent-modeling/run.mjs --claude <claude executable> [--model sonnet] [--tasks crate,bolt]
@@ -13,7 +13,7 @@
 // scene_capabilities. Records carry relationCalls, the tool calls that sent a relations list.
 // --findings off hides the structured findings (`diagnostics`) from scene_look, the control for measuring what they are worth.
 // Records carry imagesRead, the tool results that held a picture.
-// --skill puts the build-67js-scene entry point and its mesh reference in the system prompt. That measures what the
+// --skill puts the build-crucible-scene entry point and its mesh reference in the system prompt. That measures what the
 // skill's knowledge is worth, not whether an agent would load the skill on its own.
 //
 // Raw transcripts and recipes go to artifacts/agent-modeling/<run>/ (ignored by Git); the summary goes to
@@ -32,7 +32,7 @@ import { classifyZeroCalls } from './zero-calls.mjs';
 import { PROMPT_PREAMBLE, TASKS, taskById, taskPrompt } from './tasks.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
-const MCP_SERVER_NAME = '67js';
+const MCP_SERVER_NAME = 'crucible';
 const EXPORT_TOOL = `mcp__${MCP_SERVER_NAME}__scene_export_recipe`;
 const BUILT_IN_TOOLS = ['Bash', 'PowerShell', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'NotebookEdit'];
 
@@ -60,7 +60,7 @@ const rawDirectory = join(repository, 'artifacts', 'agent-modeling', runName);
 const resultsDirectory = join(repository, 'bench', 'agent-modeling', 'results');
 
 async function skillPrompt() {
-  const skillDirectory = join(repository, 'skills', 'build-67js-scene');
+  const skillDirectory = join(repository, 'skills', 'build-crucible-scene');
   const entryPoint = await readFile(join(skillDirectory, 'SKILL.md'), 'utf8');
   const meshReference = await readFile(join(skillDirectory, 'references', 'mesh-modeling.md'), 'utf8');
   return `${entryPoint}\n\n${meshReference}`;
@@ -171,7 +171,7 @@ async function removeWorkingDirectory(workingDirectory) {
 
 async function runTask(task, attempt, systemPromptAddition) {
   const fileStem = `${task.id}-${attempt}`;
-  const workingDirectory = await mkdtemp(join(tmpdir(), '67js-agent-task-'));
+  const workingDirectory = await mkdtemp(join(tmpdir(), 'crucible-agent-task-'));
   try {
     const configPath = join(workingDirectory, 'mcp.json');
     let assetDirectory = null;
