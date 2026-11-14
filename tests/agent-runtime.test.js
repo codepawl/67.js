@@ -164,18 +164,21 @@ test('scene_look steps a busy PNG down by 0.75 until it fits the 1 MiB budget an
   assert.deepEqual(busy.viewports.slice(-2).map(size => `${size.width}x${size.height}`), ['1024x640', '768x480']);
   assert.equal(stepped.metadata.returnedWidth, 768);
   assert.equal(stepped.metadata.returnedHeight, 480);
+  await busy.runtime.close();
   assert.equal(stepped.metadata.requestedWidth, 1024);
   assert.match(stepped.metadata.note, /1024x640.*768x480/);
   const calm = await reviewRuntimeHarness({ lookBytesPerPixel: 0.5 });
   const unchanged = await calm.runtime.look({ sessionId: calm.sessionId, width: 1024, height: 640 });
   assert.equal(calm.viewports.length, 1);
   assert.equal(unchanged.metadata.note, undefined);
+  await calm.runtime.close();
 });
 
 test('scene_look fails only when the fourth step down still does not fit, naming that size (#1197)', async () => {
   const hopeless = await reviewRuntimeHarness({ lookBytesPerPixel: 50 });
   await assert.rejects(hopeless.runtime.look({ sessionId: hopeless.sessionId, width: 1024, height: 640 }), /even at 324x202/);
   assert.equal(hopeless.viewports.length, 5);
+  await hopeless.runtime.close();
 });
 
 test('an edit of a scene with a bake, or one that adds a bake, gets the bake deadline; a plain edit keeps 30 s', async () => {

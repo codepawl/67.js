@@ -45,8 +45,18 @@ function worldTriangles(parts, worldMatrices) {
 // Fractions of the scene bounds tried for a ray origin, the middle first.
 const ORIGIN_FRACTIONS = [0.5, 0.25, 0.75];
 
-function insideAnyPart(point, partBounds) {
-  return partBounds.some(bounds => point.every((value, axis) => value > bounds.minimum[axis] && value < bounds.maximum[axis]));
+// A part blocks an origin only when it is small next to the scene (under this share of the scene's extent on two axes or
+// more). A room shell that encloses the whole scene never blocks, so a room built as one part still counts as a room.
+const BLOCKING_PART_SHARE = 0.5;
+
+function isSmallPart(bounds, sceneMinimum, sceneMaximum) {
+  const narrowAxes = bounds.minimum.filter((low, axis) => bounds.maximum[axis] - low < BLOCKING_PART_SHARE * (sceneMaximum[axis] - sceneMinimum[axis]));
+  return narrowAxes.length >= 2;
+}
+
+function insideAnyPart(point, triangles) {
+  return triangles.partBounds.some(bounds => isSmallPart(bounds, triangles.minimum, triangles.maximum)
+    && point.every((value, axis) => value > bounds.minimum[axis] && value < bounds.maximum[axis]));
 }
 
 /**
@@ -60,7 +70,7 @@ function freeOrigin(triangles) {
       for (const depthFraction of ORIGIN_FRACTIONS) {
         const fractions = [offsetFraction, heightFraction, depthFraction];
         const point = triangles.minimum.map((low, axis) => low + fractions[axis] * (triangles.maximum[axis] - low));
-        if (!insideAnyPart(point, triangles.partBounds)) {
+        if (!insideAnyPart(point, triangles)) {
           return point;
         }
       }

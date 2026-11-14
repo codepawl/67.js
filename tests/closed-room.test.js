@@ -148,6 +148,16 @@ test('a lone mug on a saucer is not a closed room, though the middle of its boun
   assert.ok(!diagnosticKinds(mugRecipe()).includes('closed-room-without-bake'));
 });
 
+test('a closed room built as one inward shell part (round or four-sided) still gets the diagnostic (#1197)', async () => {
+  for (const segments of [24, 4]) {
+    const recipe = mugRecipe();
+    recipe.geometries[0].segments = segments;
+    recipe.nodes = [{ id: 'shell', geometry: 'mugBody', material: 'ceramic', scale: [10, 6, 10] }];
+    await loadAgentSceneModules(recipe);
+    assert.ok(diagnosticKinds(recipe).includes('closed-room-without-bake'), `segments ${segments}`);
+  }
+});
+
 test('a closed room with a prop at its centre still gets the diagnostic from a free origin (#1197)', () => {
   const recipe = roomRecipe();
   recipe.nodes.push(wall('table', [0, -2, 0], [2, 2, 2]));
