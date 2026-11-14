@@ -303,7 +303,7 @@ cookTest('packMaterialRecordV2 and texture packing follow Principled v2 flags an
 cookTest('buildNativeInputV2 normalizes all 5 Cycles light types, camera-visibility flags, and HDRI marginal/conditional CDFs', () => {
   const hdriPixels = new Float32Array(8 * 4 * 3);
   for (let i = 0; i < 8 * 4; i++) {
-    hdriPixels[i * 3] = i === 5 ? 50.0 : 0.5; // 50.0 must clamp to HDRI_RADIANCE_LIMIT = 16
+    hdriPixels[i * 3] = i === 5 ? 50.0 : 0.5; // 50.0 stays 50.0: the packer has no default limit, as Cycles has none
     hdriPixels[i * 3 + 1] = 0.25;
     hdriPixels[i * 3 + 2] = 0.1;
   }
@@ -380,7 +380,12 @@ cookTest('buildNativeInputV2 normalizes all 5 Cycles light types, camera-visibil
 
   // HDRI texels + marginal + conditional CDF invariants.
   assert.equal(v2.environmentTexels.length, (2 * 8 * 4 + 4) * 4);
-  assert.equal(v2.environmentTexels[5 * 4], 16.0, 'HDRI pixel clamped at 16.0');
+  assert.equal(v2.environmentTexels[5 * 4], 50.0, 'an HDRI texel keeps its radiance by default');
+  const limited = buildNativeInputV2(scene, camera, { width: 16, height: 16, samples: 1, hdriRadianceLimit: 16 });
+  assert.equal(limited.environmentTexels[5 * 4], 16.0, 'hdriRadianceLimit caps the texel');
+  assert.equal(limited.environmentTexels[4 * 4], 0.5, 'a texel under the limit is untouched');
+  assert.throws(() => buildNativeInputV2(scene, camera, { width: 16, height: 16, samples: 1, hdriRadianceLimit: 0 }),
+    /`hdriRadianceLimit` must be a number above 0, or Infinity for no limit/);
   const cdfStart = 8 * 4;
   let marginalProbSum = 0;
   for (let y = 0; y < 4; y++) {

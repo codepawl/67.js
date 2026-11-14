@@ -113,7 +113,7 @@ function parseLightSamplingOption(argumentList) {
   return aliasedLightSampling === 'auto' ? lightSampling : aliasedLightSampling;
 }
 
-/** `--hdri-radiance-limit <number|none>`: the cap the packer puts on environment texels; absent keeps the packer's default (16). */
+/** `--hdri-radiance-limit <number|none>`: the cap the packer puts on environment texels; absent or `none` is no cap, the packer's default. */
 function parseHdriRadianceLimit(argumentList) {
   if (!argumentList.includes('--hdri-radiance-limit')) {
     return undefined;
