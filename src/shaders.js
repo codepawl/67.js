@@ -52,6 +52,8 @@ function vertexShaderSource(definitions, features) {
   return `#version 300 es
 ${definitions}
 precision highp float;
+// The depth prepass (depth-prepass.js) draws these vertices with another fragment shader, and its depth must equal this one's.
+invariant gl_Position;
 layout(location=0) in vec3 position;
 layout(location=1) in vec3 normal;
 layout(location=2) in mat4 instanceMatrix;

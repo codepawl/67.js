@@ -253,6 +253,18 @@ export function installReversedDepth(renderer, mode = 'auto') {
     renderer.applyDepthRank = function applyDepthRankReversed(rank) {
       original.applyDepthRank.call(this, rank, clipControl.active ? 1 : -1);
     };
+    // The depth prepass rasterises with the same matrix and camera offset as the colour pass.
+    renderer.prepassViewProjection = function prepassViewProjectionReversed() {
+      return clipControl.active ? rasterViewProjection : this.viewProjection;
+    };
+    renderer.bindPrepassCameraRelative = function bindPrepassCameraRelativeReversed(uniforms) {
+      context.uniform4fv(uniforms.cameraOffset, clipControl.active ? cameraOffset : ZERO_VECTOR);
+      context.uniform4fv(uniforms.cameraShift, clipControl.active ? cameraShift : ZERO_VECTOR);
+    };
+    // The prepass writes depth with the colour pass's own test, and the colour pass then keeps what is at that depth.
+    renderer.prepassDepthFunctions = function prepassDepthFunctionsReversed() {
+      return clipControl.active ? { fill: context.GREATER, shade: context.GEQUAL } : { fill: context.LESS, shade: context.LEQUAL };
+    };
     renderer.resolveFrame = function resolveFrameStandard(...parameters) {
       endReversed();
       return original.resolveFrame.apply(this, parameters);

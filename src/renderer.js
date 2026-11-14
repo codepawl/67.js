@@ -23,6 +23,7 @@ import { wearUniformValues } from './material-wear.js';
 import { fittedFogDensity } from './fog-fit.js';
 import { InstanceSelection, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from './render-culling.js';
 import { resolveShadowLight, shadowBiasPerSlope } from './shadow-light.js';
+import { validateDepthPrepassMode, shouldUseDepthPrepass, batchTakesDepthPrepass, depthPrepassFragmentShader } from './depth-prepass.js';
 import { MAX_MORPH_TARGETS, requireFeatureCode, deformationSupport, requireDeformationSupport, texturedReplaceSupport, textureUpdateSupport } from './shader-registry.js';
 
 const SHADOW_MAP_SIZE = 2048;
@@ -688,7 +689,7 @@ function allFinite(values) {
 }
 
 export class CrucibleRenderer {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false, background = null } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false, background = null, depthPrepass = false } = {}) {
     this.background = background ? resolveBackground(background) : null;
     this.canvas = canvas;
     this.sceneParts = parts;
@@ -721,6 +722,8 @@ export class CrucibleRenderer {
     this.transparent = Boolean(transparent);
     this.pixelRatio = pixelRatio;
     this.benchmark = benchmark;
+    this.depthPrepassMode = validateDepthPrepassMode(depthPrepass);
+    this.depthPrepassActive = false;
     this.depth = Boolean(depth && !benchmark);
     this.world = world;
     this.environment = environment;
@@ -1007,7 +1010,11 @@ export class CrucibleRenderer {
   startMainProgram() {
     const benchmark = this.benchmark;
     const fragmentSource = benchmark ? benchmarkFragmentShader : this.withViewTransform(createFragmentShader(this.shaderFeatures), 'main');
-    return startProgram(this.context, benchmark ? benchmarkVertexShader : createVertexShader(this.shaderFeatures), fragmentSource);
+    const vertexSource = benchmark ? benchmarkVertexShader : createVertexShader(this.shaderFeatures);
+    const pending = startProgram(this.context, vertexSource, fragmentSource);
+    // The prepass program shares the vertex source (and every transform applied to it), so its depth is the colour pass's depth.
+    if (!benchmark) pending.prepass = startProgram(this.context, vertexSource, depthPrepassFragmentShader);
+    return pending;
   }
 
   buildMainProgram() {
@@ -1015,6 +1022,9 @@ export class CrucibleRenderer {
   }
 
   finishMainProgram(pendingProgram) {
+    const previousPrepassProgram = this.prepassProgram;
+    this.prepassProgram = pendingProgram.prepass ? finishProgram(this.context, pendingProgram.prepass) : null;
+    if (previousPrepassProgram) this.context.deleteProgram(previousPrepassProgram);
     this.program = finishProgram(this.context, pendingProgram);
     this.uniforms = Object.fromEntries(['materialDielectric', 'materialEmissionFresnel', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', 'wearEnabled', 'wearMetal', 'wearDirt', 'wearShape', 'wearDirtShape', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', 'tintShadowMap', 'tintBlind', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
@@ -1022,6 +1032,24 @@ export class CrucibleRenderer {
     }
     for (const name of ENVIRONMENT_UNIFORMS) this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     this.keepSamplerTypesApart();
+    this.locatePrepassUniforms();
+  }
+
+  // The prepass program has the vertex uniforms of the colour program and none of its fragment ones. The table keeps the colour
+  // program's names, so the code that sets uniforms by name (depth ranks, skin, morph) draws the prepass unchanged: names this
+  // program does not have are null locations, which WebGL ignores.
+  locatePrepassUniforms() {
+    if (!this.prepassProgram) {
+      this.prepassUniforms = null;
+      return;
+    }
+    const context = this.context;
+    this.prepassUniforms = Object.fromEntries([...Object.keys(this.uniforms), 'cameraOffset', 'cameraShift', 'windHeading'].map(name => [name, context.getUniformLocation(this.prepassProgram, name)]));
+    context.useProgram(this.prepassProgram);
+    context.uniform1i(this.prepassUniforms.skinInfluences, 6);
+    context.uniform1i(this.prepassUniforms.jointPalette, 7);
+    context.uniform1i(this.prepassUniforms.morphTargets, 8);
+    context.useProgram(this.program);
   }
 
   // A sampler nobody has set reads texture unit 0, which holds the shadow map as a comparison sampler. One unit may not serve
@@ -2535,7 +2563,7 @@ export class CrucibleRenderer {
     if (this.shaderFeatures.has('boxMapScale')) context.uniformMatrix3fv(this.uniforms.boxNormalMatrix, false, data.subarray(16, 25));
   }
 
-  drawBatch(batch, textured = false, selection = null, levelSet = batch) {
+  drawBatch(batch, textured = false, selection = null, levelSet = batch, depthOnly = false) {
     if (this.hasMorphs) {
       const uniforms = textured ? this.uniforms : this.depthMorphUniforms;
       this.context.uniform1f(uniforms.morphEnabled, batch.morph ? 1 : 0);
@@ -2568,7 +2596,8 @@ export class CrucibleRenderer {
         this.context.uniform1i(uniforms.jointPalette, 7);
       }
     }
-    if (textured && !this.benchmark) {
+    // The depth prepass needs the vertex stage only, so it skips every material binding of the colour pass.
+    if (textured && !this.benchmark && !depthOnly) {
       this.context.uniform1f(this.uniforms.shadowBlind, batch.receivesShadow === false ? 1 : 0);
       this.context.uniform1f(this.uniforms.tintBlind, batch.tintBlind ? 1 : 0);
       this.context.uniform1f(this.uniforms.compositeMode, batch.compositeMode ?? 0);
@@ -2603,7 +2632,7 @@ export class CrucibleRenderer {
         this.context.uniform1f(this.uniforms.lightMapScale, batch.mapState[15]);
       }
     }
-    if (textured && !this.benchmark && this.shaderFeatures?.has('instanced') === false)this.setSingleInstanceUniforms(batch.instanceData);
+    if (textured && !this.benchmark && !depthOnly && this.shaderFeatures?.has('instanced') === false)this.setSingleInstanceUniforms(batch.instanceData);
     // A reflecting matrix reverses screen winding: clockwise triangles are the front faces of a mirrored batch.
     if (batch.mirrored) this.context.frontFace(this.context.CW);
     // The shadow pass (not textured) draws the whole index buffer; its order does not matter there.
@@ -2616,6 +2645,97 @@ export class CrucibleRenderer {
       else this.context.drawElementsInstanced(this.context.TRIANGLES, batch.indexCount, this.context.UNSIGNED_INT, 0, batch.instanceCount);
     }
     if (batch.mirrored) this.context.frontFace(this.context.CCW);
+  }
+
+  /** The depth functions of the colour loop: the plain test, and the one that keeps what the prepass left at its own depth. */
+  prepassDepthFunctions() {
+    return { fill: this.context.LESS, shade: this.context.LEQUAL };
+  }
+
+  /** Sets whether opaque batches draw depth first: true, false (the default), or 'auto', which decides by triangles per pixel. */
+  setDepthPrepass(mode) {
+    this.depthPrepassMode = validateDepthPrepassMode(mode);
+  }
+
+  /**
+   * Draws the depth of the opaque batches that qualify, with the colour mask off, when the mode and the triangle density say it
+   * pays. The batches use the colour program with the same vertex stage and depth ranks, so the depth is bit for bit what the colour
+   * pass would write. Returns a map from each batch drawn to its instance selection (so the colour pass does not cull twice), or null.
+   */
+  drawDepthPrepass({ passMode, mirrorTarget, frame, environment, assemblyAmount }) {
+    this.depthPrepassActive = false;
+    if (this.benchmark || !this.prepassProgram || passMode > 0 || mirrorTarget || this.depthPrepassMode === false) return null;
+    const eligible = this.batches.filter(batch => this.drawsInOpaqueLoop(batch) && batchTakesDepthPrepass(batch));
+    const triangles = eligible.reduce((sum, batch) => sum + batch.indexCount / 3 * batch.instanceCount, 0);
+    if (!shouldUseDepthPrepass(this.depthPrepassMode, triangles, this.canvas.width * this.canvas.height)) return null;
+    const context = this.context;
+    const drawn = new Map();
+    const functions = this.prepassDepthFunctions();
+    context.depthFunc(functions.fill);
+    context.depthMask(true);
+    context.colorMask(false, false, false, false);
+    const colourUniforms = this.uniforms;
+    this.uniforms = this.prepassUniforms;
+    context.useProgram(this.prepassProgram);
+    this.bindPrepassFrameUniforms(frame, environment, assemblyAmount);
+    for (const batch of eligible) {
+      const selection = this.selectBatchInstances(batch);
+      drawn.set(batch, { selection });
+      if (selection?.visibleCount === 0) continue;
+      this.applyAlphaState(batch, true);
+      this.drawBatch(batch, true, selection, batch, true);
+    }
+    this.uniforms = colourUniforms;
+    context.useProgram(this.program);
+    context.colorMask(true, true, true, true);
+    this.depthPrepassActive = true;
+    return drawn;
+  }
+
+  /** The view matrix the colour pass rasterises with: the reversed-depth addon replaces it inside its frames. */
+  prepassViewProjection() {
+    return this.viewProjection;
+  }
+
+  /** Camera-relative rasterising (the reversed-depth addon) adds its two uniforms here; the plain renderer has none. */
+  bindPrepassCameraRelative() {}
+
+  /** Sets the per-frame uniforms that the vertex stage reads, from the same values the colour pass was given. */
+  bindPrepassFrameUniforms(frame, environment, assemblyAmount) {
+    const context = this.context;
+    const uniforms = this.prepassUniforms;
+    context.uniformMatrix4fv(uniforms.viewProjection, false, this.prepassViewProjection());
+    this.setFlushProjection(this.prepassViewProjection());
+    context.uniform1f(uniforms.time, frame.time ?? 0);
+    context.uniform1f(uniforms.wind, frame.wind ?? 0.3);
+    context.uniform1f(uniforms.windHeading, this.windHeading ?? 0);
+    context.uniform1f(uniforms.explosionProgress, frame.explosionProgress ?? 1);
+    context.uniform3fv(uniforms.explosionCenter, environment.explosionCenter);
+    context.uniform1f(uniforms.assemblyAmount, assemblyAmount);
+    this.bindPrepassCameraRelative(uniforms);
+  }
+
+  /** Back to the plain depth test and writes once the colour loop is done with the prepass depth. */
+  endDepthPrepass() {
+    this.context.depthFunc(this.prepassDepthFunctions().fill);
+    this.context.depthMask(true);
+  }
+
+  /** The colour draw of one opaque-loop batch. A batch the prepass drew shades only the fragments at its depth and writes none. */
+  drawShadedBatch(batch, prepass, culled) {
+    const context = this.context;
+    const functions = this.prepassDepthFunctions();
+    if (!prepass) {
+      context.depthFunc(functions.fill);
+      context.depthMask(true);
+      this.drawAlphaBatch(batch, true, culled);
+      return;
+    }
+    if (prepass.selection?.visibleCount === 0) return;
+    context.depthFunc(functions.shade);
+    context.depthMask(false);
+    this.applyAlphaState(batch, true);
+    this.drawBatch(batch, true, prepass.selection);
   }
 
   // A render pass draws raw material data instead of the lit image; the addon validates frame.pass and returns the shader mode.
@@ -2744,6 +2864,7 @@ export class CrucibleRenderer {
     context.uniform1f(this.uniforms.renderPassDepthRange, frame.passDepthRange ?? 100);
     if (passMode > 5) this.passSupport.bindFrame(frame, environment, volume);
     let objectBase = 0;
+    const prepassDrawn = this.drawDepthPrepass({ passMode, mirrorTarget, frame, environment, assemblyAmount });
     for (const batch of this.batches) {
       if (this.benchmark) {
         this.drawBatch(batch, true);
@@ -2752,9 +2873,10 @@ export class CrucibleRenderer {
         objectBase += batch.instanceCount;
         // Object IDs are the instance ordinal, which culling and level selection renumber, so that pass draws every instance.
         if (passMode > 5) this.passSupport.drawBatch(batch, passMode, frame, objectBase - batch.instanceCount);
-        else this.drawAlphaBatch(batch, true, passMode !== OBJECT_ID_PASS_MODE);
+        else this.drawShadedBatch(batch, prepassDrawn?.get(batch) ?? null, passMode !== OBJECT_ID_PASS_MODE);
       }
     }
+    if (prepassDrawn) this.endDepthPrepass();
     this.applyDepthRank(0);
     context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
     context.enable(context.CULL_FACE);
@@ -2835,6 +2957,7 @@ export class CrucibleRenderer {
     this.context.deleteProgram(this.program);
     if (this.liquidProgram) this.context.deleteProgram(this.liquidProgram);
     this.context.deleteProgram(this.depthProgram);
+    if (this.prepassProgram) this.context.deleteProgram(this.prepassProgram);
     if (this.postProgram) this.context.deleteProgram(this.postProgram);
     // A program still linking must finish first: deleting it mid-link leaves a GL error that the next renderer on this context sees.
     for (const variant of this.postVariants?.values() ?? []) this.context.deleteProgram(variant.pending ? finishProgram(this.context, variant.pending) : variant.program);
