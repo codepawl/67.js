@@ -1,9 +1,10 @@
 // Temporal accumulation for the frames of a native video job (issue 1120). Every path traced frame carries fresh noise, and
 // a denoiser turns what is left of it into soft blotches that change from frame to frame, so a film shimmers even when each
-// still looks clean. Here each pixel of a new frame finds where its surface point was in the frame before (the first-hit
-// distance and the two cameras give that), and the traced light is blended into the light gathered there so far, before the
-// denoiser runs. A pixel whose surface was hidden, off screen or another surface in the frame before starts again, and so
-// does the whole image when anything but the camera changed.
+// still looks clean. More samples do not cure it (a frozen camera still shimmers at 1024 samples), so the blend runs on the
+// filtered picture: each pixel of a new frame finds where its surface point was in the frame before (the first-hit distance
+// and the two cameras give that), and its filtered light is blended into the light gathered there so far. A pixel whose
+// surface was hidden, off screen, another surface or seen from another side in the frame before starts again, and so does
+// the whole image when anything but the camera changed.
 //
 // It assumes a still scene under a moving camera. Light that depends on the view (a sharp reflection, a highlight, what is
 // seen through glass) is carried along with the surface, so it trails the camera by a few frames.
@@ -31,6 +32,10 @@ export const TEMPORAL_DEFAULTS = Object.freeze({
   normalAgreement: 0.9,
   // Below this much bilinear weight from texels of the same surface, the pixel starts again.
   minimumFetchWeight: 0.3,
+  // The cosine between the two directions a surface point was seen from in the frame before and in this one. Below it (about
+  // 6 degrees apart) the pixel starts again: a cut to another view of the same room would otherwise carry the old view's
+  // reflections and highlights along.
+  viewAgreement: 0.995,
 });
 
 function requirePlane(plane, name, floatsPerPixel, pixelCount) {
@@ -111,9 +116,9 @@ function validateShare(value, name) {
 }
 
 /**
- * Holds the history of one job. `accumulate` takes the planes of a traced frame and returns the colour to denoise.
+ * Holds the history of one job. `accumulate` takes the planes of a frame and returns the colour to show.
  *
- * @param {{ width: number, height: number, minimumWeight?: number, depthTolerance?: number, normalAgreement?: number, minimumFetchWeight?: number }} options
+ * @param {{ width: number, height: number, minimumWeight?: number, depthTolerance?: number, normalAgreement?: number, minimumFetchWeight?: number, viewAgreement?: number }} options
  */
 export function createTemporalAccumulator(options = {}) {
   const { width, height } = options;
@@ -221,8 +226,10 @@ export function createTemporalAccumulator(options = {}) {
             const left = Math.floor(sourceX);
             const top = Math.floor(sourceY);
             // On screen up to the outer edge of the border pixels; a corner past the border reads the border texel.
-            if (sourceX >= -0.5 && sourceY >= -0.5 && sourceX <= width - 0.5 && sourceY <= height - 0.5) {
-              const expectedDistance = Math.hypot(offsetX, offsetY, offsetZ);
+            const expectedDistance = Math.hypot(offsetX, offsetY, offsetZ);
+            const viewCosine = (offsetX * directionX + offsetY * directionY + offsetZ * directionZ) / (expectedDistance * distance);
+            const onScreen = sourceX >= -0.5 && sourceY >= -0.5 && sourceX <= width - 0.5 && sourceY <= height - 0.5;
+            if (onScreen && viewCosine >= settings.viewAgreement) {
               const allowedDifference = settings.depthTolerance * expectedDistance;
               const fractionX = sourceX - left;
               const fractionY = sourceY - top;

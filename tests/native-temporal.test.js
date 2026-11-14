@@ -101,8 +101,11 @@ test('a still camera averages every frame it has seen, and a moving one holds th
   assert.ok(Math.abs(share - TEMPORAL_DEFAULTS.minimumWeight) < 1e-4, `a long history takes ${TEMPORAL_DEFAULTS.minimumWeight} of the new frame, got ${share}`);
 });
 
+// These frames are 32 pixels wide, so a move of whole pixels turns the view by more than a film frame ever does.
+const WIDE_VIEW_AGREEMENT = 0.5;
+
 test('a camera that moves sideways finds each surface point where it was in the frame before', () => {
-  const accumulator = createTemporalAccumulator({ width: WIDTH, height: HEIGHT });
+  const accumulator = createTemporalAccumulator({ width: WIDTH, height: HEIGHT, viewAgreement: WIDE_VIEW_AGREEMENT });
   accumulator.accumulate({ ...wallFrame([0, 0, 0]), kernelParams: paramsForCamera([0, 0, 0]) });
   // Three pixels right and two up on the wall, so every point that was on screen sat on a pixel centre.
   const moved = wallFrame([0.75, 0.5, 0]);
@@ -114,7 +117,7 @@ test('a camera that moves sideways finds each surface point where it was in the 
 });
 
 test('a camera that moves forward and a shifted lens reproject as the kernel casts its rays', () => {
-  const accumulator = createTemporalAccumulator({ width: WIDTH, height: HEIGHT });
+  const accumulator = createTemporalAccumulator({ width: WIDTH, height: HEIGHT, viewAgreement: WIDE_VIEW_AGREEMENT });
   const lensShift = [0.1, -0.05];
   accumulator.accumulate({ ...wallFrame([0, 0, 0], { lensShift }), kernelParams: paramsForCamera([0, 0, 0], { lensShift }) });
   const moved = wallFrame([0.1, 0, -1], { lensShift });
@@ -128,6 +131,19 @@ test('history fetched at the wrong place would show: a still wall under a moved 
   // Three pixels right and two up on the wall, so every point that was on screen sat on a pixel centre.
   const moved = wallFrame([0.75, 0.5, 0]);
   assert.ok(maximumDifference(first.color, moved.color) > 0.01, 'the two frames differ pixel for pixel, so the test above proves the reprojection');
+});
+
+test('a surface seen from another side than in the frame before starts again', () => {
+  const accumulator = createTemporalAccumulator({ width: WIDTH, height: HEIGHT });
+  accumulator.accumulate({ ...flatFrame(1), kernelParams: paramsForCamera([0, 0, 0]) });
+  // 0.25 to the side of a wall 5 away turns the view by under 3 degrees, 0.75 by more than 8.
+  const smallStep = accumulator.accumulate({ ...flatFrame(0), kernelParams: paramsForCamera([0.25, 0, 0]) });
+  assert.ok(smallStep.historyShare > 0.9, `a small step keeps the history, got ${smallStep.historyShare}`);
+  const cut = accumulator.accumulate({ ...flatFrame(0.25), kernelParams: paramsForCamera([1, 0, 0]) });
+  assert.equal(cut.restarted, null);
+  assert.ok(cut.historyShare < 0.1, `only points far to the side were seen from nearly the same direction, got ${cut.historyShare}`);
+  const centrePixel = (HEIGHT / 2) * WIDTH + WIDTH / 2;
+  assert.equal(cut.color[centrePixel * 3], 0.25, 'the middle of the picture keeps no light gathered from another side');
 });
 
 test('a pixel that shows another surface than the frame before starts again', () => {

@@ -274,7 +274,7 @@ function sequenceOfFlatFrames(levels, { withoutSessionAt = -1, changedSceneAt = 
   };
 }
 
-test('a temporal accumulator blends session frames before the filter and leaves rawLinear as traced', async () => {
+test('a temporal accumulator blends the filtered session frames and leaves rawLinear as traced', async () => {
   const { createTemporalAccumulator } = await import('../scripts/agent-native-temporal.mjs');
   const temporal = createTemporalAccumulator({ width: 4, height: 4 });
   const sequence = sequenceOfFlatFrames([1, 0, 0]);

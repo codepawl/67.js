@@ -216,16 +216,16 @@ export async function denoiseFrameWithOidn({ tracer, denoiser, width, height, co
   return { linear, mode: 'cli', ...(note ? { note: `The in-process OIDN device was not used (${note}): the oidnDenoise tool ran instead.` } : {}) };
 }
 
-// Blends the traced colour into the job's history and returns the colour to filter. A frame that did not go through a
+// Blends the filtered colour into the job's history and returns the colour to show. A frame that did not go through a
 // session (a one-shot fallback) has no kernel parameter block to reproject with, so the history starts again after it.
-function blendOverTime({ temporal, features, kernelParams, route, report }) {
+function blendOverTime({ temporal, color, features, kernelParams, route, report }) {
   if (!kernelParams) {
     temporal.restart('the frame before did not render through a session');
     report.temporal = { historyShare: 0, restarted: 'this frame did not render through a session' };
-    return features.color;
+    return color;
   }
   const started = performance.now();
-  const blended = temporal.accumulate({ color: features.color, depth: features.depth, normal: features.normal, kernelParams,
+  const blended = temporal.accumulate({ color, depth: features.depth, normal: features.normal, kernelParams,
     sceneChanged: route.path !== 'reused' });
   report.temporal = { historyShare: blended.historyShare, ...(blended.restarted ? { restarted: blended.restarted } : {}),
     seconds: (performance.now() - started) / 1000 };
@@ -238,8 +238,8 @@ function blendOverTime({ temporal, features, kernelParams, route, report }) {
  * loaded OIDN package for "oidn". The result also holds `rawLinear`, the traced colour before any filter (three floats per
  * pixel), which equals `linear` when no filter ran. `sequence` (from createNativeSequence) renders a cycles kernel frame through the job's
  * persistent session and adds `report.nativeSession`, the route the frame took. `temporal` (from createTemporalAccumulator)
- * blends the traced colour of a session frame into the frames before it, ahead of the filter, and adds `report.temporal`;
- * `rawLinear` stays the colour of this frame alone. Throws when the tracer cannot run, so the caller can fall back.
+ * blends the filtered colour of a session frame into the frames before it and adds `report.temporal`; `linear` is the
+ * blended colour and `rawLinear` stays the traced colour of this frame alone. Throws when the tracer cannot run, so the caller can fall back.
  */
 export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel(), sequence, temporal }) {
   const started = performance.now();
@@ -262,9 +262,6 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
     ...(exported.materialsReason === undefined ? {} : { materialsReason: exported.materialsReason }), tracedSeconds, ignored: exported.ignored,
     ...(route ? { nativeSession: route } : {}) };
   const rawLinear = features.color;
-  if (temporal) {
-    features.color = blendOverTime({ temporal, features, kernelParams, route, report });
-  }
   let linear = features.color;
   const denoiseStarted = performance.now();
   if (denoise === 'oidn') {
@@ -293,6 +290,9 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
     Object.assign(report, { denoised: true, denoiser: 'wavelet' });
   }
   if (report.denoised) report.denoiseSeconds = (performance.now() - denoiseStarted) / 1000;
+  if (temporal) {
+    linear = blendOverTime({ temporal, color: linear, features, kernelParams, route, report });
+  }
   const [{ toneMapToRgba8 }, { encodePng }] = await Promise.all([import('../src/path-tracer.js'), import('../src/export-png.js')]);
   const png = encodePng(toneMapToRgba8(linear, width, height), width, height);
   report.seconds = (performance.now() - started) / 1000;

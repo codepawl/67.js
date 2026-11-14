@@ -1,13 +1,15 @@
 // Measures frame-to-frame flicker of a native path traced video with and without the temporal blend (issue 1120).
-//   node bench/native-tracer/temporal-job.mjs <output directory> [--browser <chrome path>] [--runtime-backend gpu|cpu] [--samples 32] [--width 960] [--height 540] [--ffmpeg ffmpeg]
+//   node bench/native-tracer/temporal-job.mjs <output directory> [--browser <chrome path>] [--runtime-backend gpu|cpu] [--samples 32] [--width 960] [--height 540] [--ffmpeg ffmpeg] [--reuse plain,reference]
+// `--reuse` scores the named videos from the output directory instead of rendering them again.
 // The scene is the demo room lit only by the area light in its window and the sky through the open front, with the particle
-// systems and every track but the camera removed, so the session reuses the scene and only the camera moves. The camera flies
+// systems and every track but the camera removed, so the session reuses the scene and only the camera moves. The camera drifts
 // slowly into the room for 2 s, then cuts to another view and holds it for 1 s. The job runs three times through the MCP
-// server: with the blend, with JS67_NATIVE_TEMPORAL=off, and with it off at 512 samples as the reference that shows how much of
+// server: with the blend, with JS67_NATIVE_TEMPORAL=off, and with it off at 256 samples as the reference that shows how much of
 // the score is the camera's own motion. The videos are read back as 8-bit grey frames.
 // The score is the mean of |f[t+1] - 2 f[t] + f[t-1]| over the pixels and the frames of the fly-through: smooth camera motion
-// cancels in it and noise that changes from frame to frame stays. Prints one TEMPORAL_JOB line of JSON and exits 1 when the
-// blended video scores 1.5 or more, or when a frame did not render on the native tracer.
+// cancels in it and noise that changes from frame to frame stays. `againstReference` is the mean absolute difference from the
+// reference video, which shows a blend that lags or dims the picture. Prints one TEMPORAL_JOB line of JSON and exits 1 when
+// the blended video scores 1.5 or more, or when a frame did not render on the native tracer.
 import { execFile } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -27,12 +29,13 @@ const samples = Number(flag('--samples', 32));
 const browserPath = flag('--browser', '');
 const runtimeBackend = flag('--runtime-backend', 'gpu');
 const ffmpegPath = flag('--ffmpeg', 'ffmpeg');
+const reusedNames = flag('--reuse', '').split(',').filter(Boolean);
 const FPS = 24;
 const FLY_SECONDS = 2;
 const TOTAL_SECONDS = 3;
 const FLY_FRAMES = FPS * FLY_SECONDS;
 const SCORE_LIMIT = 1.5;
-const REFERENCE_SAMPLES = 512;
+const REFERENCE_SAMPLES = 256;
 const WINDOW_LIGHT_INTENSITY = 220;
 
 function cameraTrack(property, flyStart, flyEnd, afterCut) {
@@ -50,8 +53,8 @@ function windowLitRoom(recipe) {
   const windowLight = { ...recipe.environment.areaLights[0], intensity: WINDOW_LIGHT_INTENSITY };
   const environment = { ...recipe.environment, pointLights: [], spotLights: [], areaLights: [windowLight] };
   const tracks = [
-    cameraTrack('eye', [1.4, 2.1, 7], [1.0, 2.0, 6.4], [3.9, 0.6, 2.8]),
-    cameraTrack('target', [0, 1.6, -2], [0.1, 1.65, -2], [0.3, 1.5, -2.3]),
+    cameraTrack('eye', [1.4, 2.1, 7], [1.3, 2.075, 6.85], [3.9, 0.6, 2.8]),
+    cameraTrack('target', [0, 1.6, -2], [0.025, 1.6125, -2], [0.3, 1.5, -2.3]),
     cameraTrack('fov', 50, 50, 55),
   ];
   return { ...kept, environment, motion: { duration: TOTAL_SECONDS, loop: false, tracks } };
@@ -127,6 +130,19 @@ function flickerScores(frames, firstFrame, lastFrame) {
   return scores;
 }
 
+// Mean absolute difference between two videos over the frames [firstFrame, lastFrame], in 8-bit grey levels.
+function meanDifference(frames, referenceFrames, firstFrame, lastFrame) {
+  let total = 0;
+  for (let frame = firstFrame; frame <= lastFrame; frame++) {
+    const current = frames[frame];
+    const reference = referenceFrames[frame];
+    for (let pixel = 0; pixel < current.length; pixel++) {
+      total += Math.abs(current[pixel] - reference[pixel]);
+    }
+  }
+  return Number((total / ((lastFrame - firstFrame + 1) * frames[firstFrame].length)).toFixed(3));
+}
+
 function summarize(scores) {
   const mean = scores.reduce((sum, score) => sum + score, 0) / scores.length;
   return { mean: Number(mean.toFixed(3)), lowest: Number(Math.min(...scores).toFixed(3)), highest: Number(Math.max(...scores).toFixed(3)) };
@@ -145,10 +161,19 @@ const variants = [
   { name: 'plain', blend: false, jobSamples: samples },
   { name: 'reference', blend: false, jobSamples: REFERENCE_SAMPLES },
 ];
+const framesByName = {};
 for (const variant of variants) {
   const { name } = variant;
+  if (reusedNames.includes(name)) {
+    const frames = await greyFrames(join(outputDirectory, `${name}.mp4`));
+    framesByName[name] = frames;
+    report[name] = { samples: variant.jobSamples, fly: summarize(flickerScores(frames, 0, FLY_FRAMES - 1)),
+      afterCut: summarize(flickerScores(frames, FLY_FRAMES, frames.length - 1)), frameCount: frames.length, reused: true };
+    continue;
+  }
   const rendered = await renderVideo(recipe, variant);
   const frames = await greyFrames(rendered.videoPath);
+  framesByName[name] = frames;
   const fly = summarize(flickerScores(frames, 0, FLY_FRAMES - 1));
   const afterCut = summarize(flickerScores(frames, FLY_FRAMES, frames.length - 1));
   for (const frame of [FLY_FRAMES - 1, FLY_FRAMES, FLY_FRAMES + 1]) {
@@ -159,6 +184,10 @@ for (const variant of variants) {
   report[name] = { samples: variant.jobSamples, fly, afterCut, frameCount: frames.length, backend: rendered.backend, backendNote: rendered.backendNote, denoiser: rendered.denoiser,
     allLaterFramesReused: allReused, lastFrameTemporal: rendered.lastFrameTemporal, renderSeconds: rendered.renderSeconds };
   if (rendered.backend !== 'native' || !allReused) failed = true;
+}
+for (const name of ['blended', 'plain']) {
+  report[name].againstReference = { fly: meanDifference(framesByName[name], framesByName.reference, 0, FLY_FRAMES - 1),
+    afterCut: meanDifference(framesByName[name], framesByName.reference, FLY_FRAMES, framesByName[name].length - 1) };
 }
 if (!(report.blended.fly.mean < SCORE_LIMIT)) failed = true;
 await writeFile(join(outputDirectory, 'temporal-job.json'), JSON.stringify(report, null, 1));
