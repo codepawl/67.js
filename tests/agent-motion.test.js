@@ -142,33 +142,31 @@ test('invalid cubic scale and material overshoot throw without clamping or parti
       { time: 1, value: [0.5, 0.5, 0.5], inTangent: [10, 0, 0], outTangent: [0, 0, 0] },
     ] },
   ]) {
-    const sampler = compileAgentMotion(motion([track('emission', 0, 1), { ...channel, interpolation: 'CUBICSPLINE' }]), recipe);
-    const output = sampler.sample(0);
-    const before = snapshot(output);
-    assert.throws(() => sampler.sample(0.5), /positive numbers|numbers of 0 or more/);
-    assert.deepEqual(snapshot(output), before);
-    sampler.sample(1);
-    sampler.sample(0);
-    assert.deepEqual(snapshot(output), before);
+    // The cubic leaves the range between its keys, so the motion is refused when it is set, not at the first seek there.
+    assert.throws(() => compileAgentMotion(motion([track('emission', 0, 1), { ...channel, interpolation: 'CUBICSPLINE' }]), recipe),
+      /positive numbers|numbers of 0 or more/);
   }
 });
 
-test('radiance overflow, camera midpose collisions and cubic lens overshoot preserve the previous sample', () => {
+test('camera midpose collisions and cubic lens overshoot are refused when the motion is set', () => {
   const inputs = [
-    motion([track('emission', 0, 1e20), track('emissiveColor', [1e20, 1e20, 1e20], [1e20, 1e20, 1e20])]),
-    motion([track('emission', 0, 1), { kind: 'camera', property: 'eye', keyframes: [{ time: 0, value: [1, 0, 0] }, { time: 1, value: [-1, 0, 0] }] }]),
-    motion([track('emission', 0, 1), { kind: 'camera', property: 'fov', interpolation: 'CUBICSPLINE', keyframes: [
+    [motion([track('emission', 0, 1), { kind: 'camera', property: 'eye', keyframes: [{ time: 0, value: [1, 0, 0] }, { time: 1, value: [-1, 0, 0] }] }]), /distinct/],
+    [motion([track('emission', 0, 1), { kind: 'camera', property: 'fov', interpolation: 'CUBICSPLINE', keyframes: [
       { time: 0, value: 45, inTangent: 0, outTangent: 1000 },
       { time: 1, value: 45, inTangent: -1000, outTangent: 0 },
-    ] }]),
+    ] }]), /field of view/],
   ];
-  for (const input of inputs) {
-    const sampler = compileAgentMotion(input, recipe);
-    const output = sampler.sample(0);
-    const before = snapshot(output);
-    assert.throws(() => sampler.sample(0.5), /materials\.[^.]+\.emission: got|distinct|field of view/);
-    assert.deepEqual(snapshot(output), before);
+  for (const [input, message] of inputs) {
+    assert.throws(() => compileAgentMotion(input, recipe), message);
   }
+});
+
+test('radiance overflow preserves the previous sample', () => {
+  const sampler = compileAgentMotion(motion([track('emission', 0, 1e20), track('emissiveColor', [1e20, 1e20, 1e20], [1e20, 1e20, 1e20])]), recipe);
+  const output = sampler.sample(0);
+  const before = snapshot(output);
+  assert.throws(() => sampler.sample(0.5), /materials\.[^.]+\.emission: got/);
+  assert.deepEqual(snapshot(output), before);
 });
 
 test('unlit radiance uses the authored base color when emissiveColor is absent', () => {

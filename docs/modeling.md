@@ -125,7 +125,7 @@ extrudes glyph outlines. The text lies in the XY plane with its first baseline o
 through its depth. `"\n"` starts a new line 1.2 em lower. `size` is the em height. At most 256 characters and 16 lines.
 
 - The bundled font is DejaVu Sans, printable ASCII only: 94 glyphs, 20 KB of data, about 7 KB gzipped. It loads on demand
-  with the text code and is never in the core, model or mesh entries. A character outside it throws.
+  with the text code and is never in the core, model or mesh entries. A character outside it (an accent, a tab, an emoji) throws a `RangeError` that names the character and the font.
 - `registerFont(name, table)` (or `await registerAgentSceneFont(name, table)` from the agent scene entry) adds a font table:
   `{ unitsPerEm, ascender, descender, glyphs: { "A": [advance, contour...] } }` where a contour is `x, y, onCurve` repeated, in TrueType
   quadratic points. `scripts/build-font.py` makes a table from a TrueType file with fontTools. A glyph is limited to 128 points, a font

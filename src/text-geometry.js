@@ -176,9 +176,15 @@ function merged(meshes) {
   return result;
 }
 
-function lineWidth(line, font, factor) {
+function glyphRecord(font, fontName, character) {
+  const record = Object.hasOwn(font.glyphs, character) ? font.glyphs[character] : undefined;
+  if (!record) throw new RangeError(`Font ${JSON.stringify(fontName)} has no glyph for ${JSON.stringify(character)}. The bundled font covers printable ASCII only (space to ~), so use those characters.`);
+  return record;
+}
+
+function lineWidth(line, font, fontName, factor) {
   let width = 0;
-  for (const character of line) width += font.glyphs[character][0] * factor;
+  for (const character of line) width += glyphRecord(font, fontName, character)[0] * factor;
   return width;
 }
 
@@ -202,12 +208,11 @@ export function text(content, { size = 1, depth = 0.2, font: fontName = DEFAULT_
   const meshes = [];
   let vertexCount = 0;
   lines.forEach((line, lineIndex) => {
-    const width = lineWidth(line, font, factor);
+    const width = lineWidth(line, font, fontName, factor);
     let cursor = align === 'center' ? -width / 2 : align === 'right' ? -width : 0;
     const baseline = -lineIndex * LINE_HEIGHT_EMS * size;
     for (const character of line) {
-      const record = font.glyphs[character];
-      if (!record) throw new RangeError(`Font ${JSON.stringify(fontName)} has no glyph for ${JSON.stringify(character)}.`);
+      const record = glyphRecord(font, fontName, character);
       if (!cache.has(character)) cache.set(character, glyphMesh(record, font.unitsPerEm, { size, depth, curveSegments, maxVertices }));
       for (const mesh of cache.get(character)) {
         vertexCount += mesh.positions.length / 3;
