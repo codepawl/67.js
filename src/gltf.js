@@ -7,6 +7,7 @@ import { describeCompressedImage } from './compressed-texture.js';
 export { ktx2WorkerConfigFor } from './compressed-texture.js';
 import { decodeGltf, isLinePrimitive, overLimit, textureSourceIndex, throwOverruns, unusablePrimitives } from './gltf-decode.js';
 import { readPunctualLights } from './gltf-lights.js';
+import { validateDocumentReferences } from './gltf-references.js';
 import { Matrix4 } from './gltf-nodes.js';
 import { textureDescriptorInfo } from './renderer.js';
 import { createSkinPose, matrixDeterminant, updateSkinPose, validateSkinGeometry, validateSkinPose } from './skinning.js';
@@ -491,6 +492,9 @@ function validateDocument(document, limits, allowedExtensions) {
       }
     }
   }
+  // A meshopt view is decoded into its full size before any accessor reads it, even a view that no accessor uses.
+  const meshoptViewBytes = (document.bufferViews ?? []).reduce((total, view) => total + (view?.extensions?.EXT_meshopt_compression ? Number(view.byteLength) || 0 : 0), 0);
+  overLimit(overruns, 'decoded meshopt view bytes', meshoptViewBytes, 'maxDecodedBytes', limits.maxDecodedBytes);
   let decodedBytes = morphBytes;
   const components = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
   for (const accessor of document.accessors ?? []) {
@@ -1261,6 +1265,7 @@ export function createSharedTextures() {
 export async function parseGltf(data, options = {}) {
   const limits = limitsFor(options);
   const document = documentFrom(data, limits.maxBytes);
+  validateDocumentReferences(document);
   const fallbackWarnings = await applyFallbacksTo(document);
   const decoders = options.decoders ?? {};
   let resampler = null;

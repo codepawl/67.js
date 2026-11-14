@@ -8,6 +8,7 @@ export const COMPONENT_TYPES = {
   5125: Uint32Array,
   5126: Float32Array,
 };
+const SPARSE_INDEX_COMPONENT_TYPES = [5121, 5123, 5125];
 const COMPONENT_COUNTS = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
 const NORMALIZATION_DIVISORS = { 5120: 127, 5121: 255, 5122: 32767, 5123: 65535 };
 
@@ -37,6 +38,18 @@ export async function attributeFloatsInSlices(attribute, checkpoint) {
 
 function elementBytesOf(accessor) {
   return COMPONENT_TYPES[accessor.componentType].BYTES_PER_ELEMENT * COMPONENT_COUNTS[accessor.type];
+}
+
+/** The distance between elements of a buffer view: its byteStride, which must hold one element and be a multiple of 4. */
+function strideOf(view, elementBytes, viewIndex) {
+  if (!view.byteStride) return elementBytes;
+  if (!Number.isInteger(view.byteStride) || view.byteStride < elementBytes) {
+    throw new Error(`Invalid glTF bufferViews[${viewIndex}].byteStride ${view.byteStride}: an accessor element needs ${elementBytes} bytes. Fix: use a byteStride of at least ${elementBytes} that is a multiple of 4.`);
+  }
+  if (view.byteStride % 4 !== 0) {
+    throw new Error(`Invalid glTF bufferViews[${viewIndex}].byteStride ${view.byteStride}: it must be a multiple of 4. Fix: round it up to ${Math.ceil(view.byteStride / 4) * 4}.`);
+  }
+  return view.byteStride;
 }
 
 function checkElementsFit(source, offset, stride, count, elementBytes) {
@@ -111,7 +124,7 @@ export function createAccessorReader(document, bufferBytes, meshoptDecoder) {
     const ArrayType = COMPONENT_TYPES[accessor.componentType];
     if (!ArrayType) throw new Error('Unsupported glTF accessor component type.');
     const elementBytes = elementBytesOf(accessor);
-    const stride = accessor.bufferView === undefined ? 0 : document.bufferViews[accessor.bufferView].byteStride || elementBytes;
+    const stride = accessor.bufferView === undefined ? 0 : strideOf(document.bufferViews[accessor.bufferView], elementBytes, accessor.bufferView);
     return { accessor, ArrayType, itemSize: COMPONENT_COUNTS[accessor.type], elementBytes, stride };
   }
 
@@ -142,8 +155,8 @@ export function createAccessorReader(document, bufferBytes, meshoptDecoder) {
 
   function applySparse(accessor, array, itemSize) {
     const { count, indices, values } = accessor.sparse;
-    const IndexType = COMPONENT_TYPES[indices.componentType];
-    if (!IndexType) throw new Error('Unsupported sparse index component type.');
+    const IndexType = SPARSE_INDEX_COMPONENT_TYPES.includes(indices.componentType) ? COMPONENT_TYPES[indices.componentType] : null;
+    if (!IndexType) throw new Error(`Unsupported sparse index component type ${indices.componentType}. Fix: use 5121, 5123 or 5125 (unsigned byte, short or int).`);
     const indexBytes = copyElements(viewBytes(indices.bufferView), indices.byteOffset ?? 0, IndexType.BYTES_PER_ELEMENT, count, IndexType.BYTES_PER_ELEMENT);
     const sparseIndices = new IndexType(indexBytes.buffer);
     const itemBytes = array.BYTES_PER_ELEMENT * itemSize;

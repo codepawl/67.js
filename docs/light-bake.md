@@ -70,6 +70,8 @@ Skipped, with the reason in `report.skipped`: transparent parts, a material tag 
 
 GLB export writes `lightUvs` as `TEXCOORD_1` and the light map as the emissive texture on `texCoord` 1, with the base colour factor as `emissiveFactor`. glTF has no light map slot, so a base colour texture does not tint it there: the export is an approximation for viewers, not for reference renders. The path tracer ignores `lightMap` and `emissiveMap` on purpose: it traces indirect light itself, so reading a baked map would count the same light twice.
 
+Export throws a `RangeError` naming `geometry.lightUvs` when a part has a `lightMap` or a map with `uvChannel: 1` but its geometry has no `lightUvs`, because the file would point at a `TEXCOORD_1` that is not written.
+
 ## Sky visibility alone
 
 `bakeSkyVisibility(parts, lighting, options)` (or `bakeLightmaps` with `skyOnly: true`) shoots one cosine ray per sample from each texel and writes only the occlusion map of the parts that see under 98 percent of the sky. It writes no light and shades nothing, so it takes a second where a bake takes seconds to a minute, and density barely matters (0.5 and 1.5 texels per unit scored the same). On `dark-shaft` and `temple-hall` it gives about half of the improvement a full bake gives (see "Closed rooms without a bake" in `bench/reference/README.md`). The recipe does not use it: a recipe asks for a closed room's bake because `scene_inspect` reports `closed-room-without-bake`.
