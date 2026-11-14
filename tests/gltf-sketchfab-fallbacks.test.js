@@ -183,6 +183,23 @@ test('a normal map on texCoord 1 loads and reads the second UV set', async () =>
   assert.ok(parts[0].geometry.lightUvs, 'the second UV set is kept on the geometry');
 });
 
+test('a normal map on texCoord 2 is dropped with a warning and the rest of the file loads', async () => {
+  const material = { name: 'third_set', normalTexture: { index: 0, texCoord: 2 }, emissiveTexture: { index: 0 } };
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(triangleDocument(material, { withUvs: true })));
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0].material.normalMap, undefined);
+  assert.ok(parts[0].material.emissiveMap, 'the other maps are kept');
+  assert.ok(warnings.some(warning => warning.includes('normalTexture of third_set') && warning.includes('TEXCOORD_1')));
+});
+
+test('a normal map on texCoord 1 beside a primitive without TEXCOORD_1 is dropped with a warning', async () => {
+  const material = { name: 'no_second_set', normalTexture: { index: 0, texCoord: 1 }, emissiveTexture: { index: 0 } };
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(triangleDocument(material, { withUvs: true })));
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0].material.normalMap, undefined);
+  assert.ok(warnings.some(warning => warning.includes('normalTexture') && warning.includes('TEXCOORD_1')));
+});
+
 test('a texCoord of -1 drops that map with a warning and keeps the mesh', async () => {
   const material = { name: 'scissors_metal', pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: -1 } } };
   const { parts, warnings } = await withImageDecoder(() => parseGltf(triangleDocument(material, { withUvs: false })));
