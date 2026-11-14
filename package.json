@@ -166,6 +166,7 @@
     "coverage:gate": "node scripts/coverage-gate.mjs",
     "cook:build": "node node_modules/@codepawlhq/cook/build.mjs",
     "preflight": "node scripts/preflight.mjs",
+    "render:file-cook": "node scripts/render-file-native.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:scenes": "node scripts/smoke-scenes.mjs",
     "smoke:vegetation-impostors": "node scripts/smoke-vegetation-impostors.mjs",

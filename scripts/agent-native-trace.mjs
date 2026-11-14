@@ -219,7 +219,8 @@ export async function denoiseFrameWithOidn({ tracer, denoiser, width, height, co
 /**
  * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet",
  * "atrous" (the tracer's GPU filter, which is also where a missing or failing OIDN lands) or "oidn"; `denoiser` is the
- * loaded OIDN package for "oidn". `sequence` (from createNativeSequence) renders a cycles kernel frame through the job's
+ * loaded OIDN package for "oidn". The result also holds `rawLinear`, the traced colour before any filter (three floats per
+ * pixel), which equals `linear` when no filter ran. `sequence` (from createNativeSequence) renders a cycles kernel frame through the job's
  * persistent session and adds `report.nativeSession`, the route the frame took. Throws when the tracer cannot run, so the
  * caller can fall back.
  */
@@ -274,7 +275,7 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const [{ toneMapToRgba8 }, { encodePng }] = await Promise.all([import('../src/path-tracer.js'), import('../src/export-png.js')]);
   const png = encodePng(toneMapToRgba8(linear, width, height), width, height);
   report.seconds = (performance.now() - started) / 1000;
-  return { data: Buffer.from(png).toString('base64'), report };
+  return { data: Buffer.from(png).toString('base64'), report, linear, rawLinear: features.color };
 }
 
 function floatsToBase64(values) {

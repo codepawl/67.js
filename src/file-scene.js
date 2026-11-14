@@ -59,7 +59,8 @@ async function start() {
     const pose = camera ? camera.sample(seconds) : { eye: description.eye, target: description.target };
     renderer.render({ ...frame, ...pose });
   };
-  window.__scene = { renderer, duration: camera?.duration, renderAt, pause() {} };
+  // `parts` and `environment` let scripts/render-file-native.mjs pack the same scene for the native path tracer.
+  window.__scene = { renderer, duration: camera?.duration, renderAt, pause() {}, parts: reflection.parts, environment: { ...(rendererOptions.environment ?? {}), map } };
 }
 
 start().catch(error => {
