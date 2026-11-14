@@ -1,4 +1,0 @@
-- tool-total: scene_ask_user is a new tool (871 bytes) that lets a person pin points on the scene, so an agent gets a part ID and a world point instead of guessing from words; it keeps to three optional fields and its detail sits in scene_capabilities askUser.
-- scene:agent-scene: the askUser topic text in scene_capabilities (about 290 bytes gzip) tells an agent when to ask and how to apply a marked change, which keeps the tool schema small; the mark code itself loads only in the MCP preview page.
-- scene:agent-scene+lazy: the same topic text, counted again with the lazy chunks.
-- goal:agent-scene: the same topic text; the agent-facing guidance is worth the bytes.

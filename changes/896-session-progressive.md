@@ -1,1 +1,0 @@
-- A native session builds one image over several `render` calls (`accumulate`, `targetSamples`, `reset()`, `resolve()`) and applies new material values, lights and instance transforms with `update()` without a new pipeline or BLAS build (#896)

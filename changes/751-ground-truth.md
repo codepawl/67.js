@@ -1,1 +1,0 @@
-- The flicker probe has an exact ground truth: every triangle is drawn unlit as its own number and compared with a float64 ray cast, so it counts true visibility flips and not colour-test false positives (#751)

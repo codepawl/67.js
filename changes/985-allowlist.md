@@ -1,1 +1,0 @@
-- The MCP server loads third-party addons the owner allowlists at startup (`--addons`, `--allow-addon`) and recipes accept the controller and camera kinds they register (#985)

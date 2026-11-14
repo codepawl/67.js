@@ -1,5 +1,0 @@
-- entry:fog-shader: the frame picker, the sequence loader with its byte budget and the texture overwrite for the next frame load with the fog addon that draws local volumes; only a scene with grid frames runs them
-- scene:agent-scene: two lines in the `environment` getter hand the motion time to a grid sequence so the preview, the film player and the render jobs pick the same frame
-- goal:agent-scene: the same two lines; animated grids cannot follow the scene time without them, and the getter is the one place every renderer reads the moved environment from
-- scene:agent-scene+lazy: the sequence loader and frame picker load on demand with the grid resolver, so this total counts them; a scene without a grid sequence does not load them
-- entry:path-tracer: the same-channels check of a grid sequence and its error text, which says to reconvert with --sequence; a sequence with channels that differ would otherwise draw the density as flame

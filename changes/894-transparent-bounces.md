@@ -1,1 +1,0 @@
-- The Cook `cycles` kernel passes the first transparent surface at a transparent bounce limit of 0 and gives shadow rays only the transparent limit the camera path has left, both as Cycles does (#894)

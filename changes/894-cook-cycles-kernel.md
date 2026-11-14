@@ -1,1 +1,0 @@
-- `traceNative` adds a `kernel: 'cycles'` path tracer matching Blender Cycles 5.3 across Principled v2 closures, solid-angle lights, and `FORMAT-v2` scene buffers (#894)

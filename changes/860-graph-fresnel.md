@@ -1,1 +1,0 @@
-- A material graph takes a `fresnel` node as a factor of `emission` (Part of #860): the rasterizer and the CPU path tracer scale the emission by Schlick's Fresnel of the IOR per pixel, so glass-like rims glow toward grazing angles.

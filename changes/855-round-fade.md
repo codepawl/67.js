@@ -1,1 +1,0 @@
-- A box local volume with a `falloff` fades out round at its edges and corners (the distance past its core box) instead of along boxes with mitred creases, so a faded smoke has no visible box outline or corner crease; the fade along a face is unchanged, and the key gain is now 3 (#855)

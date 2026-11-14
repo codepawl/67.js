@@ -14,9 +14,14 @@
  },
  "bundles": {
   "entry:core": {
-   "min": 298900,
-   "gzip": 89865,
-   "brotli": 75576
+   "min": 303434,
+   "gzip": 91934,
+   "brotli": 79071
+  },
+  "entry:core+lazy": {
+   "min": 306135,
+   "gzip": 93179,
+   "brotli": 80158
   },
   "entry:model": {
    "min": 40093,
@@ -24,9 +29,9 @@
    "brotli": 11556
   },
   "entry:nature": {
-   "min": 55134,
-   "gzip": 19228,
-   "brotli": 16356
+   "min": 55133,
+   "gzip": 19229,
+   "brotli": 16367
   },
   "entry:motion": {
    "min": 44022,
@@ -39,14 +44,14 @@
    "brotli": 7331
   },
   "entry:gltf": {
-   "min": 164481,
-   "gzip": 53928,
-   "brotli": 46591
+   "min": 168099,
+   "gzip": 55095,
+   "brotli": 47960
   },
   "entry:gltf+lazy": {
-   "min": 219312,
-   "gzip": 71537,
-   "brotli": 62377
+   "min": 227992,
+   "gzip": 74665,
+   "brotli": 65517
   },
   "entry:modeling": {
    "min": 43613,
@@ -74,9 +79,9 @@
    "brotli": 14875
   },
   "entry:mesh": {
-   "min": 303602,
-   "gzip": 101826,
-   "brotli": 85259
+   "min": 305172,
+   "gzip": 102418,
+   "brotli": 85771
   },
   "entry:shrinkwrap": {
    "min": 56422,
@@ -84,19 +89,34 @@
    "brotli": 15130
   },
   "entry:surface-attachment": {
-   "min": 41964,
-   "gzip": 13319,
-   "brotli": 11079
+   "min": 42282,
+   "gzip": 13430,
+   "brotli": 11160
   },
   "entry:physics": {
-   "min": 59583,
-   "gzip": 19357,
-   "brotli": 16560
+   "min": 62229,
+   "gzip": 20428,
+   "brotli": 17502
+  },
+  "entry:physics+lazy": {
+   "min": 71325,
+   "gzip": 24467,
+   "brotli": 21147
+  },
+  "entry:settle": {
+   "min": 70851,
+   "gzip": 23442,
+   "brotli": 20173
+  },
+  "entry:settle+lazy": {
+   "min": 79947,
+   "gzip": 27481,
+   "brotli": 23818
   },
   "entry:spume": {
-   "min": 36146,
-   "gzip": 12848,
-   "brotli": 10839
+   "min": 36194,
+   "gzip": 12855,
+   "brotli": 10829
   },
   "entry:retarget": {
    "min": 56211,
@@ -104,14 +124,14 @@
    "brotli": 16498
   },
   "entry:crowd-skinning": {
-   "min": 67790,
-   "gzip": 20869,
-   "brotli": 17929
+   "min": 69820,
+   "gzip": 21386,
+   "brotli": 18403
   },
   "entry:skeleton-pose": {
-   "min": 75494,
-   "gzip": 25103,
-   "brotli": 21693
+   "min": 75822,
+   "gzip": 25209,
+   "brotli": 21846
   },
   "entry:vehicle": {
    "min": 47322,
@@ -119,14 +139,14 @@
    "brotli": 13938
   },
   "entry:vegetation": {
-   "min": 85504,
-   "gzip": 30378,
-   "brotli": 25988
+   "min": 85511,
+   "gzip": 30386,
+   "brotli": 26015
   },
   "entry:terrain": {
-   "min": 29684,
-   "gzip": 10931,
-   "brotli": 9815
+   "min": 29683,
+   "gzip": 10932,
+   "brotli": 9829
   },
   "entry:heightfield": {
    "min": 2951,
@@ -134,9 +154,9 @@
    "brotli": 1232
   },
   "entry:export-mesh": {
-   "min": 5598,
-   "gzip": 2488,
-   "brotli": 2238
+   "min": 5610,
+   "gzip": 2490,
+   "brotli": 2240
   },
   "entry:navmesh": {
    "min": 7470,
@@ -144,69 +164,69 @@
    "brotli": 3041
   },
   "entry:grass": {
-   "min": 28186,
-   "gzip": 10277,
-   "brotli": 9248
+   "min": 28185,
+   "gzip": 10279,
+   "brotli": 9275
   },
   "entry:clutter": {
-   "min": 30802,
+   "min": 30801,
    "gzip": 11229,
-   "brotli": 10114
+   "brotli": 10086
   },
   "entry:light-bake": {
-   "min": 81291,
-   "gzip": 29631,
-   "brotli": 26233
+   "min": 81534,
+   "gzip": 29797,
+   "brotli": 26255
   },
   "entry:light-bake-gpu": {
-   "min": 100847,
-   "gzip": 36536,
-   "brotli": 32023
+   "min": 118432,
+   "gzip": 42412,
+   "brotli": 37090
   },
   "entry:light-bake-gpu+lazy": {
-   "min": 260770,
-   "gzip": 81979,
-   "brotli": 71757
+   "min": 283066,
+   "gzip": 89435,
+   "brotli": 78164
   },
   "entry:ground-bounce": {
-   "min": 37266,
-   "gzip": 13194,
-   "brotli": 11969
+   "min": 37273,
+   "gzip": 13196,
+   "brotli": 11956
   },
   "entry:floor-sky-visibility": {
-   "min": 48876,
-   "gzip": 18251,
-   "brotli": 16434
+   "min": 48883,
+   "gzip": 18271,
+   "brotli": 16357
   },
   "entry:path-tracer": {
-   "min": 68361,
-   "gzip": 26703,
-   "brotli": 23683
+   "min": 93688,
+   "gzip": 35231,
+   "brotli": 31097
   },
   "entry:path-tracer+lazy": {
-   "min": 224300,
-   "gzip": 70476,
-   "brotli": 62046
+   "min": 254338,
+   "gzip": 80581,
+   "brotli": 70769
   },
   "entry:path-tracer-progressive": {
-   "min": 110634,
-   "gzip": 36007,
-   "brotli": 31833
+   "min": 130709,
+   "gzip": 42558,
+   "brotli": 37590
   },
   "entry:path-tracer-progressive+lazy": {
-   "min": 195110,
-   "gzip": 59113,
-   "brotli": 52044
+   "min": 219334,
+   "gzip": 67040,
+   "brotli": 58893
   },
   "entry:path-tracer-realtime": {
-   "min": 125490,
-   "gzip": 40485,
-   "brotli": 35995
+   "min": 145486,
+   "gzip": 46988,
+   "brotli": 41813
   },
   "entry:path-tracer-realtime+lazy": {
-   "min": 239601,
-   "gzip": 73115,
-   "brotli": 64721
+   "min": 263752,
+   "gzip": 80992,
+   "brotli": 71635
   },
   "entry:texture-set": {
    "min": 1837,
@@ -214,79 +234,79 @@
    "brotli": 762
   },
   "entry:agent-scene": {
-   "min": 235952,
-   "gzip": 83694,
-   "brotli": 73765
+   "min": 244810,
+   "gzip": 87216,
+   "brotli": 76828
   },
   "entry:agent-scene+lazy": {
-   "min": 1309019,
-   "gzip": 474160,
-   "brotli": 420789
+   "min": 1443012,
+   "gzip": 525143,
+   "brotli": 467238
   },
   "entry:agent-asset": {
-   "min": 391591,
-   "gzip": 136591,
-   "brotli": 119909
+   "min": 401803,
+   "gzip": 141219,
+   "brotli": 124347
   },
   "entry:agent-asset+lazy": {
-   "min": 1353576,
-   "gzip": 489043,
-   "brotli": 432954
+   "min": 1479868,
+   "gzip": 537348,
+   "brotli": 477152
   },
   "entry:hdri": {
    "min": 19740,
    "gzip": 6797,
-   "brotli": 6113
+   "brotli": 6092
   },
   "entry:camera-effects": {
-   "min": 25643,
-   "gzip": 9032,
-   "brotli": 7347
+   "min": 25669,
+   "gzip": 9029,
+   "brotli": 7334
   },
   "entry:water-reflection": {
-   "min": 38761,
-   "gzip": 13564,
-   "brotli": 12266
+   "min": 38768,
+   "gzip": 13566,
+   "brotli": 12279
   },
   "entry:render-passes": {
-   "min": 30463,
-   "gzip": 10810,
-   "brotli": 8953
+   "min": 30598,
+   "gzip": 10852,
+   "brotli": 9001
   },
   "entry:user-pass": {
-   "min": 19985,
-   "gzip": 8277,
-   "brotli": 7385
+   "min": 22388,
+   "gzip": 9088,
+   "brotli": 8113
   },
   "entry:line-art": {
-   "min": 53582,
-   "gzip": 15679,
-   "brotli": 14077
+   "min": 55616,
+   "gzip": 16212,
+   "brotli": 14467
   },
   "entry:mesh-blend": {
    "min": 12261,
    "gzip": 4553,
-   "brotli": 4140
+   "brotli": 4137
   },
   "entry:coplanar-overlap": {
-   "min": 28131,
-   "gzip": 11576,
-   "brotli": 10327
+   "min": 28353,
+   "gzip": 11642,
+   "brotli": 10384
   },
   "entry:reversed-depth": {
-   "min": 23453,
-   "gzip": 8248,
-   "brotli": 6628
+   "min": 23479,
+   "gzip": 8245,
+   "brotli": 6609
   },
   "entry:material-layer-shaders": {
-   "min": 11423,
-   "gzip": 3383,
-   "brotli": 3098
+   "min": 11822,
+   "gzip": 3473,
+   "brotli": 3187
   },
   "entry:view-transform-shader": {
    "min": 5251,
    "gzip": 2463,
-   "brotli": 2188
+   "brotli": 2187
   },
   "entry:view-transform": {
    "min": 3715,
@@ -294,14 +314,14 @@
    "brotli": 1739
   },
   "entry:liquid-shader": {
-   "min": 11703,
-   "gzip": 4207,
-   "brotli": 3802
+   "min": 11751,
+   "gzip": 4217,
+   "brotli": 3831
   },
   "entry:world-material-shader": {
-   "min": 19407,
-   "gzip": 6485,
-   "brotli": 5806
+   "min": 19406,
+   "gzip": 6484,
+   "brotli": 5804
   },
   "entry:splat-shader": {
    "min": 22719,
@@ -311,27 +331,27 @@
   "entry:subsurface-shader": {
    "min": 3871,
    "gzip": 1617,
-   "brotli": 1466
+   "brotli": 1467
   },
   "entry:fog-shader": {
-   "min": 38899,
-   "gzip": 11356,
-   "brotli": 10247
+   "min": 55506,
+   "gzip": 15991,
+   "brotli": 14408
   },
   "entry:light-linking": {
-   "min": 2503,
-   "gzip": 1117,
-   "brotli": 1007
+   "min": 2539,
+   "gzip": 1133,
+   "brotli": 1019
   },
   "entry:cascaded-shadows": {
    "min": 33377,
    "gzip": 11024,
-   "brotli": 9083
+   "brotli": 9121
   },
   "entry:light-shapes": {
    "min": 7782,
-   "gzip": 3269,
-   "brotli": 2967
+   "gzip": 3270,
+   "brotli": 2969
   },
   "entry:compact-color": {
    "min": 1430,
@@ -339,44 +359,54 @@
    "brotli": 563
   },
   "entry:gaussian-splats": {
-   "min": 31342,
-   "gzip": 11304,
-   "brotli": 9392
+   "min": 31374,
+   "gzip": 11306,
+   "brotli": 9423
   },
   "entry:replace-textured-parts": {
-   "min": 51338,
-   "gzip": 14486,
-   "brotli": 12889
+   "min": 54072,
+   "gzip": 15368,
+   "brotli": 13627
+  },
+  "entry:replace-textured-parts+lazy": {
+   "min": 56773,
+   "gzip": 16612,
+   "brotli": 14714
   },
   "entry:texture-update": {
-   "min": 53129,
-   "gzip": 15073,
-   "brotli": 13419
+   "min": 55852,
+   "gzip": 16048,
+   "brotli": 14193
+  },
+  "entry:texture-update+lazy": {
+   "min": 58553,
+   "gzip": 17293,
+   "brotli": 15279
   },
   "entry:cloth": {
-   "min": 16463,
-   "gzip": 6779,
-   "brotli": 6026
+   "min": 20666,
+   "gzip": 8547,
+   "brotli": 7530
   },
   "entry:runtime": {
-   "min": 6793,
-   "gzip": 2657,
-   "brotli": 2372
+   "min": 6799,
+   "gzip": 2660,
+   "brotli": 2387
   },
   "entry:streaming": {
    "min": 11373,
-   "gzip": 4364,
-   "brotli": 3938
+   "gzip": 4362,
+   "brotli": 3933
   },
   "entry:streaming+lazy": {
-   "min": 230579,
-   "gzip": 75781,
-   "brotli": 66224
+   "min": 239259,
+   "gzip": 78884,
+   "brotli": 69390
   },
   "entry:netcode": {
-   "min": 21666,
-   "gzip": 6949,
-   "brotli": 6322
+   "min": 23825,
+   "gzip": 7446,
+   "brotli": 6770
   },
   "entry:input": {
    "min": 15165,
@@ -384,14 +414,19 @@
    "brotli": 4768
   },
   "entry:physics-runtime": {
-   "min": 63679,
-   "gzip": 20644,
-   "brotli": 17754
+   "min": 65915,
+   "gzip": 21521,
+   "brotli": 18548
+  },
+  "entry:physics-runtime+lazy": {
+   "min": 75011,
+   "gzip": 25560,
+   "brotli": 22193
   },
   "entry:physics-jolt": {
-   "min": 10751,
-   "gzip": 4569,
-   "brotli": 4136
+   "min": 10790,
+   "gzip": 4590,
+   "brotli": 4172
   },
   "entry:audio": {
    "min": 14833,
@@ -404,9 +439,9 @@
    "brotli": 12274
   },
   "entry:player": {
-   "min": 19873,
-   "gzip": 6513,
-   "brotli": 5869
+   "min": 22042,
+   "gzip": 7154,
+   "brotli": 6425
   },
   "entry:game-rules": {
    "min": 12108,
@@ -414,14 +449,14 @@
    "brotli": 4100
   },
   "entry:game": {
-   "min": 570312,
-   "gzip": 194122,
-   "brotli": 169931
+   "min": 594781,
+   "gzip": 203053,
+   "brotli": 178569
   },
   "entry:game+lazy": {
-   "min": 1473038,
-   "gzip": 524748,
-   "brotli": 464130
+   "min": 1771292,
+   "gzip": 634958,
+   "brotli": 563983
   },
   "entry:update-part-vertices": {
    "min": 1254,
@@ -429,29 +464,34 @@
    "brotli": 609
   },
   "scene:lit-box": {
-   "min": 203079,
-   "gzip": 58588,
-   "brotli": 49906
+   "min": 206994,
+   "gzip": 60017,
+   "brotli": 51126
+  },
+  "scene:lit-box+lazy": {
+   "min": 209695,
+   "gzip": 61262,
+   "brotli": 52213
   },
   "scene:gltf-box": {
-   "min": 294872,
-   "gzip": 90128,
-   "brotli": 77192
+   "min": 299609,
+   "gzip": 92245,
+   "brotli": 79886
   },
   "scene:gltf-box+lazy": {
-   "min": 349703,
-   "gzip": 107737,
-   "brotli": 92974
+   "min": 359502,
+   "gzip": 111812,
+   "brotli": 97439
   },
   "scene:agent-scene": {
-   "min": 390216,
-   "gzip": 127567,
-   "brotli": 111275
+   "min": 402505,
+   "gzip": 132802,
+   "brotli": 116588
   },
   "scene:agent-scene+lazy": {
-   "min": 1423770,
-   "gzip": 506670,
-   "brotli": 448058
+   "min": 1562207,
+   "gzip": 560275,
+   "brotli": 497555
   }
  }
 }

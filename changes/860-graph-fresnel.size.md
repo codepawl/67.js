@@ -1,7 +1,0 @@
-- entry:material-layer-shaders: the emissionFresnel shader code (Schlick's curve per pixel, 90 bytes gzip) is what makes a fresnel emission render at the view angle instead of flat
-- scene:gltf-box+lazy: the shared layer state gained one slot (emissionFresnel) and the shader gained an emission hook, which every renderer bundle carries
-- scene:agent-scene: the fresnel node check, the emission split and the capabilities text (about 200 bytes gzip) are the recipe boundary for the new node
-- scene:agent-scene+lazy: the graph compiler change and the shared Schlick function, in the lazy chunks that bake and render a graph
-- goal:lit-box: 51 bytes gzip for the emission hook and the layer uniform, which the rasterizer needs to evaluate fresnel per pixel; the shader code itself loads only for a scene that uses it
-- goal:gltf-box: 57 bytes gzip for the same emission hook and layer uniform
-- goal:agent-scene: 204 bytes gzip for the fresnel node and its error messages, the first view-dependent graph input

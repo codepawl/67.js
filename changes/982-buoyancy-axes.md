@@ -1,1 +1,0 @@
-- Bodies that float now sample the ocean waves on the same horizontal axes as the drawn `ocean` mesh edit, so a hull rides the wave it sits on and not its mirror (#982)

@@ -1,1 +1,0 @@
-- The `build-67js-scene` skill now says what the flush pass leaves for the agent: no hand offsets or `decal` for near-flush faces, and a `rank-overflow` diagnostic means remove the duplicate faces (#751).
