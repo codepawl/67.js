@@ -1,5 +1,11 @@
 # Film and animation: motion tracks, shots, timeline
 
+<!-- skill-navigation:start -->
+This is the [Film and animation: motion tracks, shots, timeline](#film-and-animation-motion-tracks-shots-timeline) reference. Read [Motion record](#motion-record) before any track.
+Then read what the film needs: [Animated lights, sun, sky and effects](#animated-lights-sun-sky-and-effects), [Shots and cuts](#shots-and-cuts) or
+[Character and imported motion](#character-and-imported-motion). Read [Before a film goes out](#before-a-film-goes-out) completely before the first export.
+<!-- skill-navigation:end -->
+
 Calls follow the conventions in `look.md`. `tests/skill-examples.test.js` applies every block, so they stay valid.
 Everything here is deterministic: a seek to a time gives the same pixels as playing to it. Export is the
 `render-crucible-media` skill.

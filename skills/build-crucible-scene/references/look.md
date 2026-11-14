@@ -1,5 +1,12 @@
 # Look: sky, HDRI, color look, fog, effects
 
+<!-- skill-navigation:start -->
+This is the [Look: sky, HDRI, color look, fog, effects](#look-sky-hdri-color-look-fog-effects) reference. Its opening paragraph holds the call conventions every
+other reference here uses. Then read the task's section: [Pick a light setup](#pick-a-light-setup), [HDRI from the catalog](#hdri-from-the-catalog),
+[Color look and tone mapping](#color-look-and-tone-mapping), [Fog](#fog), [Exposure, bloom, contrast, occlusion](#exposure-bloom-contrast-occlusion) or
+[Outlines and toon light](#outlines-and-toon-light).
+<!-- skill-navigation:end -->
+
 Each recipe is one tool call. `expectedRevision` is the revision you last read from the previous result, and `sessionId`
 may be left out. Look edits merge: omitted fields keep their value, vectors replace, `pointLights` replaces the whole list.
 Field ranges are in `scene_capabilities`. A bad value fails the whole batch and keeps the old revision.

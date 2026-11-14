@@ -1,8 +1,16 @@
 # Render job settings
 
+<!-- skill-navigation:start -->
+This is the [Render job settings](#render-job-settings) reference. Read the opening paragraph, then only the section for the job:
+[One PNG](#one-png), [Eight stills](#eight-stills), [MP4 of recipe motion](#mp4-of-recipe-motion), [Shots, cuts and sound](#shots-cuts-and-sound),
+[Encoder](#encoder), [Render passes](#render-passes), [Compositing output: alpha, 16-bit, EXR, region, 60 fps](#compositing-output-alpha-16-bit-exr-region-60-fps),
+[Path traced still](#path-traced-still) (also traced video) and [Imported character clips](#imported-character-clips).
+<!-- skill-navigation:end -->
+
 Every recipe is the arguments of `scene_render_submit`. `sessionId` may be left out. `expectedRevision` is the
 revision `scene_inspect` returned. Required in `settings`: `kind` (`image`, `stills` or `video`), `width`, `height`
-(64 to 1920 each; video sizes must be even). Defaults: 24 fps and one second.
+(64 to 1920 each and at most 1920x1080 pixels together, so 1080x1920 fits and 1920x1920 fails; video sizes must be
+even). Defaults: 24 fps and one second.
 `tests/render-skill-examples.test.js` checks that these blocks stay valid JSON with known settings fields.
 
 ## One PNG
@@ -65,7 +73,8 @@ fails the job and does not fall back, so choose `cpu` unless you know the machin
 
 ## Render passes
 
-`image` and `stills` jobs take `passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao` and `mist` (lighting terms: use `exr` for them). Each frame
+`image` and `stills` jobs take `passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao` and `mist` (lighting terms: use `exr` for them).
+More names exist (`position`, `velocity`, `uv`, `transmission`, `volume`, `environment`, `cryptomatte`, `aov`, `wireframe`); `scene_capabilities` lists them all. Each frame
 also writes one raw PNG per pass at the lit image's size, with no grading, bloom, depth of field or antialiasing.
 
 ```json
@@ -92,13 +101,16 @@ Four optional settings, off unless set, so defaults write the same bytes as befo
   in `exr`; object IDs are a gray 16-bit PNG (up to 65535 objects) or float channel `id`.
 - `region: { x, y, width, height }` (pixels from the top left, each side 16 or more; even sides for video): the frame is
   rendered whole and cropped, so the look matches the full frame.
+- `multilayer: true` (with `format: "exr"` and `passes`): one EXR per frame holds the lit image and every pass.
 - `fps` up to 60 for video, inside 900 frames.
 - The path tracer refuses transparent, format and region; H.264 refuses transparent and format.
 
 ## Path traced still
 
-Offline Cook path tracing: glass refraction, soft multi-bounce light, subsurface, many lights. Slow and bounded, for
-stills. Read `scene_capabilities` (`pathTracer`) for limits and what it skips.
+Offline Cook path tracing: glass refraction, soft multi-bounce light, subsurface, many lights. Slow and bounded. Judge
+a still first; `stills` and `video` jobs take the same `renderer`, each frame may run for `maxSeconds` and the whole job
+stops at 30 minutes, so keep a traced video short and small. It writes no passes. Read `scene_capabilities`
+(`pathTracer`) for limits and what it skips.
 
 ```json
 { "expectedRevision": 3, "settings": {
@@ -109,7 +121,8 @@ stills. Read `scene_capabilities` (`pathTracer`) for limits and what it skips.
 
 `backend` is `cpu` (default, reproducible), `gpu` (needs a server started with `--backend gpu`) or `native`
 (hardware ray queries; it falls back to `gpu` or `cpu` and `metrics.pathTracer.backendNote` says why). Start with 16
-samples to judge the light, then raise them.
+samples to judge the light, then raise them. Ranges: `samples` 1 to 1024, `bounces` 1 to 16, `maxSeconds` 1 to 600.
+`denoise` is `true` (the built-in filter), `false`, or `"oidn"` where the server has that optional package.
 
 ## Imported character clips
 
