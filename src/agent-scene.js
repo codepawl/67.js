@@ -496,6 +496,8 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
+    // Terrain checks its own numbers (a whole resolution from 2 to 256), so its message names the real range.
+    if (value.type === 'terrain' && ['size', 'resolution', 'amplitude'].includes(field)) continue;
     if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'order', 'knots', 'knotMode', 'trim', 'grow', 'root', 'source', 'impact'].includes(field)) {
       finite(value[field], field);
     }
@@ -1456,6 +1458,11 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     return records;
   }
 
+  function geometryBudgetError({ residentStats, pendingVertices }, plans, budget, heldCheckpoints) {
+    const largest = plans.filter(plan => !plan.existing).sort((first, second) => second.estimatedVertices - first.estimatedVertices)[0];
+    return new RangeError(`Geometry preflight needs ${residentStats.vertices + pendingVertices} vertices (max ${budget.maxVertices}) and ${residentStats.geometryBytes + pendingVertices * 56} bytes (max ${budget.maxGeometryBytes}); largest new geometry "${largest?.definition.id}" has ${largest?.estimatedVertices}. Reduce detail${heldCheckpoints ? ' or release checkpoints' : ''}.`);
+  }
+
   function stage(inputRecipe, preferred = null, removedNodes = new Set(), removedMaterials = new Set()) {
     releasedRevisionCount = 0;
     const recipe = normalizeRecipe(inputRecipe, limits);
@@ -1500,7 +1507,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     let { residentStats } = planned;
     const { plans, pendingVertices } = planned;
     if (planned.overBudget) {
-      throw new RangeError('Geometry preflight exceeds peak maxVertices or maxGeometryBytes across active, checkpoint and staged resources. Reduce detail or release checkpoints');
+      throw geometryBudgetError(planned, plans, limits, checkpoints.size);
     }
 
     // Validate references, hierarchy and matrix arithmetic before generating any new resource.
