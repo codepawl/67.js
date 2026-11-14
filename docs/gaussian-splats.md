@@ -23,6 +23,25 @@ One format: the standard 3DGS PLY that the original training code and most tools
 
 A file over `maximumBytes` (default 512 MiB), or one whose header names more than `maximumCount` splats (default 2,000,000, never above 4,000,000), throws a `RangeError` before any splat is read. A file that is not a PLY, is ASCII, lacks a property or is truncated throws an `Error` that names the problem. `createGaussianSplats` applies the count limit again.
 
+## Loading without freezing the page
+
+`parseGaussianSplatPly` and `createGaussianSplats` run to the end in one go: about 280 ms of blocked main thread for 1,000,000 splats, seconds for 2,000,000 on a slow machine. For a page that must keep drawing, use the async twins. They return exactly the same bytes, working in slices and waiting one macrotask (no worker needed) between slices.
+
+```js
+import { createGaussianSplatsAsync, parseGaussianSplatPlyAsync } from 'crucible/addons/gaussian-splats';
+
+const controller = new AbortController(); // controller.abort() from a cancel button
+const options = { chunkSize: 32768, signal: controller.signal, onProgress: fraction => { bar.value = fraction; } };
+const data = await parseGaussianSplatPlyAsync(bytes, { ...options, maximumCount: 1_000_000 });
+const splats = await createGaussianSplatsAsync(data, options);
+```
+
+- `onProgress(fraction)` is called after each slice with a rising fraction that ends at exactly 1. Each step reports its own 0 to 1, so map them to the parts of one bar yourself.
+- `chunkSize` is the number of splats per slice (default 32768, a few milliseconds). It must be a positive whole number.
+- An aborted `signal` stops at the next slice and rejects with an `Error` named `AbortError`. A signal that is already aborted rejects before any work.
+- The header checks, size limits and count limit run first and reject exactly as in the sync functions. `createGaussianSplatsAsync` takes `matrix` and `maximumCount` too.
+- Measured with `node bench/gaussian-splats/async-block.mjs` on 1,000,000 generated splats: the longest block drops from about 275 ms to about 22 ms, and the total time is the same (about 255 ms). The sort order buffers `createGaussianSplatsAsync` allocates at the end are not sliced.
+
 ## What it draws
 
 - Each splat is a screen-space quad shaped by its 3D covariance, projected through the camera as in the original paper. Colour is the stored colour, as 3DGS viewers show it, not converted from sRGB. The opacity falls off as a Gaussian toward the quad edge.
