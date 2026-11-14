@@ -79,11 +79,15 @@ A texture bake introduces a separate asset pipeline and cannot preserve the same
 ## Textures
 
 `material.map`, `normalMap`, `metallicRoughnessMap`, `occlusionMap` and `emissiveMap` are renderer texture descriptors: `{ image, wrapS, wrapT, minFilter, magFilter, flipY }`.
-Each distinct image is written once as an embedded PNG, as RGB when it has no transparent texel, and samplers and textures are shared between channels.
+Each distinct image is written once, and samplers and textures are shared between channels.
+An image that `loadGltf` or `parseGltf` decoded from a JPEG, PNG or WebP file, and that was not scaled to fit `maxTexturePixels`, is written with its source bytes and MIME type, so an imported asset exports at about the size it came in at (a WebP image goes out through `EXT_texture_webp`, marked required).
+Every other image (a pattern bake, a copy, an `{ width, height, data }` image, a texture with `flipY: true`, a scaled one) is written as an embedded PNG, as RGB when it has no transparent texel.
+A KTX2 image still has to be transcoded to RGBA8 to export.
+`maxTextureSize` applies to both.
 `normalScale[0]` and `occlusionStrength` are written with their textures.
 `image` is `{ width, height, data }` with RGBA8 data, or a browser image, bitmap or canvas, which is read back through a canvas.
 Rows are reversed for `flipY: true`.
-The PNG is stored without compression so the export stays synchronous: a 2048 px RGBA map is about 16 MB.
+A PNG the export writes itself is stored without compression so the export stays synchronous: a 2048 px RGBA map is about 16 MB.
 
 Geometry with textures needs `uvs`.
 Without them the export fails and names `uv_unwrap` (a mesh stack node) or `geometry.uvs`.
