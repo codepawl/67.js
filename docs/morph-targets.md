@@ -3,7 +3,7 @@
 The source renderer blends relative position and normal targets on the GPU before skinning.
 Color, benchmark and shadow passes share the same target texture and committed weights.
 Available from version `0.4.0`. The source [glTF bridge](gltf-morph.md) imports relative targets and weight animations.
-The core module exports `createMorphPose` and `MAX_MORPH_TARGETS` without adding a dependency.
+The core module exports `createMorphPose`, `MAX_MORPH_TARGETS` and `MAX_STORED_MORPH_TARGETS` without adding a dependency.
 
 Each morph target contains mesh-local changes from the base geometry.
 Position and normal channels use XYZ triples, independently of material color.
@@ -36,7 +36,7 @@ validateMorphPose(pose, metadata); // Validation does not change any weights or 
 
 ## Geometry and pose contract
 
-`geometry.morphTargets` contains between one and `MAX_MORPH_TARGETS`, which is `64`.
+`geometry.morphTargets` contains between one and `MAX_STORED_MORPH_TARGETS`, which is `256`. A draw applies at most `MAX_MORPH_TARGETS` (`64`) of them: with more than 64 stored, it applies the 64 nonzero weights that are largest in magnitude (the lower target wins a tie), so a face rig with 175 blendshapes loads and only drops targets when over 64 are active at once.
 Each target accepts only optional `positions` and `normals` fields, with at least one channel present.
 Every present channel must be a `Float32Array` containing three finite values per base vertex.
 A missing channel contributes zero changes.
@@ -100,7 +100,7 @@ Missing channels and unused texture padding contain zero.
 Even widths keep the two texels together across rows.
 Packing rejects insufficient capacity, inconsistent byte counts and allocations exceeding `2 ** 31 - 1` bytes.
 The renderer still needs an explicit texture memory budget before allocation.
-Its shader can use a bounded loop of 64 targets and skip zero weights.
+Its shader loops over at most 64 slots, each a target index and a weight, and skips zero weights.
 
 ## Design choice and verification
 

@@ -106,6 +106,27 @@ test('main and shadow draws upload the retained morph weights and disable morphs
   assert.deepEqual(uploads.at(-1), ['shadow enabled', 0]);
 });
 
+test('a batch with more than 64 targets uploads its 64 largest weights with their target indices', () => {
+  const renderer = Object.create(Renderer67.prototype);
+  renderer.hasMorphs = true;
+  renderer.benchmark = true;
+  renderer.uniforms = { morphEnabled: 'enabled', morphVertexCount: 'vertices', morphTargetCount: 'count', 'morphWeights[0]': 'weights', 'morphSlotTargets[0]': 'targets' };
+  const uploads = {};
+  renderer.context = {
+    TEXTURE0: 33984, activeTexture() {}, bindTexture() {}, bindVertexArray() {}, drawElementsInstanced() {},
+    uniform1f() {}, uniform1i(name, value) { uploads[name] = value; }, uniform1fv(name, values) { uploads[name] = [...values]; },
+  };
+  const morphWeights = new Float32Array(175);
+  morphWeights[170] = 0.25;
+  morphWeights[7] = 1;
+  const batch = { morph: {}, morphTexture: { info: { vertexCount: 3, targetCount: 175 }, texture: {} }, morphWeights };
+  renderer.drawBatch(batch, true);
+  assert.equal(uploads.count, 2);
+  assert.deepEqual(uploads.targets.slice(0, 2), [7, 170]);
+  assert.deepEqual(uploads.weights.slice(0, 2), [1, 0.25]);
+  assert.equal(uploads.weights.length, 64);
+});
+
 test('world scale overflow and shared unsent consumer transforms reject before publishing morph weights', () => {
   const geometry = makeGeometry(2e38);
   const pose = createMorphPose(1);

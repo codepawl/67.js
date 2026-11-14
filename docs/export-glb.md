@@ -34,7 +34,7 @@ const binary = exportGlb([part]);
 | `geometry.indices` | Unsigned integer `SCALAR` | Nonempty `Uint32Array` of triangles with valid vertex indices. |
 | `geometry.colors` | `COLOR_0`, Float32 `VEC3` | Optional opaque linear RGB multipliers within `[0,1]`. |
 | `geometry.uvs` | `TEXCOORD_0`, Float32 `VEC2` | Optional finite coordinates, including values outside `[0,1]`. |
-| `geometry.morphTargets` | Relative `POSITION` and `NORMAL` accessors | One to 64 targets with matching Float32 channel counts. |
+| `geometry.morphTargets` | Relative `POSITION` and `NORMAL` accessors | One to 256 targets with matching Float32 channel counts. |
 | `part.morph.weights` | Independent `node.weights` | Current finite signed Float32 weights. |
 
 Every vertex channel must match the position count.

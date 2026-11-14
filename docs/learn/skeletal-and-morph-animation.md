@@ -116,7 +116,7 @@ The glTF addon imports supported skins and relative targets, including joint and
 | --- | --- | --- |
 | `skinIndices` | geometry | `Uint16Array`, four joint indices per vertex; indices must be valid even when their weight is 0. |
 | `skinWeights` | geometry | `Float32Array`, four finite weights in 0 to 1 per vertex, total above 0. The renderer normalizes a copy. |
-| `morphTargets` | geometry | 1 to 64 (`MAX_MORPH_TARGETS`) targets, each with `positions` and/or `normals` as `Float32Array` XYZ deltas per vertex. |
+| `morphTargets` | geometry | 1 to 256 (`MAX_STORED_MORPH_TARGETS`) targets, each with `positions` and/or `normals` as `Float32Array` XYZ deltas per vertex. |
 | `skin`, `morph` | part | The retained poses from `createSkinPose` and `createMorphPose`. |
 
 Joint matrices must be finite, affine and nonsingular. Weights can be negative or above one.

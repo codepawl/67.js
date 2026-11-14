@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BufferGeometry, Float32BufferAttribute, Mesh, Vector3 } from 'three';
-import { MAX_MORPH_TARGETS, createMorphPose, validateMorphGeometry, validateMorphPose, packMorphTargets } from '../src/morph.js';
+import { MAX_MORPH_TARGETS, MAX_STORED_MORPH_TARGETS, selectMorphSlots, createMorphPose, validateMorphGeometry, validateMorphPose, packMorphTargets } from '../src/morph.js';
 import { skinTextureLayout } from '../src/skinning.js';
 
 function triangle() {
@@ -127,9 +127,11 @@ test('Float32 accumulation guards aggregate overflow even when every target prod
 });
 
 test('malformed channels, poses, target counts and unsafe base normals reject before packing', () => {
-  for (const count of [0, 65, 1.5, NaN, Infinity]) assert.throws(() => createMorphPose(count), /count/);
+  for (const count of [0, 257, 1.5, NaN, Infinity]) assert.throws(() => createMorphPose(count), /count/);
   assert.equal(MAX_MORPH_TARGETS, 64);
+  assert.equal(MAX_STORED_MORPH_TARGETS, 256);
   assert.equal(createMorphPose(64).weights.length, 64);
+  assert.equal(createMorphPose(256).weights.length, 256);
   assert.equal(validateMorphGeometry({}, undefined), undefined);
   assert.throws(() => validateMorphGeometry(triangle(), null), /pose/);
   for (const targets of [[], new Array(65).fill({}), [{}], [{ position: new Float32Array(9) }], [null]]) {
@@ -161,4 +163,21 @@ test('all 64 targets pack within explicit texture capacity and invalid layouts f
   for (const layout of [null, {}, { width: 3, height: 128 }, { width: 2, height: 1 }, { width: 32, height: 12, bytes: 1 }, { width: 2 ** 30, height: 2 ** 30 }]) {
     assert.throws(() => packMorphTargets(geometry, layout), /layout/);
   }
+});
+
+test('above 64 targets a draw applies the 64 largest nonzero weights', () => {
+  const slotTargets = new Float32Array(64);
+  const slotWeights = new Float32Array(64);
+  const rig = new Float32Array(175);
+  rig[170] = 0.5;
+  rig[3] = -0.9;
+  rig[100] = 0.5;
+  assert.equal(selectMorphSlots(rig, slotTargets, slotWeights), 3);
+  assert.deepEqual([...slotTargets.subarray(0, 3)], [3, 100, 170], 'largest magnitude first, lower target wins a tie');
+  assert.deepEqual([...slotWeights.subarray(0, 3)].map(weight => Math.fround(weight)), [Math.fround(-0.9), 0.5, 0.5]);
+
+  const crowded = Float32Array.from({ length: 175 }, (_, index) => (index + 1) / 200);
+  assert.equal(selectMorphSlots(crowded, slotTargets, slotWeights), 64);
+  assert.equal(slotTargets[0], 174);
+  assert.equal(slotTargets[63], 111, 'the 64 largest weights are targets 111 to 174');
 });

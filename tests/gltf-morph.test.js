@@ -276,7 +276,7 @@ test('clip switches restore untracked instance defaults before later weight seek
   asset.dispose();
 });
 
-test('exactly 64 targets import and larger counts reject explicitly', async () => {
+test('exactly 64 targets import, a face rig of 175 imports too and more than 256 reject explicitly', async () => {
   const asset = await parseGltf(morphAsset(document => {
     document.meshes[0].primitives[0].targets = Array.from({ length: 64 }, () => ({ POSITION: 2 }));
   }));
@@ -284,8 +284,14 @@ test('exactly 64 targets import and larger counts reject explicitly', async () =
   assert.equal(asset.parts[0].geometry.morphTargets.length, 64);
   asset.dispose();
   await assert.rejects(parseGltf(morphAsset(document => {
-    document.meshes[0].primitives[0].targets = Array.from({ length: 65 }, () => ({ POSITION: 2 }));
-  })), /64/);
+    document.meshes[0].primitives[0].targets = Array.from({ length: 257 }, () => ({ POSITION: 2 }));
+  })), /256/);
+  const faceRig = await parseGltf(morphAsset(document => {
+    document.meshes[0].primitives[0].targets = Array.from({ length: 175 }, () => ({ POSITION: 2 }));
+  }));
+  assert.equal(faceRig.parts[0].morph.weights.length, 175);
+  assert.equal(faceRig.parts[0].geometry.morphTargets.length, 175);
+  faceRig.dispose();
 });
 
 test('malformed deltas, defaults, accessor shapes and all animation channels reject', async () => {
