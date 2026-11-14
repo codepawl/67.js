@@ -12,7 +12,7 @@
 // so the page swaps to the full world with few shader changes. Nothing is read from the network.
 import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, EXTMeshoptCompression } from '@gltf-transform/extensions';
 import { dequantize, mergeDocuments, meshopt, prune } from '@gltf-transform/functions';
@@ -87,4 +87,4 @@ async function main() {
   console.log(JSON.stringify({ output, bytes: glb.length }));
 }
 
-if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, '/')}`) await main();
+if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? '')).href) await main();

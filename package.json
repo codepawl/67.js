@@ -240,6 +240,8 @@
     "changes": "node scripts/changelog-fragments.mjs",
     "changes:fold": "node scripts/changelog-fragments.mjs fold",
     "check:change-note": "node scripts/check-change-note.mjs",
+    "check:release-changelog": "node scripts/check-release-changelog.mjs",
+    "check:site-build": "vite build --outDir artifacts/site-check --emptyOutDir",
     "check:links:package": "node scripts/check-links.mjs --package"
   },
   "peerDependencies": {

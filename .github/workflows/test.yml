@@ -116,6 +116,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
       - run: npm run prepare:release
+      # The site build is the first step of `npm run deploy`, so a module error in src/home.js must fail here and not at deploy time.
+      - run: npm run check:site-build
       - run: npm run check:links:package
       # The size job measures growth against the base branch. Here the archive is compared with its own commit, so a release
       # build step that measure-archive.mjs leaves out fails every pull request, not only the push that publishes (#1093).

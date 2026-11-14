@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { freePort } from './helpers/free-port.js';
+import { launchChrome, skipOrThrow } from './helpers/dev-server-browser.js';
 import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, localVolumeProfile, MAX_LOCAL_VOLUMES } from '../src/local-volumes.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { createPostFragment, POST_STEPS } from '../src/post.js';
@@ -118,7 +119,7 @@ test('absorption darkens, emission glows, and a scene without volumes draws the 
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    context.skip('playwright is not installed');
+    skipOrThrow(context, 'playwright is not installed');
     return;
   }
   const port = await freePort();
@@ -126,9 +127,9 @@ test('absorption darkens, emission glows, and a scene without volumes draws the 
   let browser;
   try {
     try {
-      browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+      browser = await launchChrome(chromium);
     } catch (error) {
-      context.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
+      skipOrThrow(context, `Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
     }
     const page = await browser.newPage({ viewport: { width: 64, height: 64 } });

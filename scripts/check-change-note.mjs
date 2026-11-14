@@ -5,13 +5,14 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { isVersionBump, planChecks } from './preflight.mjs';
+import { readReleaseProblem } from './check-release-changelog.mjs';
 import { pullRequestBaseOf } from './size-base.mjs';
 
-const gateNames = new Set(['protected files', 'change note']);
+const gateNames = new Set(['protected files', 'change note', 'release changelog']);
 
 // Returns the failing gates for a list of changed paths. Pure, so tests can call it without git.
-export function failingGatesFor(changedPaths, { release = false } = {}) {
-  return planChecks(changedPaths, { skipTests: true, release })
+export function failingGatesFor(changedPaths, { release = false, releaseProblem = null } = {}) {
+  return planChecks(changedPaths, { skipTests: true, release, releaseProblem })
     .filter(check => gateNames.has(check.name) && check.failure)
     .map(check => ({ name: check.name, failure: check.failure, fix: check.fix }));
 }
@@ -28,19 +29,20 @@ function baseRefFromArguments() {
   return pullRequestBaseOf() ?? git(['rev-parse', 'HEAD^1']);
 }
 
-function main() {
+async function main() {
   const baseRef = baseRefFromArguments();
-  const changedPaths = git(['diff', '--name-only', baseRef, 'HEAD']).split('\n').filter(Boolean);
+  const changedPaths = git(['diff', '--name-only', '--no-renames', baseRef, 'HEAD']).split('\n').filter(Boolean);
   const release = isVersionBump(git(['show', `${baseRef}:package.json`]), git(['show', 'HEAD:package.json']));
-  if (release) console.log('The package version changed, so this is a release: the protected file and change note gates do not apply.');
-  const failing = failingGatesFor(changedPaths, { release });
+  if (release) console.log('The package version changed, so this is a release: the protected file and change note gates do not apply, the release changelog gate does.');
+  const releaseProblem = release ? await readReleaseProblem(process.cwd()) : null;
+  const failing = failingGatesFor(changedPaths, { release, releaseProblem });
   for (const gate of failing) {
     console.error(`FAIL ${gate.name}: ${gate.failure}\n     Fix: ${gate.fix}`);
   }
-  if (failing.length === 0) console.log(`ok: ${changedPaths.length} changed files pass the protected file and change note gates.`);
+  if (failing.length === 0) console.log(`ok: ${changedPaths.length} changed files pass the protected file, change note and release changelog gates.`);
   return failing.length === 0 ? 0 : 1;
 }
 
 if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? '')).href) {
-  process.exit(main());
+  process.exit(await main());
 }

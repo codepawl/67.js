@@ -9,6 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { RELEASE_FIX, readReleaseProblem } from './check-release-changelog.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const logFolder = join(root, 'artifacts', 'preflight');
@@ -48,7 +49,9 @@ export function isVersionBump(basePackageText, headPackageText) {
 }
 
 // Decides which checks apply to a list of changed paths. Pure, so tests can call it without git.
-export function planChecks(changedPaths, { skipTests = false, release = false } = {}) {
+// `baseRef` is the ref size and tool cost compare with; `releaseProblem` is what check-release-changelog.mjs found on a release.
+export function planChecks(changedPaths, { skipTests = false, release = false, baseRef = null, releaseProblem = null } = {}) {
+  const baseArguments = baseRef ? ['--', '--base', baseRef] : [];
   const paths = changedPaths.map(path => path.replace(/\\/g, '/'));
   const changesShippedCode = paths.some(path => shippedCodePattern.test(path));
   const changesToolCode = paths.some(path => toolCodePattern.test(path));
@@ -61,6 +64,14 @@ export function planChecks(changedPaths, { skipTests = false, release = false } 
     skipped: release ? RELEASE_SKIP_REASON : null,
     failure: !release && protectedEdits.length ? protectedEdits.map(path => `${path}: ${PROTECTED_FILES[path]}`).join('\n') : null,
     fix: 'Revert the edits named above: git checkout origin/main -- <file>',
+  });
+
+  checks.push({
+    name: 'release changelog',
+    kind: 'inline',
+    skipped: release ? null : 'the version did not change',
+    failure: release ? releaseProblem : null,
+    fix: RELEASE_FIX,
   });
 
   const needsNote = !release && paths.some(path => userFacingPattern.test(path));
@@ -84,15 +95,22 @@ export function planChecks(changedPaths, { skipTests = false, release = false } 
   });
   checks.push({
     name: 'size',
-    command: ['npm', 'run', 'size'],
+    command: ['npm', 'run', 'size', ...baseArguments],
     skipped: changesShippedCode ? null : 'no shipped code changed',
     fix: 'Shrink the change, or add "- entry:<name>: <why it is worth the bytes>" to changes/<issue>.size.md (bench/size/README.md).',
   });
   checks.push({
     name: 'tool cost',
-    command: ['npm', 'run', 'tool-cost'],
+    command: ['npm', 'run', 'tool-cost', ...baseArguments],
     skipped: changesToolCode ? null : 'no MCP tool code changed',
     fix: 'Move rare detail into scene_capabilities or a shared schema, or add "- tool:<name>: <why>" to changes/<issue>.size.md (bench/tool-cost/README.md).',
+  });
+
+  checks.push({
+    name: 'site build',
+    command: ['npm', 'run', 'check:site-build'],
+    skipped: changesSitePages(paths) ? null : 'no shipped code or page changed',
+    fix: 'Fix the module or import error in the log; npm run deploy runs the same build.',
   });
 
   const testSkip = skipTests ? 'skipped with --skip-tests' : null;
@@ -118,6 +136,10 @@ export function planChecks(changedPaths, { skipTests = false, release = false } 
   return checks;
 }
 
+function changesSitePages(paths) {
+  return paths.some(path => shippedCodePattern.test(path) || /\.html$|^public\/|^vite\.config\.js$|^scripts\/vite-site-pages\.mjs$/.test(path));
+}
+
 function linkedTextCheck(paths) {
   const changesLinkedText = paths.some(path => linkedTextPattern.test(path));
   return {
@@ -133,15 +155,16 @@ export function manualChecksFor(changedPaths) {
   return MANUAL_CHECKS.filter(check => paths.some(path => check.pattern.test(path)));
 }
 
-function git(args) {
-  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+function git(args, folder = root) {
+  const result = spawnSync('git', args, { cwd: folder, encoding: 'utf8' });
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
-function changedPathsSince(baseRef) {
-  const mergeBase = git(['merge-base', baseRef, 'HEAD']) ?? baseRef;
-  const committedAndStaged = git(['diff', '--name-only', mergeBase]) ?? '';
-  const untracked = git(['ls-files', '--others', '--exclude-standard']) ?? '';
+// --no-renames lists both sides of a rename, so a moved protected file still counts as a change to it.
+export function changedPathsSince(baseRef, folder = root) {
+  const mergeBase = git(['merge-base', baseRef, 'HEAD'], folder) ?? baseRef;
+  const committedAndStaged = git(['diff', '--name-only', '--no-renames', mergeBase], folder) ?? '';
+  const untracked = git(['ls-files', '--others', '--exclude-standard'], folder) ?? '';
   const lines = `${committedAndStaged}\n${untracked}`.split('\n').filter(Boolean);
   return [...new Set(lines)].sort();
 }
@@ -221,6 +244,15 @@ function valueAfter(args, flag) {
   return index < 0 ? null : args[index + 1];
 }
 
+// Builds the checks for one run: what changed since `baseRef`, whether it is a release, and the plan with `baseRef` handed to size and tool cost.
+export async function planFromArguments(args, baseRef, folder = root) {
+  const changedPaths = changedPathsSince(baseRef, folder);
+  const release = isVersionBump(git(['show', `${baseRef}:package.json`], folder), readFileSync(join(folder, 'package.json'), 'utf8'));
+  const releaseProblem = release ? await readReleaseProblem(folder) : null;
+  const checks = planChecks(changedPaths, { skipTests: args.includes('--skip-tests'), release, baseRef, releaseProblem });
+  return { changedPaths, checks };
+}
+
 async function main(args) {
   const baseRef = valueAfter(args, '--base') ?? 'origin/main';
   if (baseRef === 'origin/main' && git(['fetch', '--quiet', 'origin', 'main']) === null) {
@@ -233,10 +265,8 @@ async function main(args) {
   mkdirSync(logFolder, { recursive: true });
   mkdirSync(join(root, 'coverage'), { recursive: true });
 
-  const changedPaths = changedPathsSince(baseRef);
+  const { changedPaths, checks } = await planFromArguments(args, baseRef);
   console.log(`${changedPaths.length} files changed since ${baseRef}.`);
-  const release = isVersionBump(git(['show', `${baseRef}:package.json`]), readFileSync(join(root, 'package.json'), 'utf8'));
-  const checks = planChecks(changedPaths, { skipTests: args.includes('--skip-tests'), release });
   const results = await runChecks(checks);
   const manualChecks = manualChecksFor(changedPaths);
   printSummary(results, manualChecks);

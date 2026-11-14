@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { freePort } from './helpers/free-port.js';
+import { launchChrome, skipOrThrow } from './helpers/dev-server-browser.js';
 
 // Measured 2026-11-04 on an RTX 3060, a closed 8 m room with one lamp, 512 samples, 3 bounces: diffuse-only surfaces (ior 1)
 // gave a GPU to CPU light ratio of 1.0034 on the floor, 1.0014 on the ceiling and 1.008 to 1.011 on the walls (0.6 percent over
@@ -76,7 +77,7 @@ async function withPage(context, run) {
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    context.skip('playwright is not installed');
+    skipOrThrow(context, 'playwright is not installed');
     return;
   }
   const port = await freePort();
@@ -84,9 +85,9 @@ async function withPage(context, run) {
   let browser;
   try {
     try {
-      browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+      browser = await launchChrome(chromium);
     } catch (error) {
-      context.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
+      skipOrThrow(context, `Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
     }
     const page = await browser.newPage({ viewport: { width: 320, height: 180 } });

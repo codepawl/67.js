@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { freePort } from './helpers/free-port.js';
+import { launchChrome, skipOrThrow } from './helpers/dev-server-browser.js';
 
 async function startServer(port) {
   const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -65,7 +66,7 @@ test('the rasterizer draws a mesh volume with fit bounds as the oriented bounds 
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    context.skip('playwright is not installed');
+    skipOrThrow(context, 'playwright is not installed');
     return;
   }
   const port = await freePort();
@@ -73,9 +74,9 @@ test('the rasterizer draws a mesh volume with fit bounds as the oriented bounds 
   let browser;
   try {
     try {
-      browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+      browser = await launchChrome(chromium);
     } catch (error) {
-      context.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
+      skipOrThrow(context, `Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
     }
     const page = await browser.newPage({ viewport: { width: 64, height: 64 } });

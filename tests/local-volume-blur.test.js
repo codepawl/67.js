@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { freePort } from './helpers/free-port.js';
+import { launchChrome, skipOrThrow } from './helpers/dev-server-browser.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { applyViewTransform } from '../src/view-transform.js';
 import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_BLUR_PIXELS } from '../src/local-volumes.js';
@@ -158,7 +159,7 @@ test('density is extinction per metre: a slab of density d and thickness t lets 
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    context.skip('playwright is not installed');
+    skipOrThrow(context, 'playwright is not installed');
     return;
   }
   const port = await freePort();
@@ -166,10 +167,9 @@ test('density is extinction per metre: a slab of density d and thickness t lets 
   let browser;
   try {
     try {
-      const launchArguments = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'];
-      browser = await chromium.launch({ headless: true, args: launchArguments }).catch(() => chromium.launch({ headless: true, channel: 'chrome', args: launchArguments }));
+      browser = await launchChrome(chromium);
     } catch (error) {
-      context.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
+      skipOrThrow(context, `Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
     }
     const page = await browser.newPage({ viewport: { width: SIZE, height: SIZE } });

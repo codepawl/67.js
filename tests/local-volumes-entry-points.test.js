@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { freePort } from './helpers/free-port.js';
+import { launchChrome, skipOrThrow } from './helpers/dev-server-browser.js';
 import { buildTraceScene, refuseLocalVolumes } from '../src/path-tracer-scene.js';
 
 const GROUND = [{
@@ -98,7 +99,7 @@ test('the renderer rejects a bad localVolumes value before it binds a post progr
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    context.skip('playwright is not installed');
+    skipOrThrow(context, 'playwright is not installed');
     return;
   }
   const port = await freePort();
@@ -106,9 +107,9 @@ test('the renderer rejects a bad localVolumes value before it binds a post progr
   let browser;
   try {
     try {
-      browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+      browser = await launchChrome(chromium);
     } catch (error) {
-      context.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
+      skipOrThrow(context, `Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
     }
     const page = await browser.newPage({ viewport: { width: 32, height: 32 } });

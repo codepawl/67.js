@@ -37,7 +37,7 @@ It runs the gates of the `Test` workflow that apply to the files your branch cha
 tool schemas, size, tool cost, the build, the unit tests with coverage and the coverage gate. It keeps going after a failure,
 writes each log to `artifacts/preflight/`, prints only the tail of a failing log and ends with one line per check and its fix.
 `--skip-tests` skips the slow test pass while you iterate, and `--json` adds a machine-readable summary.
-Run the full preflight once before you push. A green preflight means the `test` check should pass.
+Run the full preflight once before you push. A green preflight covers the PR gates, the site build, size and tool cost; the `test` workflow also runs `npm audit`, the `package` job (`prepare:release`, `check:links:package`, `smoke:package`, `smoke:mcp-package`), the bun smoke and the `COOK_DISABLE=1` leg, which only CI runs.
 `npm ci` installs a pre-push hook that runs `npm run preflight -- --skip-tests` and stops a push that would fail those gates.
 `SKIP_PREFLIGHT=1 git push` skips it once; use that only for a push you know the gates do not cover.
 

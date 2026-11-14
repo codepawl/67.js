@@ -6,6 +6,8 @@
 // An image is kept as it is when the WebP is not smaller. Nothing is read from the network.
 import { readFileSync, writeFileSync } from 'node:fs';
 import sharp from 'sharp';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const GLB_MAGIC = 0x46546c67;
 const JSON_CHUNK = 0x4e4f534a;
@@ -145,4 +147,4 @@ async function main() {
   console.log(JSON.stringify({ inputBytes: result.inputBytes, outputBytes: result.glb.length, imageBytesBefore: result.imageBytesBefore, imageBytesAfter: result.imageBytesAfter }));
 }
 
-if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, '/')}`) await main();
+if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? '')).href) await main();
