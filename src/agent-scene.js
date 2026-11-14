@@ -9,7 +9,7 @@ import { postStepSupport } from './shader-registry.js';
 import { agentSceneModule, agentSceneModuleLoaded } from './agent-scene-modules.js';
 import { CURVE_TEXT_LIMITS, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, MAX_MATERIAL_PATTERNS, RECIPE_ALPHA_MODES } from './agent-scene-capabilities.js';
 import { normalizeMaterialWear, geometryWithSurfaceMasks } from './material-wear.js';
-import { ALL_LIGHTS_MASK, MATERIAL_LAYER_FIELDS, normalizeEmissionMask, validateMaterialLayers } from './material-layers.js';
+import { ALL_LIGHTS_MASK, MATERIAL_LAYER_FIELDS, validateMaterialLayers } from './material-layers.js';
 import { recipeDiagnostics, closedRoomDiagnostic } from './agent-diagnostics.js';
 import { closedRoomShare, CLOSED_ROOM_SHARE } from './closed-room.js';
 import { depthLayerOf, MAXIMUM_DEPTH_LAYER } from './depth-layer.js';
@@ -216,8 +216,7 @@ function copyMaterialLayers(value, result) {
   }
   validateMaterialLayers(result);
   if (value.emissionMask !== undefined) {
-    result.emissionMask = Object.freeze(normalizeEmissionMask(value.emissionMask));
-    agentSceneModule('layerShaders');
+    result.emissionMask = Object.freeze(agentSceneModule('emissionMask').normalizeEmissionMask(value.emissionMask));
   }
   if (value.subsurface !== undefined) result.subsurface = agentSceneModule('subsurfaceShader').copySubsurface(value.subsurface, result.tag);
   if (value.snippet) result.snippet = agentSceneModule('materialSnippet').normalizeMaterialSnippet(value.snippet, { hasMap: Boolean(value.map || value.pattern) });
@@ -1071,7 +1070,7 @@ function materialHandle(snapshot, sequence, images) {
 }
 
 function immutableMaterial(snapshot) {
-  for (const field of ['color', 'emissiveColor', 'absorption', 'aov', 'emissionMask']) {
+  for (const field of ['color', 'emissiveColor', 'absorption', 'aov']) {
     if (snapshot[field]) {
       Object.freeze(snapshot[field]);
     }

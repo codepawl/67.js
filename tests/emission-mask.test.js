@@ -4,7 +4,8 @@ import { parseGltf } from '../src/gltf.js';
 import { createAgentScene, loadAllAgentSceneModules } from '../src/agent-scene.js';
 import { assetCopyKey } from '../src/agent-scene-assets.js';
 import { createFragmentShader, createVertexShader } from '../src/shaders.js';
-import { emissionMaskState, materialLayerState, MATERIAL_LAYER_STATE_LENGTH, normalizeEmissionMask } from '../src/material-layers.js';
+import { materialLayerState, MATERIAL_LAYER_STATE_LENGTH } from '../src/material-layers.js';
+import { normalizeEmissionMask } from '../src/emission-mask.js';
 import { skinnedStripAsset } from './fixtures/skinned-strip.js';
 
 const ASSET_ID = 'ab'.repeat(32);
@@ -53,7 +54,7 @@ test('without a mask the material and its layer state are unchanged', async () =
   assert.equal(material.emissionMask, undefined);
   const state = materialLayerState(material);
   assert.equal(state.length, MATERIAL_LAYER_STATE_LENGTH);
-  assert.deepEqual(state.slice(-3), emissionMaskState(undefined));
+  assert.deepEqual(state.slice(-3), [-1, 0, 1]);
   assert.notDeepEqual(state, materialLayerState(await stoolMaterial({ emissionMask: MASK })));
 });
 

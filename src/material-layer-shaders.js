@@ -352,6 +352,7 @@ layerTextureSupport.bind = (renderer, mapState, layerState, batch) => {
     const transform = mapState[MAP_STATE_NORMAL_MAP]?.uvTransform ?? IDENTITY_NORMAL_MAP_TRANSFORM;
     context.uniform4f(uniformOf(renderer, 'normalMapTransform'), ...transform);
   }
+  if (renderer.shaderFeatures.has('emissionMask')) context.uniform3f(uniformOf(renderer, 'materialEmissionMask'), layerState[25], layerState[26], layerState[27]);
   layerTextureNamesOf(renderer).forEach((name, index) => {
     const descriptor = layerMaps?.[name];
     context.activeTexture(context.TEXTURE0 + LAYER_TEXTURE_UNIT + index);

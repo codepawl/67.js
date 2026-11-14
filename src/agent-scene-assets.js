@@ -1,4 +1,4 @@
-import { normalizeEmissionMask } from './material-layers.js';
+import { normalizeEmissionMask } from './emission-mask.js';
 import { invalidField } from './field-error.js';
 import { mat4 } from 'gl-matrix';
 import { normalizeDrive } from './agent-drive-schema.js';

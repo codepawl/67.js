@@ -22,6 +22,7 @@ const MODULE_LOADERS = {
   relations: () => import('./agent-relations.js'),
   timeline: () => import('./film-timeline.js'),
   layerShaders: () => import('./material-layer-shaders.js'),
+  emissionMask: () => import('./emission-mask.js'),
   liquidShader: () => import('./liquid-shader.js'),
   subsurfaceShader: () => import('./subsurface-shader.js'),
   fogShader: () => import('./fog-shader.js'),
@@ -72,6 +73,7 @@ const MODULE_MARKERS = {
   relations: ['"relations":'],
   timeline: ['"timeline":{'],
   layerShaders: ['"anisotropy"', '"iridescence"', '"fresnel"', '"emissionMask"'],
+  emissionMask: ['"emissionMask"'],
   liquidShader: ['"transmission"', '"liquid"', '"foam"'],
   subsurfaceShader: ['"subsurface"'],
   // Any mention loads it, because an edit can set the density through a path or the environment of an operation.
