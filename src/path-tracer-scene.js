@@ -731,9 +731,12 @@ export function buildTraceScene(allParts, environment = {}, options = {}) {
   const geometries = tryInstancing ? parts.map(traceGeometry) : undefined;
   if (tryInstancing && countSharedGeometries(parts, geometries) > 0) return buildInstancedTraceScene(parts, geometries, environment, localVolumes, limits);
   if (!Array.isArray(parts) || parts.length < 1 || parts.length > limits.parts.count) {
-    throw new RangeError(limits.parts.native
-      ? `A native path trace takes 1 to ${limits.parts.count} parts, got ${Array.isArray(parts) ? parts.length : parts}. Merge small meshes into one part.`
-      : `A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
+    if (!Array.isArray(parts) || parts.length < 1) {
+      if (limits.parts.native) throw new RangeError(`A native path trace takes 1 to ${limits.parts.count} parts, got ${Array.isArray(parts) ? 0 : parts}. Pass at least one part with geometry.`);
+    } else if (limits.parts.native) {
+      throw new RangeError(`A native path trace takes 1 to ${limits.parts.count} parts, got ${parts.length}. Merge small meshes into one part.`);
+    }
+    throw new RangeError(`A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
   }
   const geometry = flattenParts(parts, geometries, limits);
   const bvh = buildTriangleBvh(geometry.positions, geometry.indices);
