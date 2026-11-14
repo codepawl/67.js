@@ -162,3 +162,8 @@ Source: https://dejavu-fonts.github.io/ (version 2.37).
 ## HDRI environments in assets/looks
 
 `sky-clouds.hdr` and `studio-softbox.hdr` are 128 x 64 area averages of the 1k Poly Haven HDRIs `kloofendal_48d_partly_cloudy_puresky` and `studio_small_03`, published under CC0 1.0 (https://polyhaven.com/license). `teal-orange.cube` and `noir.cube` were made for Crucible and are CC0.
+
+
+## Website fonts in public/fonts
+
+The site serves Fredoka, Plus Jakarta Sans, Inter and JetBrains Mono, subset by Google Fonts (latin, latin-ext and vietnamese). All four are under the SIL Open Font License 1.1 (https://openfontlicense.org): Fredoka by Milena Brandao and Hafontia, Plus Jakarta Sans by Tokotype, Inter by Rasmus Andersson, JetBrains Mono by JetBrains. Sources: https://fonts.google.com/specimen/Fredoka, https://fonts.google.com/specimen/Plus+Jakarta+Sans, https://fonts.google.com/specimen/Inter, https://fonts.google.com/specimen/JetBrains+Mono.

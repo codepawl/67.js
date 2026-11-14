@@ -6,16 +6,16 @@
 .showcase-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .showcase-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .site .showcase-controls button { min-height: 36px; padding: 6px 14px; background: transparent; color: var(--muted); font-size: 14px; }
-.site .showcase-controls button:hover:not(:disabled) { background: #ffffff12; color: var(--text); }
+.site .showcase-controls button:hover:not(:disabled) { background: var(--tint); color: var(--text); }
 .site .showcase-tabs button[aria-pressed=true] { background: var(--surface); color: var(--text); }
 .site .showcase-tabs button:disabled { opacity: 1; cursor: default; }
 .site .showcase-tabs button[aria-pressed=false]:disabled { opacity: .5; }
 .showcase-frame {
   position: relative;
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: 16px;
   background: var(--surface);
-  box-shadow: 0 0 0 1px #ffffff1f, 0 40px 140px -40px color-mix(in srgb, var(--glow) 70%, transparent);
+  box-shadow: 0 0 0 1px var(--line, transparent);
 }
 #showcase-viewport { display: block; width: 100%; height: clamp(360px, 62vh, 760px); touch-action: none; cursor: grab; transition: opacity .25s; }
 #showcase-viewport:active { cursor: grabbing; }
@@ -29,15 +29,14 @@
   padding: 6px 14px;
   border: 0;
   border-radius: 999px;
-  background: #0d0a16a6;
-  color: #fff;
+  background: #17161aa6;
+  color: #fefefd;
   font-size: 13px;
-  box-shadow: inset 0 0 0 1px #ffffff26;
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   backdrop-filter: blur(14px) saturate(1.4);
   cursor: pointer;
 }
-.site .showcase-frame .showcase-reset:hover { background: #0d0a16d9; }
+.site .showcase-frame .showcase-reset:hover { background: #17161ad9; }
 .showcase-frame[data-loading=true] #showcase-viewport { opacity: .45; }
 
 /* The loading and error chip: glass, centred over the canvas. */
@@ -53,12 +52,11 @@
   padding: 10px 16px;
   transform: translate(-50%, -50%);
   border-radius: 999px;
-  background: #0d0a16b8;
-  color: #fff;
+  background: #17161ab8;
+  color: #fefefd;
   font-size: 14px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  box-shadow: inset 0 0 0 1px #ffffff26;
   pointer-events: none;
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   backdrop-filter: blur(14px) saturate(1.4);
@@ -76,5 +74,5 @@
 .showcase-credits ul { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 4px; }
 .showcase-credits a { color: var(--text); text-decoration: underline; }
 @media (max-width: 600px) {
-  .showcase-frame { border-radius: 20px; }
+  .showcase-frame { border-radius: 12px; }
 }

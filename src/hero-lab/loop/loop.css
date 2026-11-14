@@ -1,4 +1,4 @@
-/* The world loop hero: a full-viewport stage, the headline on the left over a per-scene scrim, scene names bottom right.
+/* The world loop hero: the headline on the left, the live stage in a rounded frame on the right, scene names under it.
    Everything that moves here is opacity or transform; no rules, no eyebrow labels, states lead with an icon. */
 @property --scrim {
   syntax: '<number>';
@@ -7,20 +7,23 @@
 }
 
 .hero-loop {
-  --surface-hover: #2a2538;
+  --surface-hover: var(--tint-strong);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --press: 140ms;
   --hover: 160ms;
   --scrim: 0.72;
   position: relative;
-  height: max(100svh, 640px);
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  grid-template-areas: 'copy stage' 'copy bar';
+  align-items: center;
+  gap: 12px clamp(28px, 4vw, 56px);
   transition: --scrim 900ms ease;
 }
 /* On the home page the site header sits above the hero, so the hero fills what is left of the first screen. */
-.site > .hero-loop { height: max(calc(100svh - 80px), 560px); margin-top: 12px; }
+.site > .hero-loop { width: var(--page); margin: clamp(24px, 5vh, 56px) auto 0; }
 /* The stage: the poster first, the live canvas fades in over it, then the poster leaves. */
-.hero-loop .stage { position: absolute; inset: 0; overflow: hidden; background: var(--window, #09070f); }
+.hero-loop .stage { position: relative; grid-area: stage; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 16px; background: var(--bg); box-shadow: 0 0 0 1px var(--line, transparent); }
 .hero-loop .stage canvas, .hero-loop .stage .poster { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .hero-loop .stage .poster { object-fit: cover; z-index: 1; transition: opacity 520ms ease 80ms; }
 .hero-loop .stage canvas { z-index: 0; touch-action: pan-y; }
@@ -32,13 +35,14 @@
   position: absolute;
   inset: 0;
   z-index: 2;
+  display: none;
   pointer-events: none;
   background:
-    linear-gradient(to top, rgb(9 7 15 / calc(var(--scrim) * 1.08)) 0%, transparent 52%),
-    linear-gradient(to right, rgb(9 7 15 / var(--scrim)) 0%, rgb(9 7 15 / calc(var(--scrim) * 0.5)) 38%, transparent 68%);
+    linear-gradient(to top, rgb(23 22 26 / calc(var(--scrim) * 1.08)) 0%, transparent 52%),
+    linear-gradient(to right, rgb(23 22 26 / var(--scrim)) 0%, rgb(23 22 26 / calc(var(--scrim) * 0.5)) 38%, transparent 68%);
 }
-.hero-loop .copy { position: absolute; z-index: 3; left: clamp(16px, 6vw, 96px); bottom: clamp(32px, 9svh, 96px); max-width: 640px; display: flex; flex-direction: column; gap: 22px; }
-.hero-loop .copy h1 { font-size: clamp(42px, 6vw, 88px); font-weight: 640; letter-spacing: -0.04em; line-height: 0.98; text-shadow: none; }
+.hero-loop .copy { grid-area: copy; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.hero-loop .copy h1 { font-size: clamp(40px, 5vw, 72px); }
 .hero-loop .copy .lede { max-width: 34ch; color: var(--muted); font-size: clamp(16px, 1.5vw, 19px); line-height: 1.5; }
 .hero-loop .copy .lede, .hero-loop .copy h1, .hero-loop .copy .hero-actions { animation: rise 700ms var(--ease-out) backwards; }
 .hero-loop .copy .lede { animation-delay: 190ms; }
@@ -46,13 +50,13 @@
 .hero-loop .copy h1 { animation-delay: 120ms; }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
-.scene-bar { position: absolute; z-index: 4; right: clamp(16px, 4vw, 48px); bottom: clamp(24px, 5svh, 48px); display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; max-width: min(720px, 60vw); }
-.scene-tabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
-.hero-loop .scene-tab, .hero-loop .credits-toggle, .hero-loop .play-live { display: inline-flex; text-shadow: 0 1px 12px rgb(9 7 15 / 0.9); align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color var(--hover) ease, color var(--hover) ease, transform var(--press) var(--ease-out); }
+.scene-bar { grid-area: bar; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; }
+.scene-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
+.hero-loop .scene-tab, .hero-loop .credits-toggle, .hero-loop .play-live { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color var(--hover) ease, color var(--hover) ease, transform var(--press) var(--ease-out); }
 .hero-loop .scene-tab svg, .hero-loop .credits-toggle svg, .hero-loop .play-live svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .hero-loop .scene-tab:active, .hero-loop .credits-toggle:active, .hero-loop .play-live:active { transform: scale(0.97); }
-.hero-loop .scene-tab[aria-current='true'] { background: rgb(255 255 255 / 0.1); color: var(--text); }
-.ring-track { stroke: rgb(255 255 255 / 0.22); }
+.hero-loop .scene-tab[aria-current='true'] { background: var(--tint-strong); color: var(--text); }
+.ring-track { stroke: currentColor; opacity: 0.3; }
 .ring-fill { stroke: currentColor; transform: rotate(-90deg); transform-origin: 50% 50%; opacity: 0; }
 .ring-dot { fill: currentColor; stroke: none; opacity: 0.6; }
 .hero-loop .scene-tab[data-state='playing'] .ring-fill { opacity: 1; }
@@ -61,12 +65,12 @@
 @keyframes ring-turn { to { transform: rotate(360deg); } }
 @media (hover: hover) and (pointer: fine) {
   .attribution a:hover { color: var(--text); }
-  .hero-loop .scene-tab:hover, .hero-loop .credits-toggle:hover, .hero-loop .play-live:hover:not(:disabled) { background: rgb(255 255 255 / 0.08); color: var(--text); }
+  .hero-loop .scene-tab:hover, .hero-loop .credits-toggle:hover, .hero-loop .play-live:hover:not(:disabled) { background: var(--tint); color: var(--text); }
 }
 .attribution[hidden], .credits-panel[hidden], .hero-loop .play-live[hidden] { display: none; }
-.attribution { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-end; padding: 0 12px 4px; }
-.attribution a { display: inline-flex; align-items: center; min-height: 28px; color: var(--muted); font-size: 12px; text-shadow: 0 1px 12px rgb(9 7 15 / 0.9); transition: color var(--hover) ease; }
-.credits-panel { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 16px; background: var(--surface); }
+.attribution { flex-basis: 100%; order: 3; display: flex; flex-direction: column; align-items: flex-start; padding: 0 12px; }
+.attribution a { display: inline-flex; align-items: center; min-height: 28px; color: var(--muted); font-size: 13px; transition: color var(--hover) ease; }
+.credits-panel { flex-basis: 100%; order: 4; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 12px; background: var(--bg); }
 .credits-panel a { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
 .credits-panel .credit-meta { color: var(--muted); font-size: 12px; }
 .credits-panel p { margin: 0; padding: 8px 10px; color: var(--muted); font-size: 12px; }
@@ -90,15 +94,19 @@ html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: poster-pan 
   .hero-loop .scene-tab span { display: none; }
   .hero-loop .scene-tab[aria-current='true'] span { display: inline; }
 }
+@media (max-width: 860px) {
+  .hero-loop { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'stage' 'bar' 'copy'; gap: 8px; }
+  .hero-loop .copy { margin-top: 20px; }
+}
 @media (max-width: 700px) {
-  .hero-loop .copy { bottom: 148px; }
+  .hero-loop .stage { aspect-ratio: 4 / 3; border-radius: 12px; }
   .hero-loop .copy h1 { font-size: 40px; }
-  .scene-bar { left: 8px; right: 8px; max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'attribution attribution' 'panel panel' 'tabs credits'; align-items: center; gap: 0; bottom: 16px; }
+  .scene-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'tabs credits' 'attribution attribution' 'panel panel'; align-items: center; gap: 0; }
   .attribution { grid-area: attribution; }
-  .credits-panel { grid-area: panel; margin-bottom: 8px; }
+  .credits-panel { grid-area: panel; margin-top: 8px; }
   .scene-tabs { grid-area: tabs; }
   .hero-loop .credits-toggle { grid-area: credits; }
-  .attribution { align-items: flex-start; padding: 0 8px 8px; }
+  .attribution { align-items: flex-start; padding: 0 8px; }
   .hero-loop .scene-tab, .hero-loop .credits-toggle { padding: 0 9px; }
   .hero-loop .play-live { padding: 0 12px 0 9px; }
   .hero-loop .scene-tab[aria-current='true'] { padding: 0 12px 0 9px; }

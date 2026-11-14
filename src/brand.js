@@ -1,14 +1,18 @@
 import './site-tokens.css';
 import './brand.css';
+import { addColorToggle } from './site-color.js';
 
 for (const brand of document.querySelectorAll('a.brand')) {
   const mark = document.createElement('img');
-  mark.src = '/logo.svg';
+  mark.src = '/brand/crucible-mark.svg';
   mark.alt = '';
   mark.width = mark.height = 34;
   mark.className = 'brand-mark';
   brand.prepend(mark);
 }
+
+const siteNavigation = document.querySelector('body.site .navigation');
+if (siteNavigation) addColorToggle(siteNavigation);
 
 // Local SVGs share one stroke style and never depend on a third-party icon CDN.
 const paths = {

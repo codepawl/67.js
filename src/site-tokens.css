@@ -1,14 +1,14 @@
 /* Design tokens and the shared button for the website. Light is the default; dark follows the system. */
 :root {
-  --site-bg: #ffffff;
-  --site-surface: #f1f1f1;
-  --site-sidebar: #f7f7f8;
-  --site-text: #1f1f1f;
-  --site-muted: #666666;
-  --site-border: #e5e5e5;
-  --site-row-hover: #f1f1f2;
-  --site-row-active: #e8e8ea;
-  --site-focus: #576b99;
+  --site-bg: #f8f7f1;
+  --site-surface: #efede4;
+  --site-sidebar: #ffffff;
+  --site-text: #2a282d;
+  --site-muted: #6e6c73;
+  --site-border: #2a282d1f;
+  --site-row-hover: #efede4;
+  --site-row-active: #2a282d17;
+  --site-focus: #df5829;
   --site-radius: 9px;
   --site-control-height: 34px;
   --site-motion-quick: 110ms;
@@ -19,15 +19,15 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --site-bg: #212121;
-    --site-surface: #2f2f2f;
-    --site-sidebar: #171717;
-    --site-text: #ececec;
-    --site-muted: #b4b4b4;
-    --site-border: #404040;
-    --site-row-hover: #252525;
-    --site-row-active: #323232;
-    --site-focus: #a6c1ff;
+    --site-bg: #17161a;
+    --site-surface: #2a282d;
+    --site-sidebar: #201f24;
+    --site-text: #f1f0ec;
+    --site-muted: #a09ea6;
+    --site-border: #fefefd1f;
+    --site-row-hover: #201f24;
+    --site-row-active: #2a282d;
+    --site-focus: #fc9132;
   }
 }
 
