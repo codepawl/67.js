@@ -347,6 +347,8 @@ Five node fields change how a node renders; `add-node` and `set-node` take them,
 
 - `shadowOnly: true` (mesh nodes) keeps the node in the shadow passes and leaves it out of the picture, the same as Blender's Ray Visibility > Camera off. Use it for a gobo, such as a window frame outside the shot that throws bars of sun onto a wall. It is also left out of depth, object ID and wireframe passes. It defaults to false, so no scene changes. A node cannot set `shadowOnly` together with `castShadow: false`, `holdout` or `shadowCatcher`. Every backend honours it: the raster renderer, and Cook on the cpu, gpu (WebGL2), webgpu and native backends (both native kernels). Cook leaves the node out of camera rays (the first hit of each path) and keeps it for shadow and bounce rays, so a mirror or glass can still show it. No backend lists it as an ignored feature.
 
+- `rayVisibility` (mesh nodes, native path tracer only) hides a node from one ray kind: `'glass'` is the shorthand for `{ "shadow": false }`, so sun and sky are sampled through a window pane while it still shows and refracts; the object form takes booleans for `camera`, `diffuse`, `glossy`, `transmission`, `shadow` and `volumeScatter`. An emissive node cannot hide from diffuse, glossy or transmission rays, and `shadowOnly` needs shadow rays on. The raster renderer ignores it. See [path-tracer.md](https://github.com/codepawl/crucible/blob/main/docs/path-tracer.md).
+
 Parts with different `castShadow`, `receiveShadow`, `holdout`, `shadowCatcher` or `shadowOnly` values batch apart; `visible` never splits a batch. `receiveShadow`, `holdout`, `shadowCatcher` and `shadowOnly` changes need `replaceParts`, not `updateParts`.
 
 ### Relations between parts

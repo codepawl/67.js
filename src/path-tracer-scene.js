@@ -10,6 +10,7 @@ import { resolveTraceSubsurface } from './path-tracer-subsurface.js';
 import { lightShapeSupport } from './shader-registry.js';
 import { flushOrderOf } from './depth-layer.js';
 import { liftRankedTriangles } from './flush-lift.js';
+import { RAY_VISIBILITY_BITS } from './ray-visibility.js';
 
 // The scene a path trace reads: every part flattened into one world-space triangle soup with per-vertex normals, UVs
 // and colours, one resolved material per part, the lights in plain arrays, and the environment map as a sampling table.
@@ -504,8 +505,7 @@ function resolveTraceLocalVolumes(input, parts, volumeTime = 0) {
   return { volumes, boundsOnlyParts: parts.filter(part => meshPartNames.has(part.name) && part.visible === false) };
 }
 
-// FORMAT-v2 instance visibility bits, the same names a part's `rayVisibility` takes.
-export const RAY_VISIBILITY_BITS = Object.freeze({ camera: 1, diffuse: 2, glossy: 4, transmission: 8, shadow: 16, volumeScatter: 32 });
+export { RAY_VISIBILITY_BITS };
 const ALL_RAY_KINDS = 63;
 
 function describePart(part, index) {
