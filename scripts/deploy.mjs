@@ -13,6 +13,8 @@ const commit = run('git', ['rev-parse', 'HEAD'], true);
 const remoteCommit = run('git', ['ls-remote', 'origin', 'refs/heads/main'], true).split(/\s/)[0];
 if (commit !== remoteCommit) throw new Error('Push this commit to origin/main before deployment.');
 run(process.execPath, ['scripts/prepare-release.mjs', '--require-clean']);
+// The marketplace reads /packs/index.json, which only this step writes; a fresh checkout has no public/packs.
+run(process.execPath, ['scripts/build-pack-index.mjs']);
 run(process.execPath, ['node_modules/vite/bin/vite.js', 'build']);
 run(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy']);
 const release = JSON.parse(await readFile('dist/release.json', 'utf8'));
