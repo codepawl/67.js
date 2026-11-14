@@ -58,7 +58,7 @@ Variants: `scene_apply` with a `branch` name, compare in one `scene_review` (a `
   resizes the body and the handle follows.
 - Surfaces without UVs: material `pattern` (wood, bricks, marble, metal, fabric). Glass: `transmission` with a nonzero
   `thickness`. Details are in `scene_capabilities`.
-- Hide a node with `visible: false`; `castShadow`, `receiveShadow`, `holdout` and `shadowCatcher` are node flags too
+- Hide a node with `visible: false`; `castShadow`, `receiveShadow`, `holdout` and `shadowCatcher` are node flags too; a window pane takes `rayVisibility: 'glass'` so the path tracer lets sun and sky through
   (the last two need a transparent canvas, so they matter for exported composites, not `scene_look`).
 - Characters and creatures: recipe `armatures` plus `skin` per mesh node, `motion.ik`, imported GLBs through the
   `asset` node field and `scene_asset_catalog`. Physics, cloth, particles and hair are recipe sections.

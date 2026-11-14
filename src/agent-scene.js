@@ -13,6 +13,7 @@ import { ALL_LIGHTS_MASK, MATERIAL_LAYER_FIELDS, validateMaterialLayers } from '
 import { recipeDiagnostics, closedRoomDiagnostic } from './agent-diagnostics.js';
 import { closedRoomShare, CLOSED_ROOM_SHARE } from './closed-room.js';
 import { depthLayerOf, MAXIMUM_DEPTH_LAYER } from './depth-layer.js';
+import { normalizeRayVisibility } from './ray-visibility.js';
 import { armatureNodes, bakeRigExport, bindSkins, createSkinStages, normalizeArmatures, publishSkinPoses, restWorldMatrix, rigReport, stageSkinPoses, transformedBounds, withoutArmatureNodes } from './rig.js';
 export { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS };
 
@@ -44,7 +45,7 @@ const CAMERA_DEFAULTS = Object.freeze({ eye: [4, 3, 5], target: [0, 0, 0], up: [
 // Per-node render flags: `visible` hides a node and its children; the rest become renderer part flags of a mesh node.
 const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'shadowOnly'];
 const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
-const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
+const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', 'rayVisibility', ...RENDER_FLAG_FIELDS];
 const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', 'aov', 'wear', ...MATERIAL_LAYER_FIELDS];
 const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'layerMaps', 'transmissionMap', 'aovMap', 'emissionFresnel', 'boxMapScale', 'boxMapAxis'];
 const CAMERA_FIELDS = [...Object.keys(CAMERA_DEFAULTS), ...CAMERA_LENS_FIELDS];
@@ -342,6 +343,15 @@ function nodeFrom(value) {
   for (const flag of RENDER_FLAG_FIELDS) {
     if (value[flag] !== undefined && typeof value[flag] !== 'boolean') throw invalidField(flag, value[flag], 'true or false', TypeError);
     if (flag !== 'visible' && value[flag] !== undefined && value.geometry === undefined) throw invalidField(flag, value[flag], 'a flag on a mesh node with geometry and material; remove it from group nodes', TypeError);
+  }
+  if (value.rayVisibility !== undefined) {
+    if (value.geometry === undefined) throw invalidField('rayVisibility', value.rayVisibility, 'a field on a mesh node; remove it from group nodes', TypeError);
+    const rayVisibility = normalizeRayVisibility(value.rayVisibility);
+    if (rayVisibility === undefined) delete result.rayVisibility;
+    else result.rayVisibility = rayVisibility;
+    if (rayVisibility?.shadow === false && value.shadowOnly === true) {
+      throw invalidField('rayVisibility', value.rayVisibility, 'shadow rays on when shadowOnly is true', TypeError);
+    }
   }
   if (value.holdout === true && value.shadowCatcher === true) throw invalidField('shadowCatcher', value.shadowCatcher, 'false when holdout is true; a node is a holdout or a shadow catcher, not both', TypeError);
   if (value.shadowOnly === true && (value.castShadow === false || value.holdout === true || value.shadowCatcher === true)) {
@@ -1232,11 +1242,17 @@ function sampledGeometries(stagedState, time, sampled) {
 }
 
 function partFlagsOf(node) {
-  return Object.fromEntries(PART_FLAG_FIELDS.filter(flag => node[flag] !== undefined).map(flag => [flag, node[flag]]));
+  const flags = Object.fromEntries(PART_FLAG_FIELDS.filter(flag => node[flag] !== undefined).map(flag => [flag, node[flag]]));
+  if (node.rayVisibility !== undefined) flags.rayVisibility = node.rayVisibility;
+  return flags;
+}
+
+function sameRayVisibility(first, second) {
+  return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
 }
 
 function sameRenderFlags(part, node, usesVisibility, assetExtras) {
-  return PART_FLAG_FIELDS.every(flag => part[flag] === (node[flag] ?? assetExtras?.[flag])) && Boolean(part.visibility) === usesVisibility;
+  return PART_FLAG_FIELDS.every(flag => part[flag] === (node[flag] ?? assetExtras?.[flag])) && sameRayVisibility(part.rayVisibility, node.rayVisibility) && Boolean(part.visibility) === usesVisibility;
 }
 
 function recipeUsesVisibility(recipe) {

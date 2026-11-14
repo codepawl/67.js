@@ -60,6 +60,8 @@ const skinSpec = z.strictObject({
 const relationList = z.array(z.record(z.string(), z.unknown())).max(8).describe('Relations against other mesh nodes; fields in scene_capabilities relations. [] removes them.').meta({ id: 'Relations' });
 const placedAsset = z.record(z.string(), z.unknown()).describe('Catalog GLB placed at this group node: {id,materials,clip,drive}; see scene_capabilities placedAssets.').meta({ id: 'PlacedAsset' });
 const placedVegetation = z.record(z.string(), z.unknown()).describe('Trees at this group node: {species} for one, or {mix, scatter:{ground,...}} over a terrain node; see scene_capabilities vegetation.').meta({ id: 'PlacedVegetation' });
+// Left open here and checked by the scene (normalizeRayVisibility), whose errors say what to pass; the shape is in scene_capabilities renderFlags.
+const rayVisibility = z.unknown();
 const nodeFields = {
   relations: relationList.optional(),
   asset: placedAsset.optional(),
@@ -73,6 +75,7 @@ const nodeFields = {
   holdout: z.boolean().optional(),
   shadowCatcher: z.boolean().optional(),
   shadowOnly: z.boolean().optional(),
+  rayVisibility: rayVisibility.optional(),
   blend: z.strictObject({ radius: z.number().min(0.005).max(2) }).optional().describe('Soft seam into another mesh, radius in m; docs/mesh-blend.md.'),
   label: z.string().max(256).optional().describe('Human-readable label. Identity remains the node ID.'),
   parent: identifier.nullable().optional().describe('Parent node ID, or null for a root. Local transforms stay unchanged.'),
