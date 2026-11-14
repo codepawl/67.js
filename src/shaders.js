@@ -173,6 +173,7 @@ uniform float assemblyAmount;
 uniform float time;
 uniform float wind;
 out vec2 textureUV;
+out vec2 lightmapUV;
 ${skinningShader(features)}
 ${morphingShader(features)}
 ${windShader(features)}
@@ -182,6 +183,7 @@ void main() {
   world.xyz += USES_CROWD ? vec3(0.0) : assemblyOffset * assemblyAmount + assemblyDetailOffset * smoothstep(0.3, 1.0, assemblyAmount);
   // Same displacement as the colour pass, so shadows follow the swaying leaves.
   world.xyz += windOffset(position, world.xyz, uv, instanceSurface.w, time, wind);
+  lightmapUV = uvSets.zw;
   textureUV = uv;
 ${tinted ? TINT_VERTEX_ASSIGNMENTS : ''}  gl_Position = lightProjection * world;
 }`, features);
@@ -215,7 +217,7 @@ out vec4 tintOutput;
 // caster is dropped, because no light reaches it, and so is one that covers almost nothing.
 const TINT_FRAGMENT_BRANCH = `void main() {
   if (tintPass > 0.5) {
-    vec4 baseSample = hasBaseMap > 0.5 ? texture(baseMap, textureUV) : vec4(1.0);
+    vec4 baseSample = hasBaseMap > 0.5 ? texture(baseMap, mapUV(hasBaseMap)) : vec4(1.0);
     float coverage = tintOpacity * baseSample.a;
     if (coverage < 0.02) discard;
     if (texture(opaqueShadow, vec3(gl_FragCoord.xy / tintMapSize, gl_FragCoord.z - tintBias)) < 0.5) discard;
@@ -228,16 +230,21 @@ const TINT_FRAGMENT_BRANCH = `void main() {
 // Only masked batches sample the base map, so shadows follow the cutout.
 export const depthFragmentShader = `#version 300 es
 precision highp float;
+in vec2 lightmapUV;
 in vec2 textureUV;
 uniform float alphaMasked;
 uniform float alphaCutoff;
 uniform float materialOpacity;
 uniform float hasBaseMap;
 uniform sampler2D baseMap;
+// A map flag of 2 or more reads the second UV set.
+vec2 mapUV(float flag) {
+  return flag > 1.5 ? lightmapUV : textureUV;
+}
 void main() {
   if (alphaMasked < 0.5) return;
   float alpha = materialOpacity;
-  if (hasBaseMap > 0.5) alpha *= texture(baseMap, textureUV).a;
+  if (hasBaseMap > 0.5) alpha *= texture(baseMap, mapUV(hasBaseMap)).a;
   if (alpha < alphaCutoff) discard;
 }
 `;
@@ -493,6 +500,10 @@ ${featureCode("environmentShading")}
 // Set once per fragment from the environment's BRDF table; every light's specular scales by it.
 vec3 directSpecularGain = vec3(1.0);
 
+// A map flag of 2 or more reads the second UV set; layer maps use it too, so it comes before their declarations.
+vec2 mapUV(float flag) {
+  return flag > 1.5 ? lightmapUV : textureUV;
+}
 ${featureCode("declarations")}vec3 illuminate(vec3 normal, vec3 viewDirection, vec3 lightDirection, vec3 radiance, vec3 color, float metallic, float roughness) {
   float normalLight = max(dot(normal, lightDirection), 0.0);
   if (normalLight == 0.0) return vec3(0);
@@ -560,10 +571,6 @@ vec3 boxMappedNormal(vec3 normal) {
   vec3 blended = blendX.zyx * weights.x + blendY.xzy * weights.y + blendZ * weights.z;
   vec3 world = normalize(boxNormalMatrix * boxAxisSwap(blended));
   return dot(world, normal) < 0.0 ? -world : world;
-}
-
-vec2 mapUV(float flag) {
-  return flag > 1.5 ? lightmapUV : textureUV;
 }
 
 // Toksvig variance: a normal map mip averages texels that disagree, so the filtered normal is shorter than 1.
@@ -718,7 +725,7 @@ void main() {
   if (!USES_SPLAT) color *= vertexTint;
   float textureAlpha = 1.0;
   if (USES_BASE_MAP) {
-    vec4 sampledBase = BOX_MAPPED ? sampleBox(baseMap) : texture(baseMap, textureUV);
+    vec4 sampledBase = BOX_MAPPED ? sampleBox(baseMap) : texture(baseMap, mapUV(hasBaseMap));
     color *= sampledBase.rgb;
     textureAlpha = sampledBase.a;
   }

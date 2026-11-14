@@ -132,12 +132,12 @@ test('a base color map alone on the second UV set is promoted to the first set',
   assert.ok(imported.warnings.some(warning => /material 0.*TEXCOORD_1/.test(warning)));
 });
 
-test('a base color map on the second UV set beside a first-set map is dropped with the material named', async () => {
+test('a base color map on the second UV set beside a first-set map keeps both maps', async () => {
   const material = { name: 'Mixed', color: [1, 1, 1], metallic: 0, roughness: 0.5, map: descriptorFor(6, 'srgb', 1), emissiveMap: descriptorFor(2, 'srgb', 0) };
   const imported = await parseGltf(exportGlb([boxPart(material, { secondUvSet: true })]));
-  assert.equal(imported.parts[0].material.map, undefined);
-  assert.ok(imported.parts[0].material.emissiveMap);
-  assert.ok(imported.warnings.some(warning => /Dropped baseColorTexture of material 0/.test(warning)));
+  assert.equal(imported.parts[0].material.map.uvChannel, 1);
+  assert.equal(imported.parts[0].material.emissiveMap.uvChannel, 0);
+  assert.deepEqual(imported.warnings, []);
 });
 
 test('layer texture features splice their sampler once and guard shared code, whatever order they come in', () => {

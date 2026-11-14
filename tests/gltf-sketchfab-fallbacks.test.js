@@ -139,12 +139,54 @@ test('a material whose maps all read TEXCOORD_1 loads with that set as its UVs',
   assert.ok(warnings.some(warning => /Laminate floor.*TEXCOORD_1/.test(warning)));
 });
 
-test('a base color map on TEXCOORD_1 beside maps on TEXCOORD_0 is dropped with the material named', async () => {
+test('an identity KHR_texture_transform on a TEXCOORD_1 map beside a TEXCOORD_0 map is not a transform', async () => {
+  const document = twoUvSetDocument({
+    name: 'identity',
+    normalTexture: { index: 0, texCoord: 1, extensions: { KHR_texture_transform: { offset: [0, 0] } } },
+    pbrMetallicRoughness: { baseColorTexture: { index: 0 } },
+  });
+  document.extensionsUsed = ['KHR_texture_transform'];
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.equal(parts[0].material.normalMap.uvChannel, 1);
+  assert.equal(parts[0].material.map.uvChannel, 0);
+  assert.deepEqual(warnings, []);
+});
+
+test('a base color map on TEXCOORD_1 beside a normal map on TEXCOORD_0 keeps its base color', async () => {
+  const document = twoUvSetDocument({
+    name: 'mixed',
+    normalTexture: { index: 0 },
+    pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 1 } },
+  });
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.equal(parts[0].material.map.uvChannel, 1);
+  assert.equal(parts[0].material.normalMap.uvChannel, 0);
+  assert.deepEqual([...parts[0].geometry.uvs], [0, 0, 1, 0, 0, 1]);
+  assert.deepEqual([...parts[0].geometry.lightUvs], [0, 0, 2, 0, 0, 2]);
+  assert.deepEqual(warnings, []);
+});
+
+test('a clearcoat map on TEXCOORD_1 beside a base color map on TEXCOORD_0 keeps both', async () => {
+  const document = twoUvSetDocument({
+    name: 'coated',
+    pbrMetallicRoughness: { baseColorTexture: { index: 0 } },
+    extensions: { KHR_materials_clearcoat: { clearcoatFactor: 1, clearcoatTexture: { index: 0, texCoord: 1 } } },
+  });
+  document.extensionsUsed = ['KHR_materials_clearcoat'];
+  const { parts } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.equal(parts[0].material.map.uvChannel, 0);
+  assert.equal(parts[0].material.layerMaps.clearcoatTexture.uvChannel, 1);
+});
+
+test('a base color map with a KHR_texture_transform on TEXCOORD_1 beside maps on TEXCOORD_0 is dropped with the material named', async () => {
   const document = twoUvSetDocument({
     name: 'mixed',
     emissiveTexture: { index: 0 },
-    pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 1 } },
+    pbrMetallicRoughness: {
+      baseColorTexture: { index: 0, texCoord: 1, extensions: { KHR_texture_transform: { texCoord: 1, scale: [2, 2] } } },
+    },
   });
+  document.extensionsUsed = ['KHR_texture_transform'];
   const { parts, warnings } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
   assert.equal(parts[0].material.map, undefined);
   assert.ok(parts[0].material.emissiveMap);
