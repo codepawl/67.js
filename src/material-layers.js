@@ -1,6 +1,8 @@
 // Extra PBR layers on top of the base metallic-roughness material, named as in the glTF KHR_materials_* extensions.
 // This module holds plain data only, so the MCP server, recipes, the glTF code and the renderer share one set of ranges.
 
+import { invalidField } from './field-error.js';
+
 const UNIT = Object.freeze([0, 1]);
 // KHR_materials_specular allows any non-negative colour factor, and Blender writes 10 for glossy Cycles materials. The
 // reflectance is clamped to 1 after the IOR term (dielectricReflectance), so a value above 1 divided by that term is harmless.
@@ -79,6 +81,44 @@ function checkAttenuationDistance(value) {
   }
 }
 
+export const EMISSION_MASK_AXES = Object.freeze(['x', 'y', 'z']);
+const EMISSION_MASK_FIELDS = Object.freeze(['axis', 'from', 'to']);
+const EMISSION_MASK_LIMIT = 100000;
+
+/**
+ * Validate an emission mask, a smooth ramp that multiplies emission along one axis of the part's own space (metres).
+ * Returns the canonical { axis, from, to }. `from` is where the glow is 0 and `to` where it is full, so from above to flips the ramp.
+ */
+export function normalizeEmissionMask(value, label = 'emissionMask') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidField(label, value, 'an object such as { "axis": "y", "from": 0, "to": 0.4 }', TypeError);
+  }
+  for (const key of Object.keys(value)) {
+    if (!EMISSION_MASK_FIELDS.includes(key)) {
+      throw invalidField(`${label}.${key}`, value[key], `no such field; use ${EMISSION_MASK_FIELDS.join(', ')}`, TypeError);
+    }
+  }
+  if (!EMISSION_MASK_AXES.includes(value.axis)) {
+    throw invalidField(`${label}.axis`, value.axis, `one of ${EMISSION_MASK_AXES.join(', ')}, the object axis the glow ramps along, such as "y"`);
+  }
+  for (const field of ['from', 'to']) {
+    const edge = value[field];
+    if (typeof edge !== 'number' || !Number.isFinite(edge) || Math.abs(edge) > EMISSION_MASK_LIMIT) {
+      throw invalidField(`${label}.${field}`, edge, `a finite coordinate in metres along the axis within ${EMISSION_MASK_LIMIT}, such as 0.4`);
+    }
+  }
+  if (value.from === value.to) {
+    throw invalidField(`${label}.to`, value.to, `a coordinate different from from (${value.from}), since a ramp needs two, such as from 0 to 0.4`);
+  }
+  return { axis: value.axis, from: value.from, to: value.to };
+}
+
+/** The mask as the three numbers the renderer binds: axis index (-1 for none), then from and to. */
+export function emissionMaskState(mask) {
+  if (!mask) return [-1, 0, 1];
+  return [EMISSION_MASK_AXES.indexOf(mask.axis), mask.from, mask.to];
+}
+
 /** Throws a RangeError that names the field and the fix for the first layer value that is out of range. */
 export function validateMaterialLayers(material) {
   for (const field of Object.keys(MATERIAL_LAYER_SCALAR_RANGES)) {
@@ -126,7 +166,7 @@ export function dielectricReflectance(material) {
 
 /**
  * Plain values the renderer batches by: dielectric F0 (3), coat (2), sheen (4), transmission (4), attenuation colour (3),
- * anisotropy strength and rotation (2), iridescence factor, film IOR and film thickness in nanometres (3), light mask (1), toon bands (1), and the subsurface block as JSON, or '' (1; subsurface-limits.js and the addon read it).
+ * anisotropy strength and rotation (2), iridescence factor, film IOR and film thickness in nanometres (3), light mask (1), toon bands (1), and the subsurface block as JSON, or '' (1; subsurface-limits.js and the addon read it), emission fresnel (1) and the emission mask: axis index or -1, from, to (3).
  */
 export function materialLayerState(material) {
   validateMaterialLayers(material);
@@ -150,7 +190,8 @@ export function materialLayerState(material) {
     materialLayerValue(material, 'toon'),
     material.subsurface ? JSON.stringify(material.subsurface) : '',
     material.emissionFresnel ?? 0,
+    ...emissionMaskState(material.emissionMask),
   ];
 }
 
-export const MATERIAL_LAYER_STATE_LENGTH = 25;
+export const MATERIAL_LAYER_STATE_LENGTH = 28;

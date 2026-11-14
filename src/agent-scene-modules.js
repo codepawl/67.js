@@ -71,7 +71,7 @@ const MODULE_MARKERS = {
   patterns: ['"pattern"'],
   relations: ['"relations":'],
   timeline: ['"timeline":{'],
-  layerShaders: ['"anisotropy"', '"iridescence"', '"fresnel"'],
+  layerShaders: ['"anisotropy"', '"iridescence"', '"fresnel"', '"emissionMask"'],
   liquidShader: ['"transmission"', '"liquid"', '"foam"'],
   subsurfaceShader: ['"subsurface"'],
   // Any mention loads it, because an edit can set the density through a path or the environment of an operation.
