@@ -125,13 +125,13 @@ function dropTexturesWithoutUvs(document, warnings) {
   warnings.push(`Dropped ${[...dropped].sort().join(', ')} from primitives without ${[...missingAttributes].sort().join(' or ')}, which cannot sample a texture (material ${[...materialNames].sort().join(', ')}).`);
 }
 
-/** Paths to every texture reference whose texCoord is a negative number, which no UV set can satisfy. */
-function collectNegativeTexCoordKeys(value, path = [], found = []) {
+/** Paths to every texture reference whose texCoord the test refuses: a negative number, or a set above the two Crucible reads. */
+function collectTexCoordKeys(value, isUnreadable, path = [], found = []) {
   if (!value || typeof value !== 'object') return found;
   for (const [key, child] of Object.entries(value)) {
     if (!child || typeof child !== 'object') continue;
-    if (Number.isInteger(child.index) && typeof child.texCoord === 'number' && child.texCoord < 0) found.push([...path, key]);
-    else collectNegativeTexCoordKeys(child, [...path, key], found);
+    if (Number.isInteger(child.index) && typeof child.texCoord === 'number' && isUnreadable(child.texCoord)) found.push([...path, key]);
+    else collectTexCoordKeys(child, isUnreadable, [...path, key], found);
   }
   return found;
 }
@@ -144,12 +144,17 @@ function collectNegativeTexCoordKeys(value, path = [], found = []) {
 function repairOutOfSpecMaterialValues(document, warnings) {
   const droppedNames = [];
   const clampedNames = [];
+  const highSetNames = [];
   document.materials?.forEach((material, index) => {
     if (!material || typeof material !== 'object') return;
     const name = material.name ?? `material ${index}`;
-    for (const path of collectNegativeTexCoordKeys(material)) {
+    for (const path of collectTexCoordKeys(material, texCoord => texCoord < 0)) {
       delete referenceAt(material, path.slice(0, -1))[path.at(-1)];
       droppedNames.push(`${path.at(-1)} of ${name}`);
+    }
+    for (const path of collectTexCoordKeys(material, texCoord => texCoord > 1)) {
+      delete referenceAt(material, path.slice(0, -1))[path.at(-1)];
+      highSetNames.push(`${path.at(-1)} of ${name}`);
     }
     const pbr = material.pbrMetallicRoughness;
     if (!pbr || typeof pbr !== 'object') return;
@@ -161,6 +166,7 @@ function repairOutOfSpecMaterialValues(document, warnings) {
     }
   });
   if (droppedNames.length) warnings.push(`Dropped ${droppedNames.join(', ')}: a negative texCoord names no UV set.`);
+  if (highSetNames.length) warnings.push(`Dropped ${highSetNames.join(', ')}: Crucible reads only TEXCOORD_0 and TEXCOORD_1, and the texCoord names a later set.`);
   if (clampedNames.length) warnings.push(`Clamped ${clampedNames.join(', ')} to 0..1.`);
 }
 
