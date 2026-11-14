@@ -1,3 +1,4 @@
+import { resolveBackground, clearColourFor } from './clear-colour.js';
 import { materialTags } from './shader-registry.js';
 import { mat4, mat3 } from 'gl-matrix';
 import { SPLAT_UNITS, requireSplatSupport, layerTextureSupport, LIGHT_SHADING_FEATURE, SHADING_MODES, LIGHT_SHADING_MAXIMUM_SAMPLES, createVertexShader, vertexShader, liquidFragmentSource, createFragmentShader, liquidPassDrawer, createDepthFragmentShader, benchmarkVertexShader, benchmarkFragmentShader, viewTransformShader, createDepthVertexShader } from './shaders.js';
@@ -682,7 +683,8 @@ function allFinite(values) {
 }
 
 export class Renderer67 {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false, background = null } = {}) {
+    this.background = background ? resolveBackground(background) : null;
     this.canvas = canvas;
     this.sceneParts = parts;
     // `skyOpenness` from closed-room.js is passed in, which keeps the ray code out of scenes without volume fog.
@@ -1897,6 +1899,11 @@ export class Renderer67 {
     return this.batches.some(batch => batch.castShadow && SWAYING_TAGS.has(batch.parts[0].material.tag));
   }
 
+  // Sets the clear colour behind the scene as [red, green, blue] or [red, green, blue, alpha] from 0 to 1; null restores the default.
+  setBackground(background) {
+    this.background = background ? resolveBackground(background) : null;
+  }
+
   resize() {
     const plan = planRenderSize({ width: Math.max(1, this.canvas.clientWidth), height: Math.max(1, this.canvas.clientHeight), pixelRatio: this.pixelRatio, samples: this.samples, memoryBudgetMiB: this.memoryBudgetMiB, geometryBytes: this.geometryBytes, textureBytes: this.textureBytes, hdr: this.hdr, bloom: !this.benchmark, depth: this.depth, maximumSize: Math.min(this.context.getParameter(this.context.MAX_RENDERBUFFER_SIZE), this.context.getParameter(this.context.MAX_TEXTURE_SIZE)) });
     const { width, height } = plan;
@@ -2675,10 +2682,8 @@ export class Renderer67 {
     context.viewport(0, 0, mirrorTarget?.width ?? this.canvas.width, mirrorTarget?.height ?? this.canvas.height);
     if (passMode) {
       context.clearColor(...this.passSupport.background(frame.pass));
-    } else if (this.transparent) {
-      context.clearColor(0, 0, 0, 0);
     } else {
-      context.clearColor(0.145, 0.162, 0.177, 1);
+      context.clearColor(...clearColourFor(this.background, this.transparent));
     }
     // The environment background covers every pixel, so the colour clear before it would be overwritten.
     const backgroundCoversFrame = !passMode && Boolean(environmentMap?.showBackground) && !this.transparent;
