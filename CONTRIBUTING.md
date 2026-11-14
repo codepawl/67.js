@@ -41,6 +41,16 @@ The `Test` workflow runs this check on every pull request, so `git push --no-ver
 
 Under **How I checked it** (or **Ran**, **Checks**, **Checked**, **Tests**, **Verification**), paste the commands you ran and what they printed. A line such as `npm run preflight: 14 checks ok` is enough. This applies to agents too: show the commands and their results.
 
+### Show the evidence
+
+Under **Evidence**, show what changed from old to new. This applies to every pull request that changes shipped code, from maintainers, outside contributors and agents alike.
+
+- For a change people can see, add a before and an after picture or a short clip rendered by 67js.
+- For a change that can be measured, give the numbers before and after: frame time, load time, bundle bytes, memory, a quality score or the bench table.
+- If nothing can be seen or measured, write one line that says so, such as "Nothing to see or measure: an internal rename."
+
+Drag pictures and clips into the description box on GitHub. A coding agent that cannot upload pushes them to a branch named `evidence-pr-<number>` and links the raw file URLs. Put the same picture or clip in the change note when the change is visible.
+
 ### Keep private data out
 
 Issues and pull requests are public. Leave out local paths (a Windows user folder, or a home folder under `/home` or `/Users`), tokens and personal data. Use a path inside the repository instead.
@@ -121,6 +131,7 @@ The `PR metadata` workflow checks each pull request against this guide. It posts
 
 - The description links an issue and says how you checked.
 - Shipped code has a change note.
+- Shipped code shows its evidence: pictures, numbers before and after, or a line that there is nothing to show.
 - Tool and skill changes have a bench table.
 - Look changes have a picture.
 - The description holds no local path.

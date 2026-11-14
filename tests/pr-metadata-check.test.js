@@ -25,10 +25,16 @@ Adds a thing.
 
 Closes #12
 
+## Evidence
+
+Frame time 9.1 ms before, 7.4 ms after.
+
 ## How I checked it
 
 \`npm run preflight\` passed, 14 checks ok.
 `;
+
+const withoutEvidence = goodBody.replace('## Evidence\n\nFrame time 9.1 ms before, 7.4 ms after.\n\n', '');
 
 function pullRequest(overrides = {}) {
   return {
@@ -89,6 +95,22 @@ test('shipped code without changes/<issue>.md is a contributor fix, and a size n
   assert.deepEqual(fixIds({ pr: pullRequest(), files: [file('packages/x/index.js'), file('changes/12-edges.md')] }), []);
 });
 
+test('shipped code needs evidence: pictures, before and after numbers, or a line that there is nothing to show', () => {
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: withoutEvidence }), files: shippedFiles }), ['missing-evidence']);
+  const templateOnly = `${withoutEvidence}## Evidence\n\n<!-- Before and after. -->\n`;
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: templateOnly }), files: shippedFiles }), ['missing-evidence']);
+  const picture = `${withoutEvidence}![after](https://github.com/user-attachments/assets/after.png)\n`;
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: picture }), files: shippedFiles }), []);
+  const nothingToShow = `${withoutEvidence}## Evidence\n\nNothing to see or measure: a rename inside one function.\n`;
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: nothingToShow }), files: shippedFiles }), []);
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: withoutEvidence }), files: [file('docs/guide.md')] }), []);
+});
+
+test('a look change without a picture asks for the picture once, not also for evidence', () => {
+  const fixes = fixIds({ pr: pullRequest({ body: withoutEvidence }), files: [file('src/shaders.js'), file('changes/12.md')] });
+  assert.deepEqual(fixes, ['look-without-image']);
+});
+
 test('a local path in the body is a contributor fix, for every kind of path', () => {
   const windowsPath = ['C:', 'Users', 'me', 'work'].join('\\');
   for (const path of [windowsPath, '/home/me/work', '/Users/me/work']) {
@@ -135,12 +157,13 @@ test('detail text in src/agent-scene-capabilities.js alone needs no bench table'
 });
 
 test('a section named Ran, or a fenced block, counts as how I checked it', () => {
-  const ran = ['## What changed', '', 'Adds a thing.', '', 'Closes #12', '', '## Ran', '', 'npm run preflight passed, 14 checks ok.', ''].join('\n');
+  const evidence = ['## Evidence', '', 'Nothing to see or measure: an internal rename.', ''];
+  const ran = ['## What changed', '', 'Adds a thing.', '', 'Closes #12', '', ...evidence, '## Ran', '', 'npm run preflight passed, 14 checks ok.', ''].join('\n');
   assert.deepEqual(fixIds({ pr: pullRequest({ body: ran }), files: shippedFiles }), []);
   const checked = ran.replace('## Ran', '## Checked');
   assert.deepEqual(fixIds({ pr: pullRequest({ body: checked }), files: shippedFiles }), []);
   const fence = '`'.repeat(3);
-  const fenced = ['## What changed', '', 'Closes #12', '', fence, 'node --test tests/a.test.js', '# pass 4', fence, ''].join('\n');
+  const fenced = ['## What changed', '', 'Closes #12', '', ...evidence, fence, 'node --test tests/a.test.js', '# pass 4', fence, ''].join('\n');
   assert.deepEqual(fixIds({ pr: pullRequest({ body: fenced }), files: shippedFiles }), []);
 });
 

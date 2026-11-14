@@ -10,7 +10,7 @@ import { readPunctualLights } from './gltf-lights.js';
 import { Matrix4 } from './gltf-nodes.js';
 import { textureDescriptorInfo } from './renderer.js';
 import { createSkinPose, matrixDeterminant, updateSkinPose, validateSkinGeometry, validateSkinPose } from './skinning.js';
-import { MAX_MORPH_TARGETS, createMorphPose, validateMorphGeometry, validateMorphPose, validateMorphTransform } from './morph.js';
+import { MAX_STORED_MORPH_TARGETS, createMorphPose, validateMorphGeometry, validateMorphPose, validateMorphTransform } from './morph.js';
 
 // The defaults fit one large exported scene (a 240 MB GLB of 8 million vertices with 8K textures) and still bound a hostile file.
 const DEFAULT_LIMITS = Object.freeze({
@@ -52,7 +52,9 @@ function needsFallbacks(document) {
   const materials = document.materials ?? [];
   if (materials.some(material => material?.extensions?.KHR_materials_pbrSpecularGlossiness)) return true;
   // Validation reads every material, used or not, so a second-set map on any of them needs the rewrite.
-  if (materials.some(material => /"texCoord":1/.test(JSON.stringify(material ?? {})))) return true;
+  if (materials.some(material => /"texCoord":(1|-)/.test(JSON.stringify(material ?? {})))) return true;
+  const outOfRange = value => Number.isFinite(value) && (value < 0 || value > 1);
+  if (materials.some(material => outOfRange(material?.pbrMetallicRoughness?.metallicFactor) || outOfRange(material?.pbrMetallicRoughness?.roughnessFactor))) return true;
   return (document.meshes ?? []).some(mesh => (mesh.primitives ?? []).some(primitive => {
     return primitive.attributes?.TEXCOORD_0 === undefined && JSON.stringify(materials[primitive.material] ?? {}).includes('"index"');
   }));
@@ -349,7 +351,7 @@ function validateDocument(document, limits, allowedExtensions) {
   let morphBytes = 0;
   for (const mesh of document.meshes ?? []) {
     const targetCount = morphCount(mesh);
-    if (targetCount > MAX_MORPH_TARGETS) throw new Error('Morph target count exceeds 64.');
+    if (targetCount > MAX_STORED_MORPH_TARGETS) throw new Error('Morph target count exceeds 256.');
     validateDefaultWeights(mesh.weights, targetCount);
     for (const primitive of mesh.primitives ?? []) {
       if (isLinePrimitive(primitive)) continue;

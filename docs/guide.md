@@ -57,6 +57,7 @@ server.close();
 ```
 
 The canvas is read in the same task as the render, so no `preserveDrawingBuffer` option is needed.
+The frame clears to a dark grey behind the scene. Pass `background: [red, green, blue]` or `[red, green, blue, alpha]` (each `0` to `1`) as a renderer option, or call `renderer.setBackground(color)` between frames; `setBackground(null)` restores the grey. With `transparent: true` the canvas clears to nothing unless you give a `background`, whose alpha then shows the page behind the canvas. A scene sky or environment background still covers it, and the scene recipe's background field does not reach this option yet.
 The `matrix` is a column-major 4x4 transform, and `box()` is a unit cube centred on the origin.
 The MCP server (`67js-mcp`) is the route for scene recipes, review grids and video, and `npm run render` in a source checkout exports video.
 
