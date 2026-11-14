@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import test from 'node:test';
-import {
-  findNativeAddon,
-  probeCyclesLobe,
-  traceNative,
-} from '../packages/render-native/index.mjs';
-import { KERNEL_FLAG_WHITE_NOISE_SAMPLER, validatePackOptions } from '../packages/render-native/pack-input-v2.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const { findNativeAddon, probeCyclesLobe, traceNative } = cook ?? {};
+const { KERNEL_FLAG_WHITE_NOISE_SAMPLER, validatePackOptions } = packV2 ?? {};
 
 const referencePath = new URL('../bench/cycles-parity/sampler-reference.json', import.meta.url);
 const reference = JSON.parse(readFileSync(referencePath, 'utf8'));
-const hasAddon = findNativeAddon() !== null;
+const hasAddon = cookInstalled && findNativeAddon() !== null;
 const skipWithoutAddon = hasAddon ? false : 'the native addon is not built';
 const FLOAT_TOLERANCE = 2e-7;
 
@@ -33,14 +32,14 @@ function assertClose(actual, expected, label) {
   assert.ok(Math.abs(actual - expected) <= FLOAT_TOLERANCE, `${label}: got ${actual}, expected ${expected}`);
 }
 
-test('the sampler options are validated with a message that names the accepted values', () => {
+cookTest('the sampler options are validated with a message that names the accepted values', () => {
   assert.doesNotThrow(() => validatePackOptions({ sampler: 'sobol-burley' }, 'test'));
   assert.doesNotThrow(() => validatePackOptions({ sampler: 'white' }, 'test'));
   assert.throws(() => validatePackOptions({ sampler: 'halton' }, 'test'), /"sobol-burley" \(default\) or "white"/);
   assert.equal(KERNEL_FLAG_WHITE_NOISE_SAMPLER, 64);
 });
 
-test('the first points of every dimension set match the independent port of the Cycles functions', { skip: skipWithoutAddon }, () => {
+cookTest('the first points of every dimension set match the independent port of the Cycles functions', { skip: skipWithoutAddon }, () => {
   let compared = 0;
   for (const dimensionSet of reference.dimensionSets) {
     for (const sampleOffset of reference.blockStarts) {
@@ -72,7 +71,7 @@ test('the first points of every dimension set match the independent port of the 
   assert.ok(compared >= 500, `compared only ${compared} points`);
 });
 
-test('aligned blocks of the sequence are stratified and the mean and variance are uniform', { skip: skipWithoutAddon }, () => {
+cookTest('aligned blocks of the sequence are stratified and the mean and variance are uniform', { skip: skipWithoutAddon }, () => {
   const count = 4096;
   const probe = probeSampler({ dimensionSet: 3, sampleOffset: 0, count });
   const blockLength = 256;
@@ -105,7 +104,7 @@ test('aligned blocks of the sequence are stratified and the mean and variance ar
   }
 });
 
-test('traceNative rejects an unknown sampler before it reaches the GPU', () => {
+cookTest('traceNative rejects an unknown sampler before it reaches the GPU', () => {
   assert.throws(
     () => traceNative({}, { width: 16, height: 16, samples: 1, kernel: 'cycles', sampler: 'halton' }),
     /"sobol-burley" \(default\) or "white"/,

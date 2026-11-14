@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import {
-  buildNativeInputV2,
-  findNativeAddon,
-  traceNative,
-} from '../packages/render-native/index.mjs';
-import {
+import { createCamera } from '../src/path-tracer.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const { buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
+const {
   KERNEL_FLAG_USE_LIGHT_TREE,
   LIGHT_TREE_AUTO_MIN_EMITTERS,
   resolveUseLightTree,
   validatePackOptions,
-} from '../packages/render-native/pack-input-v2.mjs';
-import { createCamera } from '../src/path-tracer.js';
+} = packV2 ?? {};
 
-const hasAddon = findNativeAddon() !== null;
+const hasAddon = cookInstalled && findNativeAddon() !== null;
 const skipWithoutAddon = hasAddon ? false : 'the native addon is not built';
 
 const UNIT_QUAD = {
@@ -61,7 +60,7 @@ function meanRgb(rgba) {
   return sum.map((value) => value / pixelCount);
 }
 
-test('lightSampling "auto" turns the tree on from two emitters, "tree" from one, "uniform" never', () => {
+cookTest('lightSampling "auto" turns the tree on from two emitters, "tree" from one, "uniform" never', () => {
   assert.equal(LIGHT_TREE_AUTO_MIN_EMITTERS, 1);
   assert.equal(resolveUseLightTree('auto', 1, 1), false);
   assert.equal(resolveUseLightTree(undefined, 2, 3), true);
@@ -71,7 +70,7 @@ test('lightSampling "auto" turns the tree on from two emitters, "tree" from one,
   assert.equal(KERNEL_FLAG_USE_LIGHT_TREE, 1);
 });
 
-test('traceNative rejects an unknown lightSampling before it reaches the GPU', () => {
+cookTest('traceNative rejects an unknown lightSampling before it reaches the GPU', () => {
   assert.throws(
     () => validatePackOptions({ lightSampling: 'bvh' }, 'test'),
     /`lightSampling` must be "auto" \(default\), "tree" or "uniform", got "bvh"/
@@ -79,7 +78,7 @@ test('traceNative rejects an unknown lightSampling before it reaches the GPU', (
   assert.doesNotThrow(() => validatePackOptions({ lightSampling: 'tree' }, 'test'));
 });
 
-test('pick probabilities from random shading points sum to 1 over all emitters and match what the sampler returns', { skip: skipWithoutAddon }, () => {
+cookTest('pick probabilities from random shading points sum to 1 over all emitters and match what the sampler returns', { skip: skipWithoutAddon }, () => {
   const scene = buildRoomScene({
     points: [
       { position: [2, 1.5, 1], intensity: 10, radius: 0.1 },
@@ -117,7 +116,7 @@ test('pick probabilities from random shading points sum to 1 over all emitters a
   assert.ok(pointsWithSumOne > pointCount * 0.8, `${pointsWithSumOne} of ${pointCount} points sum to 1`);
 });
 
-test('a large emissive quad renders the same mean with NEE only, BSDF only and both', { skip: skipWithoutAddon }, () => {
+cookTest('a large emissive quad renders the same mean with NEE only, BSDF only and both', { skip: skipWithoutAddon }, () => {
   const scene = buildRoomScene(undefined);
   const common = { width: 48, height: 32, samples: 256, samplesPerDispatch: 32, lightSampling: 'tree', seed: 3 };
   const both = meanRgb(trace(scene, { ...common, directLighting: 'both' }).rgba);
@@ -130,7 +129,7 @@ test('a large emissive quad renders the same mean with NEE only, BSDF only and b
   }
 });
 
-test('the tree and the flat pick render the same mean', { skip: skipWithoutAddon }, () => {
+cookTest('the tree and the flat pick render the same mean', { skip: skipWithoutAddon }, () => {
   const scene = buildRoomScene({ points: [{ position: [2, 1.5, 1], intensity: 10, radius: 0.1 }] });
   const common = { width: 48, height: 32, samples: 256, samplesPerDispatch: 32, seed: 5 };
   const tree = meanRgb(trace(scene, { ...common, lightSampling: 'tree' }).rgba);

@@ -5,8 +5,10 @@ import { bakeLightmapsAsync } from '../src/light-bake-gpu.js';
 import { gpuBakeKernels } from '../src/agent-bake-gpu.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
-import { buildNativeTexelInput } from '../packages/render-native/pack-input.mjs';
 import { isNativeTimeLimitError, traceTexelsNative } from '../scripts/agent-native-trace.mjs';
+import { cookModule, cookTest } from './support/cook.js';
+
+const { buildNativeTexelInput } = (await cookModule('pack-input')) ?? {};
 
 const cube = box(0, 1);
 
@@ -37,7 +39,7 @@ test('a native bake without a texel tracer says what it needs instead of running
   await assert.rejects(bakeLightmapsAsync(room, lamp, fastOptions), /texelTracer/);
 });
 
-test('the texel parameter block carries the texel count, the sample count and the bounces after the first leg', () => {
+cookTest('the texel parameter block carries the texel count, the sample count and the bounces after the first leg', () => {
   const scene = buildTraceScene(room, { keyColor: [0, 0, 0], lightDirection: [0, 1, 0], pointLights: lamp.pointLights });
   const input = buildNativeTexelInput(scene, { texelCount: 1234, samples: 77, bounces: 3, seed: 5, fireflyClamp: 1e6 }, pack);
   const integers = new Int32Array(input.parameters.buffer, input.parameters.byteOffset, input.parameters.byteLength / 4);
@@ -53,7 +55,7 @@ function decodeFloats(base64) {
   return [...new Float32Array(bytes.buffer)];
 }
 
-test('the host decodes the page request, runs the native texel trace and encodes the answer', () => {
+cookTest('the host decodes the page request, runs the native texel trace and encodes the answer', () => {
   const scene = buildTraceScene(room, { keyColor: [0, 0, 0], lightDirection: [0, 1, 0], pointLights: lamp.pointLights });
   const input = buildNativeTexelInput(scene, { texelCount: 2, samples: 4, bounces: 2, seed: 1, fireflyClamp: 1e6 }, pack);
   const tables = {};

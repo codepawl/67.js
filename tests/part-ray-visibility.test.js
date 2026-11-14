@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { buildNativeInput, buildNativeTexelInput, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
-import { STRUCT_STRIDES_V2 } from '../packages/render-native/pack-input-v2.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { exportNativeSceneTables } from '../scripts/native-bake-page.js';
 import { box } from '../src/geometry.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene, partRayVisibilityFlags, RAY_VISIBILITY_BITS, refuseLocalVolumes, resolveTexture } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const jobInputModule = await cookModule('job-input');
+const { buildNativeInput, buildNativeTexelInput, findNativeAddon, traceNative } = cook ?? {};
+const { STRUCT_STRIDES_V2 } = packV2 ?? {};
+const { buildFlattenedJobNativeInput, buildJobNativeInput } = jobInputModule ?? {};
 
 const INSTANCE_VISIBILITY_OFFSET = 116;
 const ALL_RAY_KINDS = 63;
@@ -64,7 +69,7 @@ test('a part maps rayVisibility and shadowOnly to visibility bits', () => {
   assert.equal(partRayVisibilityFlags({ shadowOnly: true, rayVisibility: { glossy: false } }), 62 & ~4);
 });
 
-test('castShadow never reaches the ray visibility, because library code sets it as a raster default', () => {
+cookTest('castShadow never reaches the ray visibility, because library code sets it as a raster default', () => {
   assert.equal(partRayVisibilityFlags({ castShadow: false }), ALL_RAY_KINDS);
   const castingOff = [uniquePart('a', 0, { castShadow: false }), uniquePart('b', 2, { castShadow: false, shadowOnly: true })];
   assert.equal(buildTraceScene(castingOff, environment).partRayVisibility, null);
@@ -127,21 +132,21 @@ test('a flattened scene carries one visibility byte per part, or none when no pa
   assert.deepEqual([...buildTraceScene(hiding, environment).partRayVisibility], [ALL_RAY_KINDS, SHADOW_OFF, 62 & ~4]);
 });
 
-test('a native render job packs the visibility of an instanced scene into the instance table', () => {
+cookTest('a native render job packs the visibility of an instanced scene into the instance table', () => {
   const parts = [sharedPart('wall', 0), sharedPart('pane', 2, { rayVisibility: { shadow: false } }), sharedPart('wall2', 4)];
   const { exported, flags } = exportedVisibility(parts, true);
   assert.equal(exported.instances, 3, 'the copies stay instances');
   assert.deepEqual(flags, [ALL_RAY_KINDS, SHADOW_OFF, ALL_RAY_KINDS]);
 });
 
-test('a native render job packs the visibility of a flattened scene into the instance table', () => {
+cookTest('a native render job packs the visibility of a flattened scene into the instance table', () => {
   const parts = [uniquePart('wall', 0), uniquePart('pane', 2, { rayVisibility: { shadow: false } }), uniquePart('lamp', 4, { shadowOnly: true })];
   const { exported, flags } = exportedVisibility(parts, false);
   assert.equal(exported.schemaVersion, 2);
   assert.deepEqual(flags, [ALL_RAY_KINDS, SHADOW_OFF, 62]);
 });
 
-test('scenes whose rayVisibility hides nothing export the same tables as scenes without it', () => {
+cookTest('scenes whose rayVisibility hides nothing export the same tables as scenes without it', () => {
   const plain = [uniquePart('wall', 0), uniquePart('lamp', 4, { shadowOnly: true })];
   const withDefaults = [uniquePart('wall', 0, { rayVisibility: {} }), uniquePart('lamp', 4, { shadowOnly: true, rayVisibility: { shadow: true } })];
   assert.equal(digestOfTables(exportedVisibility(withDefaults, false).exported), digestOfTables(exportedVisibility(plain, false).exported));
@@ -154,7 +159,7 @@ function withoutRayVisibility(parts) {
   return parts.map(({ rayVisibility, ...part }) => part);
 }
 
-test('the v1 tables of the legacy kernel refuse a hidden ray kind, and a light bake leaves it out', () => {
+cookTest('the v1 tables of the legacy kernel refuse a hidden ray kind, and a light bake leaves it out', () => {
   const hiding = [uniquePart('wall', 0), uniquePart('pane', 2, { rayVisibility: { shadow: false } })];
   const scene = buildTraceScene(hiding, environment);
   assert.throws(() => buildNativeInput(scene, camera, options, pack), /v1 tables of kernel "legacy" cannot carry.*kernel "cycles"/);
@@ -171,7 +176,7 @@ test('a job on the legacy kernel refuses a hidden ray kind', () => {
   );
 });
 
-test('the v1 fallback of a cycles job draws without the visibility and reports why', () => {
+cookTest('the v1 fallback of a cycles job draws without the visibility and reports why', () => {
   const parts = [uniquePart('wall', 0), uniquePart('pane', 2, { rayVisibility: { shadow: false } })];
   const failingModules = { ...modules, buildFlattenedJobNativeInput: () => { throw new Error('forced material failure'); } };
   const exported = exportNativeSceneTables({ parts, environment, camera, options, kernel: 'cycles', instancing: false, modules: failingModules });
@@ -185,7 +190,7 @@ test('the v1 fallback of a cycles job draws without the visibility and reports w
 
 // The sun is a delta light: only a shadow ray can reach it. Measured on the native kernel, the mean of the top-down picture
 // is about 5.6 with the clear pane blocking shadow rays (the floor is dimmer, not black) and about 9.3 once it does not.
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 const SIZE = 16;
 const sunEnvironment = { keyColor: [3, 3, 3], lightDirection: [0, 1, 0] };
 const topDownCamera = createCamera({ eye: [0, 6, 0], target: [0, 0, 0], up: [0, 0, -1], fov: 30 }, SIZE, SIZE);
@@ -219,7 +224,7 @@ for (const [shape, instancing, geometryFor] of [
   ['flattened', false, () => box(0, 1)],
   ['instanced', true, () => sharedBox],
 ]) {
-  test(`the native cycles kernel lights the floor through a ${shape} pane with rayVisibility shadow false`, { skip: skipWithoutAddon }, () => {
+  cookTest(`the native cycles kernel lights the floor through a ${shape} pane with rayVisibility shadow false`, { skip: skipWithoutAddon }, () => {
     const blocked = floorBrightness(paneOverFloor({}, geometryFor), instancing);
     const lit = floorBrightness(paneOverFloor({ rayVisibility: { shadow: false } }, geometryFor), instancing);
     assert.ok(lit > blocked * 1.3, `shadow rays that pass the pane reach the sun: ${lit} against ${blocked}`);

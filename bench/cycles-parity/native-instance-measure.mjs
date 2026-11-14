@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as pack from '../../src/path-tracer-gpu-pack.js';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../../packages/render-native/job-input.mjs';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '@codepawlhq/cook/job-input';
 import { MAX_NATIVE_TRACE_INSTANCES, buildTraceScene, resolveTexture } from '../../src/path-tracer-scene.js';
 import { encodeNativeInputV2 } from '../../scripts/native-bake-page.js';
 import { readFlag } from './sequence-bench-core.mjs';
@@ -36,7 +36,7 @@ function tableBytes(input) {
 }
 
 async function traceExported(exported, samples, pngPath) {
-  const tracer = await import('../../packages/render-native/index.mjs');
+  const tracer = await import('@codepawlhq/cook');
   const { traceFrameNative } = await import('../../scripts/agent-native-trace.mjs');
   const { width, height } = CARD_FIELD_PACK_OPTIONS;
   const frame = await traceFrameNative({ tracer, exported: { ...exported, ignored: [] }, width, height, samples, bounces: CARD_FIELD_PACK_OPTIONS.bounces, seed: 1, denoise: 'none', kernel: 'cycles' });

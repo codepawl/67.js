@@ -7,8 +7,8 @@
 import { createHash } from 'node:crypto';
 import { createCamera } from '../../src/path-tracer.js';
 import * as pack from '../../src/path-tracer-gpu-pack.js';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../../packages/render-native/job-input.mjs';
+import { buildNativeInput } from '@codepawlhq/cook/pack-input';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '@codepawlhq/cook/job-input';
 import { buildTraceScene, resolveTexture } from '../../src/path-tracer-scene.js';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import { loadReferenceScene } from './scene-bridge.mjs';

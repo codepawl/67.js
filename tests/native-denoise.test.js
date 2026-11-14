@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { denoiseAtrous, findNativeAddon } from '../packages/render-native/index.mjs';
-import { validatePackOptions } from '../packages/render-native/pack-input-v2.mjs';
 import { denoiseRadiance } from '../src/path-tracer-denoise.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-const hasAddon = findNativeAddon() !== null;
+const { denoiseAtrous, findNativeAddon } = (await cookModule()) ?? {};
+const { validatePackOptions } = (await cookModule('pack-input-v2')) ?? {};
+const hasAddon = cookInstalled && findNativeAddon() !== null;
 const skipWithoutAddon = hasAddon ? false : 'the native addon is not built';
 const WIDTH = 48;
 const HEIGHT = 40;
@@ -87,14 +87,14 @@ function range(from, to) {
   return Array.from({ length: to - from }, (_, index) => from + index);
 }
 
-test('the denoise option accepts none and atrous and names the choices otherwise', () => {
+cookTest('the denoise option accepts none and atrous and names the choices otherwise', () => {
   assert.doesNotThrow(() => validatePackOptions({ denoise: 'none' }, 'test'));
   assert.doesNotThrow(() => validatePackOptions({ denoise: 'atrous' }, 'test'));
   assert.doesNotThrow(() => validatePackOptions({}, 'test'));
   assert.throws(() => validatePackOptions({ denoise: 'oidn' }, 'test'), /"none" \(default\) or "atrous"/);
 });
 
-test('denoiseAtrous rejects a plane of the wrong length', { skip: skipWithoutAddon }, () => {
+cookTest('denoiseAtrous rejects a plane of the wrong length', { skip: skipWithoutAddon }, () => {
   const image = buildImage();
   assert.throws(
     () => denoiseAtrous({ width: WIDTH, height: HEIGHT, ...image, depth: new Float32Array(3) }),
@@ -102,7 +102,7 @@ test('denoiseAtrous rejects a plane of the wrong length', { skip: skipWithoutAdd
   );
 });
 
-test('the GPU filter matches the CPU wavelet filter it was written from', { skip: skipWithoutAddon }, () => {
+cookTest('the GPU filter matches the CPU wavelet filter it was written from', { skip: skipWithoutAddon }, () => {
   const image = buildImage();
   const gpu = denoiseAtrous({ width: WIDTH, height: HEIGHT, ...image });
   const cpu = denoiseRadiance({
@@ -126,7 +126,7 @@ test('the GPU filter matches the CPU wavelet filter it was written from', { skip
   assert.ok(largestRelativeDifference < 2e-3, `largest relative difference ${largestRelativeDifference}`);
 });
 
-test('the filter smooths the noise inside a surface and keeps the edge between two surfaces', { skip: skipWithoutAddon }, () => {
+cookTest('the filter smooths the noise inside a surface and keeps the edge between two surfaces', { skip: skipWithoutAddon }, () => {
   const image = buildImage();
   const gpu = denoiseAtrous({ width: WIDTH, height: HEIGHT, ...image });
   const innerRows = range(10, 30);
@@ -140,7 +140,7 @@ test('the filter smooths the noise inside a surface and keeps the edge between t
   assert.ok(gpu.gpuSeconds > 0 && gpu.uploadSeconds >= 0 && gpu.readbackSeconds >= 0);
 });
 
-test('pixels that hit nothing (zero normal and depth) stay finite', { skip: skipWithoutAddon }, () => {
+cookTest('pixels that hit nothing (zero normal and depth) stay finite', { skip: skipWithoutAddon }, () => {
   const image = buildImage();
   for (let pixel = 0; pixel < WIDTH * HEIGHT; pixel += 7) {
     image.normal.fill(0, pixel * 3, pixel * 3 + 3);

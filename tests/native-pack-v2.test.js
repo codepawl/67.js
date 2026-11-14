@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import {
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
+import { createEnvironmentMap } from '../src/hdri.js';
+import { createCamera } from '../src/path-tracer.js';
+import * as pack from '../src/path-tracer-gpu-pack.js';
+import { buildTraceScene } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const {
   FORMAT_V2_MAGIC,
   FORMAT_V2_VERSION,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
@@ -12,12 +19,8 @@ import {
   probeCyclesLobe,
   traceNative,
   upgradeNativeInputV1ToV2,
-} from '../packages/render-native/index.mjs';
-import { validatePackOptions } from '../packages/render-native/pack-input-v2.mjs';
-import { createEnvironmentMap } from '../src/hdri.js';
-import { createCamera } from '../src/path-tracer.js';
-import * as pack from '../src/path-tracer-gpu-pack.js';
-import { buildTraceScene } from '../src/path-tracer-scene.js';
+} = cook ?? {};
+const { validatePackOptions } = packV2 ?? {};
 
 function quadGeometry(z = 0) {
   return {
@@ -73,7 +76,7 @@ function viewRecord(bytes, stride, index = 0) {
   };
 }
 
-test('buildNativeInputV2 packs empty-emitter scene with valid FORMAT-v2 headers and non-empty dummy tables', () => {
+cookTest('buildNativeInputV2 packs empty-emitter scene with valid FORMAT-v2 headers and non-empty dummy tables', () => {
   const parts = [{ name: 'card', geometry: quadGeometry(0), material: { color: [0.6, 0.5, 0.4], roughness: 0.7 } }];
   const scene = buildTraceScene(parts, {});
   const camera = createCamera({ eye: [0, 0, 4], target: [0, 0, 0], fov: 45 }, 32, 16);
@@ -116,7 +119,7 @@ test('buildNativeInputV2 packs empty-emitter scene with valid FORMAT-v2 headers 
   assert.equal(kp.u32[27], 0);
 });
 
-test('buildNativeInputV2 deduplicates shared mesh BLASes, inverts 3x4 transforms, and handles negative-scale instances', () => {
+cookTest('buildNativeInputV2 deduplicates shared mesh BLASes, inverts 3x4 transforms, and handles negative-scale instances', () => {
   const sharedMesh = quadGeometry(0);
   const camera = createCamera({ eye: [0, 0, 6], target: [0, 0, 0], fov: 50 }, 16, 16);
   const cosA = Math.cos(0.4);
@@ -199,7 +202,7 @@ test('buildNativeInputV2 deduplicates shared mesh BLASes, inverts 3x4 transforms
   assert.equal(tri1.u32[7], 1, 'shared triangle 1 local_emissive_offset populated for emissive override MIS');
 });
 
-test('packMaterialRecordV2 and texture packing follow Principled v2 flags and deduplicate shared textures', () => {
+cookTest('packMaterialRecordV2 and texture packing follow Principled v2 flags and deduplicate shared textures', () => {
   const sharedImage = makeCheckerRgba8(4, 4, true);
   const mixedGeo = {
     positions: new Float32Array([
@@ -297,7 +300,7 @@ test('packMaterialRecordV2 and texture packing follow Principled v2 flags and de
   assert.ok(Math.abs(kp.f32[11] - 12.0) < 1e-6, 'clamp_indirect = 4.0 * 3.0');
 });
 
-test('buildNativeInputV2 normalizes all 5 Cycles light types, camera-visibility flags, and HDRI marginal/conditional CDFs', () => {
+cookTest('buildNativeInputV2 normalizes all 5 Cycles light types, camera-visibility flags, and HDRI marginal/conditional CDFs', () => {
   const hdriPixels = new Float32Array(8 * 4 * 3);
   for (let i = 0; i < 8 * 4; i++) {
     hdriPixels[i * 3] = i === 5 ? 50.0 : 0.5; // 50.0 must clamp to HDRI_RADIANCE_LIMIT = 16
@@ -393,7 +396,7 @@ test('buildNativeInputV2 normalizes all 5 Cycles light types, camera-visibility 
   assert.equal(v2.environmentTexels[(cdfStart + 3) * 4], 1.0, 'marginal CDF ends at 1.0');
 });
 
-test('upgradeNativeInputV1ToV2 preserves textures, lights, subsurface, volume, and camera from legacy v1 input', () => {
+cookTest('upgradeNativeInputV1ToV2 preserves textures, lights, subsurface, volume, and camera from legacy v1 input', () => {
   const texImage = makeCheckerRgba8(4, 4, true);
   const envMap = createEnvironmentMap({ width: 4, height: 2, data: new Float32Array(4 * 2 * 3).fill(0.4), intensity: 1.0 });
   const parts = [
@@ -450,7 +453,7 @@ test('upgradeNativeInputV1ToV2 preserves textures, lights, subsurface, volume, a
   assert.ok(Math.abs(spot.f32[21] - 0.25) < 1e-5, 'spot_blend recovered cleanly from v1 blend');
 });
 
-test('Cycles v2 host executes multi-BLAS/TLAS ray queries, cutout alpha masking, v1 auto-upgrade, and probeCyclesLobe on GPU', { skip: !findNativeAddon() }, () => {
+cookTest('Cycles v2 host executes multi-BLAS/TLAS ray queries, cutout alpha masking, v1 auto-upgrade, and probeCyclesLobe on GPU', { skip: !cookInstalled || !findNativeAddon() }, () => {
   const cutoutImage = makeCheckerRgba8(4, 4, true, true); // left half alpha=0, right half opaque neutral white
   const sharedQuad = quadGeometry(0);
   const camera = createCamera({ eye: [0, 0, 2.4], target: [0, 0, 0], fov: 50 }, 16, 16);
@@ -560,7 +563,7 @@ test('Cycles v2 host executes multi-BLAS/TLAS ray queries, cutout alpha masking,
 // Boundary validation: shared filterGlossy offset constant
 // ---------------------------------------------------------------------------
 
-test('KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET equals 300 (f32[75] * 4)', () => {
+cookTest('KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET equals 300 (f32[75] * 4)', () => {
   assert.equal(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, 300);
   // Verify pack-input-v2 writes filterGlossy at that offset.
   const parts = [{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }];
@@ -575,7 +578,7 @@ test('KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET equals 300 (f32[75] * 4)', () =
 // Boundary validation: width and height
 // ---------------------------------------------------------------------------
 
-test('buildNativeInputV2 rejects non-finite, non-integer, out-of-range width and height', () => {
+cookTest('buildNativeInputV2 rejects non-finite, non-integer, out-of-range width and height', () => {
   const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
   const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
   const ok = { width: 8, height: 8, samples: 1 };
@@ -610,7 +613,7 @@ test('buildNativeInputV2 rejects non-finite, non-integer, out-of-range width and
 // Boundary validation: samples
 // ---------------------------------------------------------------------------
 
-test('buildNativeInputV2 rejects non-finite, non-integer, out-of-range samples', () => {
+cookTest('buildNativeInputV2 rejects non-finite, non-integer, out-of-range samples', () => {
   const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
   const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
   const ok = { width: 8, height: 8, samples: 1 };
@@ -632,7 +635,7 @@ test('buildNativeInputV2 rejects non-finite, non-integer, out-of-range samples',
 // Boundary validation: samplesPerDispatch (optional)
 // ---------------------------------------------------------------------------
 
-test('buildNativeInputV2 accepts undefined samplesPerDispatch but rejects invalid values', () => {
+cookTest('buildNativeInputV2 accepts undefined samplesPerDispatch but rejects invalid values', () => {
   const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
   const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
   const ok = { width: 8, height: 8, samples: 1 };
@@ -656,7 +659,7 @@ test('buildNativeInputV2 accepts undefined samplesPerDispatch but rejects invali
 // Boundary validation: bounce limits (non-finite / negative / float / over-bound rejection)
 // ---------------------------------------------------------------------------
 
-test('buildNativeInputV2 rejects non-finite and out-of-range bounce limit values', () => {
+cookTest('buildNativeInputV2 rejects non-finite and out-of-range bounce limit values', () => {
   const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
   const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
   const ok = { width: 8, height: 8, samples: 1 };
@@ -690,7 +693,7 @@ test('buildNativeInputV2 rejects non-finite and out-of-range bounce limit values
 // Boundary validation: upgradeNativeInputV1ToV2 validates options too
 // ---------------------------------------------------------------------------
 
-test('upgradeNativeInputV1ToV2 validates width, height, samples, samplesPerDispatch, and bounce fields', () => {
+cookTest('upgradeNativeInputV1ToV2 validates width, height, samples, samplesPerDispatch, and bounce fields', () => {
   // Minimal valid v1 input (parameters = 256-byte Uint8Array with triangleCount = 0 triangle data).
   const parameters = new Uint8Array(256);
   const v1Input = { parameters, triangleCount: 0, triangles: new Float32Array(0), materials: new Float32Array(0) };
@@ -708,7 +711,7 @@ test('upgradeNativeInputV1ToV2 validates width, height, samples, samplesPerDispa
   );
 });
 
-test('traceNative and probeCyclesLobe validate options at the public boundary even on pre-built v2 inputs', () => {
+cookTest('traceNative and probeCyclesLobe validate options at the public boundary even on pre-built v2 inputs', () => {
   const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
   const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
   const v2Input = buildNativeInputV2(minimalScene, camera, { width: 8, height: 8, samples: 1 });
@@ -725,7 +728,7 @@ test('traceNative and probeCyclesLobe validate options at the public boundary ev
 // Boundary validation: pixel count, dispatch size, maxSeconds and number types
 // ---------------------------------------------------------------------------
 
-test('traceNative bounds the pixel count by the accumulation buffer and states the largest size', () => {
+cookTest('traceNative bounds the pixel count by the accumulation buffer and states the largest size', () => {
   const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
   const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
   const v2Input = buildNativeInputV2(minimalScene, camera, { width: 8, height: 8, samples: 1 });
@@ -739,7 +742,7 @@ test('traceNative bounds the pixel count by the accumulation buffer and states t
   assert.doesNotThrow(() => validatePackOptions({ width: 16384, height: 1, samples: 1 }, 'traceNative', true));
 });
 
-test('traceNative bounds samplesPerDispatch times pixel count and says what to pass', () => {
+cookTest('traceNative bounds samplesPerDispatch times pixel count and says what to pass', () => {
   const options = { width: 4096, height: 4096, samples: 64 };
   assert.doesNotThrow(() => validatePackOptions({ ...options, samplesPerDispatch: 16 }, 'traceNative', true));
   assert.throws(
@@ -749,7 +752,7 @@ test('traceNative bounds samplesPerDispatch times pixel count and says what to p
   assert.doesNotThrow(() => validatePackOptions({ width: 8, height: 8, samples: 1, samplesPerDispatch: 65536 }, 'traceNative', true));
 });
 
-test('traceNative validates maxSeconds when given', () => {
+cookTest('traceNative validates maxSeconds when given', () => {
   const base = { width: 8, height: 8, samples: 1 };
   assert.doesNotThrow(() => validatePackOptions({ ...base, maxSeconds: undefined }, 'traceNative', true));
   assert.doesNotThrow(() => validatePackOptions({ ...base, maxSeconds: 0.5 }, 'traceNative', true));
@@ -762,7 +765,7 @@ test('traceNative validates maxSeconds when given', () => {
   assert.throws(() => probeCyclesLobe({ width: 8, height: 8, maxSeconds: 0 }), /maxSeconds/);
 });
 
-test('pack options reject strings, booleans, arrays and null instead of coercing them', () => {
+cookTest('pack options reject strings, booleans, arrays and null instead of coercing them', () => {
   const base = { width: 8, height: 8, samples: 1 };
   for (const field of ['width', 'height', 'samples', 'samplesPerDispatch', 'bounces', 'minBounceRr']) {
     for (const invalid of ['8', true, [8], null]) {
@@ -799,7 +802,7 @@ function readEnvironmentConditionalProbabilities(packedInput, width, height) {
   return probabilities;
 }
 
-test('envCompensation is off by default and leaves the environment table unchanged', () => {
+cookTest('envCompensation is off by default and leaves the environment table unchanged', () => {
   const withoutOption = packSunnyEnvironment({});
   const withFalse = packSunnyEnvironment({ envCompensation: false });
   const withZero = packSunnyEnvironment({ envCompensation: 0 });
@@ -807,7 +810,7 @@ test('envCompensation is off by default and leaves the environment table unchang
   assert.deepEqual(withZero.environmentTexels, withoutOption.environmentTexels);
 });
 
-test('envCompensation removes the dim texels from the sampling table and keeps the CDFs valid', () => {
+cookTest('envCompensation removes the dim texels from the sampling table and keeps the CDFs valid', () => {
   const plain = packSunnyEnvironment({});
   const compensated = packSunnyEnvironment({ envCompensation: true });
   const width = 16;
@@ -831,7 +834,7 @@ test('envCompensation removes the dim texels from the sampling table and keeps t
   assert.ok(compensated.environmentTexels[0] === plain.environmentTexels[0], 'radiance texels are untouched');
 });
 
-test('envCompensation keeps the original table for a uniform map and rejects bad values', () => {
+cookTest('envCompensation keeps the original table for a uniform map and rejects bad values', () => {
   const width = 8;
   const height = 4;
   const uniformMap = createEnvironmentMap({ width, height, data: new Float32Array(width * height * 3).fill(0.5), intensity: 1 });

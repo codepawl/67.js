@@ -1,18 +1,22 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import {
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
+import { createCamera } from '../src/path-tracer.js';
+import * as pack from '../src/path-tracer-gpu-pack.js';
+import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const jobInputModule = await cookModule('job-input');
+const {
   STRUCT_STRIDES_V2,
   buildNativeInputV2,
   findNativeAddon,
   packMaterialRecordV2,
   planNativeSessionUpdate,
   traceNative,
-} from '../packages/render-native/index.mjs';
-import { INVALID_INDEX_V2, shareEqualMaterialRecords } from '../packages/render-native/pack-input-v2.mjs';
-import { buildJobNativeInput } from '../packages/render-native/job-input.mjs';
-import { createCamera } from '../src/path-tracer.js';
-import * as pack from '../src/path-tracer-gpu-pack.js';
-import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
+} = cook ?? {};
+const { INVALID_INDEX_V2, shareEqualMaterialRecords } = packV2 ?? {};
+const { buildJobNativeInput } = jobInputModule ?? {};
 
 const WIDTH = 32;
 const HEIGHT = 24;
@@ -56,7 +60,7 @@ function recordHex(input, recordIndex) {
   return Buffer.from(input.materials.buffer, start, STRUCT_STRIDES_V2.material).toString('hex');
 }
 
-test('records with equal bytes share one record, in the order of their first part', () => {
+cookTest('records with equal bytes share one record, in the order of their first part', () => {
   const grey = () => packMaterialRecordV2({ color: [0.6, 0.6, 0.6], roughness: 0.7 });
   const red = () => packMaterialRecordV2({ color: [0.8, 0.1, 0.1], roughness: 0.7 });
   const { records, recordIndexOf } = shareEqualMaterialRecords([grey(), red(), grey(), red(), grey()]);
@@ -64,14 +68,14 @@ test('records with equal bytes share one record, in the order of their first par
   assert.deepEqual([0, 1, 2, 3, 4].map(recordIndexOf), [0, 1, 0, 1, 0]);
 });
 
-test('a scene without equal records keeps its table', () => {
+cookTest('a scene without equal records keeps its table', () => {
   const materials = [0.1, 0.2, 0.3, 0.4].map(roughness => packMaterialRecordV2({ roughness }));
   const { records, recordIndexOf } = shareEqualMaterialRecords(materials);
   assert.equal(records.length, 4);
   assert.deepEqual([0, 1, 2, 3].map(recordIndexOf), [0, 1, 2, 3]);
 });
 
-test('any differing material field keeps its own record', () => {
+cookTest('any differing material field keeps its own record', () => {
   const base = { color: [0.6, 0.5, 0.4], roughness: 0.5 };
   const variations = {
     color: { color: [0.6, 0.5, 0.41] },
@@ -97,7 +101,7 @@ test('any differing material field keeps its own record', () => {
   }
 });
 
-test('the diffuse transmission of a record, which sits outside its 256 bytes, keeps records apart', () => {
+cookTest('the diffuse transmission of a record, which sits outside its 256 bytes, keeps records apart', () => {
   const sheet = { color: [0.6, 0.5, 0.4], roughness: 0.5, diffuseTransmission: 0.5 };
   const variations = {
     none: { diffuseTransmission: 0 },
@@ -114,7 +118,7 @@ test('the diffuse transmission of a record, which sits outside its 256 bytes, ke
   assert.deepEqual([0, 1, 2, 3].map(recordIndexOf), [0, 1, 0, 1]);
 });
 
-test('records that differ only in a texture slot stay apart, equal textures share', () => {
+cookTest('records that differ only in a texture slot stay apart, equal textures share', () => {
   const imageA = { image: { width: 1, height: 1, data: new Uint8ClampedArray([255, 0, 0, 255]) }, colorSpace: 'srgb' };
   const imageB = { image: { width: 1, height: 1, data: new Uint8ClampedArray([0, 0, 255, 255]) }, colorSpace: 'srgb' };
   const parts = [{ map: imageA }, { map: imageA }, { map: imageB }, { metallicRoughnessMap: imageA }, {}].map(material => ({ color: [1, 1, 1], ...material }));
@@ -123,7 +127,7 @@ test('records that differ only in a texture slot stay apart, equal textures shar
   assert.equal(input.materialCount, 4, 'two parts with the same image share, the others differ in the image or the slot');
 });
 
-test('copies of a mesh with equal materials share one record and need no override', () => {
+cookTest('copies of a mesh with equal materials share one record and need no override', () => {
   const copyCount = 12;
   const parts = Array.from({ length: copyCount }, (_, index) => placedPart(index, { color: [0.6, 0.6, 0.6], roughness: 0.7 }));
   const input = jobInput(parts);
@@ -135,7 +139,7 @@ test('copies of a mesh with equal materials share one record and need no overrid
   assert.equal(wordAt(input.triangles, 0, STRUCT_STRIDES_V2.triangle, MATERIAL_INDEX_OFFSET_IN_TRIANGLE), 0);
 });
 
-test('a copy with another material keeps an override to its own record', () => {
+cookTest('a copy with another material keeps an override to its own record', () => {
   const grey = () => ({ color: [0.6, 0.6, 0.6], roughness: 0.7 });
   const red = () => ({ color: [0.8, 0.1, 0.1], roughness: 0.7 });
   const parts = [grey(), red(), grey(), red(), grey()].map((material, index) => placedPart(index, material));
@@ -145,7 +149,7 @@ test('a copy with another material keeps an override to its own record', () => {
   assert.notEqual(recordHex(input, 0), recordHex(input, 1));
 });
 
-test('an explicit override and an override flag point at the shared record', () => {
+cookTest('an explicit override and an override flag point at the shared record', () => {
   const grey = () => ({ color: [0.6, 0.6, 0.6], roughness: 0.7 });
   const red = () => ({ color: [0.8, 0.1, 0.1], roughness: 0.7 });
   const scene = buildTraceScene([grey(), red(), grey(), red()].map((material, index) => placedPart(index, material)), environment, { instancing: true });
@@ -160,7 +164,7 @@ test('an explicit override and an override flag point at the shared record', () 
   assert.equal(instanceOverride(input, 2), 0, 'part 2 is grey, whose record is 0');
 });
 
-test('a mesh with per-triangle materials names the shared records in its triangles', () => {
+cookTest('a mesh with per-triangle materials names the shared records in its triangles', () => {
   const twoMaterialMesh = { ...quad, triangleMaterial: Uint32Array.from([0, 3]) };
   const grey = () => ({ color: [0.6, 0.6, 0.6] });
   const materials = [grey(), { color: [0.8, 0.1, 0.1] }, grey(), grey()];
@@ -175,7 +179,7 @@ test('a mesh with per-triangle materials names the shared records in its triangl
   }
 });
 
-test('emissive copies share a record and their emissive entries name it', () => {
+cookTest('emissive copies share a record and their emissive entries name it', () => {
   const lamp = () => ({ color: [1, 0.8, 0.6], emission: 4 });
   const wall = () => ({ color: [0.6, 0.6, 0.6], roughness: 0.7 });
   const parts = [lamp(), wall(), lamp(), wall(), lamp()].map((material, index) => placedPart(index, material));
@@ -187,7 +191,7 @@ test('emissive copies share a record and their emissive entries name it', () => 
   }
 });
 
-test('a material update to one part leaves the parts that shared its record alone', () => {
+cookTest('a material update to one part leaves the parts that shared its record alone', () => {
   const grey = () => ({ color: [0.6, 0.6, 0.6], roughness: 0.7 });
   const before = jobInput([grey(), grey(), grey(), { color: [0.8, 0.1, 0.1], roughness: 0.7 }].map((material, index) => placedPart(index, material)));
   assert.equal(before.materialCount, 2);
@@ -204,7 +208,7 @@ test('a material update to one part leaves the parts that shared its record alon
   assert.notEqual(instanceOverride(sharedPartChanges, 1), INVALID_INDEX_V2, 'the changed part reads a record of its own');
 });
 
-test('a material update that remaps parts to other records is refused, not applied', () => {
+cookTest('a material update that remaps parts to other records is refused, not applied', () => {
   const grey = () => ({ color: [0.6, 0.6, 0.6], roughness: 0.7 });
   const red = () => ({ color: [0.8, 0.1, 0.1], roughness: 0.7 });
   const green = () => ({ color: [0.1, 0.8, 0.1], roughness: 0.7 });
@@ -217,7 +221,7 @@ test('a material update that remaps parts to other records is refused, not appli
   assert.throws(() => planNativeSessionUpdate(before, regrouped), { message: /`materialCount` changes from 2 to 3/ });
 });
 
-const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
+const addonSkip = cookInstalled && findNativeAddon() ? false : 'the native addon is not built';
 
 // Rebuilds the input the way it was packed before records were shared: every instance reads a copy of the record it resolves to,
 // appended after the shared table through its override. A non-emissive scene sees the same materials by either layout.
@@ -241,7 +245,7 @@ function withUnsharedRecords(input) {
   return { ...input, instances, materials, materialCount, kernelParams };
 }
 
-test('shared records trace the picture of one record per part', { skip: addonSkip }, t => {
+cookTest('shared records trace the picture of one record per part', { skip: addonSkip }, t => {
   const grey = () => ({ color: [0.6, 0.6, 0.6], roughness: 0.7 });
   const red = () => ({ color: [0.8, 0.1, 0.1], roughness: 0.7 });
   const parts = [grey(), red(), grey(), red(), grey(), red()].map((material, index) => placedPart(index, material));

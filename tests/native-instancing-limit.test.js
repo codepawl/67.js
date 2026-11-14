@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { meanRatioRgb, relativeMeanSquaredError, tileMeanRatios } from '../bench/instancing/image-compare.mjs';
 import {
   CARD_FIELD_ENVIRONMENT,
@@ -10,6 +9,9 @@ import {
   cardFieldCamera,
 } from '../bench/cycles-parity/native-instance-scene.mjs';
 import { buildTraceScene, MAX_TRACE_INSTANCES } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const { buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
 
 // More instances than the 65,536 of the CPU and WebGL tracers, on the native "cycles" kernel, against the same cards merged into
 // two world-space meshes. The cards from index 65,536 on are red, so a picture without those instances has no red in their band.
@@ -37,9 +39,9 @@ function redPixelCount(rgba) {
   return count;
 }
 
-const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
+const addonSkip = !cookInstalled || !findNativeAddon() ? 'the native addon is not built' : false;
 
-test('more than 65,536 instances of one card render the picture of the same cards merged', { skip: addonSkip }, t => {
+cookTest('more than 65,536 instances of one card render the picture of the same cards merged', { skip: addonSkip }, t => {
   const redFrom = MAX_TRACE_INSTANCES;
   let merged;
   try {

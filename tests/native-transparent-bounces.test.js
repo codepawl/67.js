@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { loadReferenceScene } from '../bench/cycles-parity/scene-bridge.mjs';
 import { buildTraceSceneWithManyLights } from '../bench/cycles-parity/trace-scene-many-lights.mjs';
-import { buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { createCamera } from '../src/path-tracer.js';
 
-const hasAddon = findNativeAddon() !== null;
+const cook = await cookModule();
+const { buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
+const hasAddon = cookInstalled && findNativeAddon() !== null;
 const skipWithoutAddon = hasAddon ? false : 'the native addon is not built';
 
 const WIDTH = 240;
@@ -70,7 +71,7 @@ function assertWithinTolerance(actual, expected, label) {
   });
 }
 
-test('a transparent limit of 0 lets the path through the first layer, as Cycles does', { skip: skipWithoutAddon }, async () => {
+cookTest('a transparent limit of 0 lets the path through the first layer, as Cycles does', { skip: skipWithoutAddon }, async () => {
   const limitZero = await traceLimit(0);
   assertWithinTolerance(meanOfRegion(limitZero, [0, 1], [0, 1]), CYCLES_IMAGE_MEAN_AT_LIMIT_0_AND_1, 'image mean at limit 0');
   assertWithinTolerance(
@@ -80,7 +81,7 @@ test('a transparent limit of 0 lets the path through the first layer, as Cycles 
   );
 });
 
-test('a transparent limit of 1 matches Cycles and a limit of 0 renders the same picture', { skip: skipWithoutAddon }, async () => {
+cookTest('a transparent limit of 1 matches Cycles and a limit of 0 renders the same picture', { skip: skipWithoutAddon }, async () => {
   const limitZero = await traceLimit(0);
   const limitOne = await traceLimit(1);
   assertWithinTolerance(meanOfRegion(limitOne, [0, 1], [0, 1]), CYCLES_IMAGE_MEAN_AT_LIMIT_0_AND_1, 'image mean at limit 1');
@@ -91,7 +92,7 @@ test('a transparent limit of 1 matches Cycles and a limit of 0 renders the same 
   );
 });
 
-test('shadow rays spend what is left of the limit after the camera path passed layers', { skip: skipWithoutAddon }, async () => {
+cookTest('shadow rays spend what is left of the limit after the camera path passed layers', { skip: skipWithoutAddon }, async () => {
   const limitTwo = await traceLimit(2);
   assertWithinTolerance(meanOfRegion(limitTwo, [0, 1], [0, 1]), CYCLES_IMAGE_MEAN_AT_LIMIT_2, 'image mean at limit 2');
   assertWithinTolerance(

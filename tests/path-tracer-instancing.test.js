@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeInput, buildNativeInputV2, STRUCT_STRIDES_V2 } from '../packages/render-native/index.mjs';
+import { cookModule, cookTest } from './support/cook.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { MAX_TRACE_INSTANCES, MAX_TRACE_PARTS, MAX_TRACE_TRIANGLES, buildTraceScene } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const { buildNativeInput, buildNativeInputV2, STRUCT_STRIDES_V2 } = cook ?? {};
 
 function quadGeometry(z = 0) {
   return {
@@ -138,7 +141,7 @@ test('an invalid matrix or geometry in an instanced scene is named by its part',
   assert.throws(() => buildTraceScene(copiesOf(brokenGeometry, 2), {}, { instancing: true }), /index past its last vertex/);
 });
 
-test('N copies of one mesh pack as one geometry record set and N instance records', () => {
+cookTest('N copies of one mesh pack as one geometry record set and N instance records', () => {
   const camera = createCamera({ eye: [0, 0, 40], target: [0, 0, 0], fov: 45 }, 16, 16);
   const copyCount = 200;
   const parts = copiesOf(quadGeometry(), copyCount);
@@ -153,7 +156,7 @@ test('N copies of one mesh pack as one geometry record set and N instance record
   assert.ok(instanced.triangles.byteLength < flattened.triangles.byteLength);
 });
 
-test('the legacy v1 packer refuses an instanced scene and says what to use instead', () => {
+cookTest('the legacy v1 packer refuses an instanced scene and says what to use instead', () => {
   const camera = createCamera({ eye: [0, 0, 40], target: [0, 0, 0], fov: 45 }, 16, 16);
   const scene = buildTraceScene(copiesOf(quadGeometry(), 3), {}, { instancing: true });
   assert.throws(() => buildNativeInput(scene, camera, { width: 16, height: 16, samples: 1, bounces: 2, seed: 1 }, pack), /cannot read instances.*buildNativeInputV2.*"cycles"/);

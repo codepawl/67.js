@@ -3,7 +3,7 @@
 //   node bench/oidn-cost/measure-oidn-cost.mjs --out <result.json> [--sizes 960x540,1920x1080] [--devices cpu,cuda] [--warm 7]
 //
 // Needs the oidnDenoise tool and its library (npm run fetch in packages/denoise-oidn, or OIDN_DENOISE_PATH) and the built
-// render-native addon. For each size and device it reports:
+// Cook addon. For each size and device it reports:
 //   - the oidnDenoise tool call split into PFM encode, PFM file write, process start to exit, PFM read and decode,
 //     with the bare process start (`--version`) beside it;
 //   - the in-process device: creation, first call and warm calls split into commit, buffer writes, execute and read;
@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { createOidnDenoiser, decodePfm, denoiseWithOidn, encodePfm, findOidnBinary } from '../../packages/denoise-oidn/index.mjs';
-import { createNativeOidnDenoiser, findNativeAddon } from '../../packages/render-native/index.mjs';
+import { createNativeOidnDenoiser, findNativeAddon } from '@codepawlhq/cook';
 
 function readOption(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -221,7 +221,7 @@ async function main() {
   const warmCount = Number(readOption('--warm', '7'));
   const binary = findOidnBinary();
   if (!binary) throw new Error('The oidnDenoise tool is not installed: run `npm run fetch` in packages/denoise-oidn, or set OIDN_DENOISE_PATH.');
-  if (!findNativeAddon()) throw new Error('The render-native addon is not built: run `npm run build` in packages/render-native.');
+  if (!findNativeAddon()) throw new Error('The Cook addon is not built: run `npm run cook:build`.');
   const result = { oidnBinary: 'oidnDenoise', devices, sizes: [], rows: [] };
   for (const [width, height] of sizes) {
     const images = makeImages(width, height);

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
 import { createCamera } from '../src/path-tracer.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const { buildNativeInputV2, findNativeAddon, traceNative } = (await cookModule()) ?? {};
+const { buildNativeInput } = (await cookModule('pack-input')) ?? {};
+
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 
 const UNIT_QUAD = {
   positions: new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]),
@@ -54,7 +55,7 @@ function assertSameBytes(first, second, message) {
   }
 }
 
-test('the cycles kernel gives the same bytes whatever the samples per dispatch', { skip: skipWithoutAddon }, () => {
+cookTest('the cycles kernel gives the same bytes whatever the samples per dispatch', { skip: skipWithoutAddon }, () => {
   const camera = createCamera({ eye: [0, 2.2, 6], target: [0, 0.5, 0], fov: 45 }, IMAGE_OPTIONS.width, IMAGE_OPTIONS.height);
   const input = buildNativeInputV2(buildRoomScene(), camera, IMAGE_OPTIONS);
   const traceWith = (samplesPerDispatch) => traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles', samplesPerDispatch });
@@ -68,7 +69,7 @@ test('the cycles kernel gives the same bytes whatever the samples per dispatch',
   }
 });
 
-test('the cycles kernel gives the same bytes when adaptive sampling stops pixels early, whatever the split', { skip: skipWithoutAddon }, () => {
+cookTest('the cycles kernel gives the same bytes when adaptive sampling stops pixels early, whatever the split', { skip: skipWithoutAddon }, () => {
   const camera = createCamera({ eye: [0, 2.2, 6], target: [0, 0.5, 0], fov: 45 }, IMAGE_OPTIONS.width, IMAGE_OPTIONS.height);
   const adaptiveOptions = { ...IMAGE_OPTIONS, samples: 128, noiseThreshold: 0.05 };
   const input = buildNativeInputV2(buildRoomScene(), camera, adaptiveOptions);
@@ -77,7 +78,7 @@ test('the cycles kernel gives the same bytes when adaptive sampling stops pixels
   assertSameBytes(oneAtATime, split, '37 samples per dispatch against 1 with a noise threshold');
 });
 
-test('two renders that size their own dispatches from timing give the same bytes', { skip: skipWithoutAddon }, () => {
+cookTest('two renders that size their own dispatches from timing give the same bytes', { skip: skipWithoutAddon }, () => {
   const camera = createCamera({ eye: [0, 2.2, 6], target: [0, 0.5, 0], fov: 45 }, IMAGE_OPTIONS.width, IMAGE_OPTIONS.height);
   const input = buildNativeInputV2(buildRoomScene(), camera, IMAGE_OPTIONS);
   const first = traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles' });
@@ -85,7 +86,7 @@ test('two renders that size their own dispatches from timing give the same bytes
   assertSameBytes(first, second, 'two untimed-split renders');
 });
 
-test('the legacy kernel draws one sample per dispatch, so two renders give the same bytes', { skip: skipWithoutAddon }, () => {
+cookTest('the legacy kernel draws one sample per dispatch, so two renders give the same bytes', { skip: skipWithoutAddon }, () => {
   const camera = createCamera({ eye: [0, 1, 4], target: [0, 1, 0], fov: 50 }, IMAGE_OPTIONS.width, IMAGE_OPTIONS.height);
   const parts = [{ name: 'floor', geometry: FLOOR, material: { color: [0.5, 0.5, 0.5] } }];
   const input = buildNativeInput(buildTraceScene(parts, {}), camera, IMAGE_OPTIONS, pack);

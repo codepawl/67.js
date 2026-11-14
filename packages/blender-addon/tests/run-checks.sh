@@ -11,7 +11,7 @@ OUT=artifacts/900
 mkdir -p "$OUT"
 status=0
 
-(cd packages/render-native && node build.mjs) > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "BUILD FAILED"; exit 1; }
+npm run cook:build > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "BUILD FAILED"; exit 1; }
 export COOK_NATIVE_DIR="$PWD"
 
 echo "== python tests"

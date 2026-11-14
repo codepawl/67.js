@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findNativeAddon, prepareCyclesInput, traceNative } from '../packages/render-native/index.mjs';
-import { buildFlattenedJobNativeInput } from '../packages/render-native/job-input.mjs';
 import { createCamera, describeIgnoredFeatures } from '../src/path-tracer.js';
 import { BACK, ROOM_CAMERA, WINDOW, roomParts, skyMap, sphereParts, uniformSkyMap } from './helpers/camera-environment-scenes.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const { findNativeAddon, prepareCyclesInput, traceNative } = (await cookModule()) ?? {};
+const { buildFlattenedJobNativeInput } = (await cookModule('job-input')) ?? {};
+
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 
 // `camera_env_scale` (byte 304) of KernelParamsV2; bytes 308 to 311 hold portal_count and 312 to 319 the tile origin, zero in a pack.
 const CAMERA_ENV_SCALE_BYTE_OFFSET = 304;
@@ -121,7 +123,7 @@ test('cameraIntensity is checked at the public boundary and the error says what 
   assert.throws(() => buildTraceScene(roomParts(1), { cameraIntensity: 0.2 }), /environment\.cameraIntensity needs environment\.map/);
 });
 
-test('the packed word holds the camera factor, and only it differs from a pack without the field', () => {
+cookTest('the packed word holds the camera factor, and only it differs from a pack without the field', () => {
   const camera = cameraFor(ROOM_CAMERA);
   const plain = jobInputOf(roomParts(1), { map: skyMap(1) }, camera);
   const withField = jobInputOf(roomParts(1), { map: skyMap(1), cameraIntensity: 0.2 }, camera);
@@ -137,7 +139,7 @@ test('the packed word holds the camera factor, and only it differs from a pack w
   assert.equal(Buffer.compare(bytesOf(plain.environmentTexels), bytesOf(withField.environmentTexels)), 0, 'the map and its tables are the same');
 });
 
-test('the word is the factor on the lighting intensity, a signed zero for a black view, and an absolute strength when the lighting is off', () => {
+cookTest('the word is the factor on the lighting intensity, a signed zero for a black view, and an absolute strength when the lighting is off', () => {
   const camera = cameraFor(ROOM_CAMERA);
   const brighter = jobInputOf(roomParts(1), { map: skyMap(2), cameraIntensity: 0.5 }, camera);
   assert.equal(scaleValue(brighter), 0.25);
@@ -161,7 +163,7 @@ test('the CPU, WebGL and WebGPU tracers report that they ignore cameraIntensity;
   assert.ok(!describeIgnoredFeatures(parts, { map: skyMap(1) }, 'cpu').some(note => note.includes('cameraIntensity')));
 });
 
-test('a window drawn at 0.2 leaves every pixel that does not see the sky through the glass byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, context => {
+cookTest('a window drawn at 0.2 leaves every pixel that does not see the sky through the glass byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, context => {
   const camera = cameraFor(ROOM_CAMERA);
   const samples = 256;
   const reference = traceOf(roomParts(1), { map: skyMap(1) }, camera, samples);
@@ -185,7 +187,7 @@ test('a window drawn at 0.2 leaves every pixel that does not see the sky through
 });
 
 // The ball is about 49 pixels in radius at this size: the object region stays inside it, the sky region outside it.
-test('an open scene scales the sky pixels by the factor and leaves the object pixels byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, context => {
+cookTest('an open scene scales the sky pixels by the factor and leaves the object pixels byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, context => {
   const camera = cameraFor({ eye: [0, 0, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 30 });
   const samples = 64;
   const reference = traceOf(sphereParts(), { map: uniformSkyMap(1) }, camera, samples);
@@ -209,7 +211,7 @@ test('an open scene scales the sky pixels by the factor and leaves the object pi
   context.diagnostic(`object pixels byte-identical ${objectPixels}, sky pixels at 0.5 of the reference ${skyPixels}`);
 });
 
-test('a camera strength equal to the lighting intensity is the same image as leaving the field out', { skip: skipWithoutAddon, timeout: 600000 }, () => {
+cookTest('a camera strength equal to the lighting intensity is the same image as leaving the field out', { skip: skipWithoutAddon, timeout: 600000 }, () => {
   const camera = cameraFor(ROOM_CAMERA);
   const samples = 32;
   const reference = traceOf(roomParts(1.45), { map: skyMap(1.5) }, camera, samples);

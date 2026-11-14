@@ -1,6 +1,6 @@
 """Diffuse transmission parity (#1058): Cook against Blender Cycles on a thin sheet lit from behind and from the front.
 
-Run from the repository root on a machine with Blender 5.3, Node, a GPU and the built render-native addon:
+Run from the repository root on a machine with Blender 5.3, Node, a GPU and the Cook native addon built by npm run cook:build:
     uv run --no-project --with numpy python bench/cycles-parity/run-diffuse-transmission-parity.py <outputDirectory> [options]
 
 It writes the scenes of make-diffuse-transmission-scenes.mjs, renders each with Cycles and with Cook and prints one result line

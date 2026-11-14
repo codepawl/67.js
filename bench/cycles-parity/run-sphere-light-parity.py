@@ -1,6 +1,6 @@
 """Sphere light parity matrix (#1040): Cook against Blender Cycles on small scenes with one lamp that has a radius.
 
-Run from the repository root on a machine with Blender 5.3, Node, a GPU and the built render-native addon:
+Run from the repository root on a machine with Blender 5.3, Node, a GPU and the Cook native addon built by npm run cook:build:
     uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py <outputDirectory> [options]
 
 It exports `lit-interior`, writes the scenes of make-sphere-light-scenes.mjs, renders each one with Cycles (grey diffuse

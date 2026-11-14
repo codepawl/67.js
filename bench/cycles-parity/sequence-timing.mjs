@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../../src/path-tracer-scene.js';
-import * as renderNative from '../../packages/render-native/index.mjs';
+import * as renderNative from '@codepawlhq/cook';
 import { PHASE_NAMES, averageOfWarmFrames, readFlag, runSequence } from './sequence-bench-core.mjs';
 import { applyCookOnlyFields } from './cook-only-fields.mjs';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';

@@ -1,12 +1,8 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import {
-  buildNativeInputV2,
-  packCameraParams,
-  resolveSessionFrame,
-  resolveSessionCreation,
-} from '../packages/render-native/index.mjs';
 import { createCamera } from '../src/path-tracer.js';
+import { cookModule, cookTest } from './support/cook.js';
+
+const { buildNativeInputV2, packCameraParams, resolveSessionFrame, resolveSessionCreation } = (await cookModule()) ?? {};
 
 const UNIT_QUAD = {
   positions: new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]),
@@ -48,7 +44,7 @@ const pinholeView = { eye: [1.5, 2.2, 5] };
 const thinLensView = { eye: [-2, 1.4, 4], fStop: 2.8, focusDistance: 4.5 };
 
 for (const [name, view] of [['a pinhole camera', pinholeView], ['a thin lens camera', thinLensView]]) {
-  test(`packCameraParams equals a full repack with ${name}`, () => {
+  cookTest(`packCameraParams equals a full repack with ${name}`, () => {
     const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }));
     const camera = cameraFor(view);
     const patched = packCameraParams(heldBlock, camera);
@@ -59,7 +55,7 @@ for (const [name, view] of [['a pinhole camera', pinholeView], ['a thin lens cam
   });
 }
 
-test('packCameraParams leaves its input alone and writes the seed with the camera', () => {
+cookTest('packCameraParams leaves its input alone and writes the seed with the camera', () => {
   const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }));
   const copy = new Uint8Array(heldBlock);
   const camera = cameraFor(thinLensView);
@@ -71,7 +67,7 @@ test('packCameraParams leaves its input alone and writes the seed with the camer
   assert.ok(changed.length > 0, 'the seed word changed');
 });
 
-test('packCameraParams keeps the block seed when no seed is given and writes seed 0 and the largest seed', () => {
+cookTest('packCameraParams keeps the block seed when no seed is given and writes seed 0 and the largest seed', () => {
   const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }), { seed: 9 });
   const camera = cameraFor(pinholeView);
   assert.deepEqual(packCameraParams(heldBlock, camera), fullBlock(camera, { seed: 9 }));
@@ -79,7 +75,7 @@ test('packCameraParams keeps the block seed when no seed is given and writes see
   assert.deepEqual(packCameraParams(heldBlock, camera, { seed: 4294967295 }), fullBlock(camera, { seed: 4294967295 }));
 });
 
-test('packCameraParams follows the camera options of the packer: orthographic bit, far plane and sensor shift', () => {
+cookTest('packCameraParams follows the camera options of the packer: orthographic bit, far plane and sensor shift', () => {
   const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }));
   const camera = { ...cameraFor(pinholeView), far: 77, lensShift: [0.1, -0.05], orthographic: true };
   assert.deepEqual(packCameraParams(heldBlock, camera), fullBlock(camera));
@@ -100,7 +96,7 @@ const packOptionsForCamera = {
   apertureRotation: 0.3,
 };
 
-test('packCameraParams keeps what the block was packed with through pack options when the camera leaves it out', () => {
+cookTest('packCameraParams keeps what the block was packed with through pack options when the camera leaves it out', () => {
   const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }), packOptionsForCamera);
   const bareCamera = cameraFor(pinholeView);
   const patched = packCameraParams(heldBlock, bareCamera);
@@ -119,7 +115,7 @@ test('packCameraParams keeps what the block was packed with through pack options
   assert.notEqual(wordsAsIntegers[8] & 8, 0, 'orthographic bit kept');
 });
 
-test('packCameraParams lets a field the camera or the options carry win over the block', () => {
+cookTest('packCameraParams lets a field the camera or the options carry win over the block', () => {
   const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }), packOptionsForCamera);
   const ownCamera = {
     ...cameraFor(thinLensView),
@@ -142,7 +138,7 @@ test('packCameraParams lets a field the camera or the options carry win over the
   assert.equal(optionWords[43], 5.5, 'focal distance still from the block');
 });
 
-test('packCameraParams validates the block, the camera, the seed and the aspect', () => {
+cookTest('packCameraParams validates the block, the camera, the seed and the aspect', () => {
   const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }));
   const camera = cameraFor(pinholeView);
   assert.throws(() => packCameraParams(new Uint8Array(8), camera), { name: 'TypeError', message: /320 bytes/ });
@@ -164,7 +160,7 @@ test('packCameraParams validates the block, the camera, the seed and the aspect'
   assert.throws(() => packCameraParams(heldBlock, { ...camera, aperture: 0, apertureRadius: -1 }), { name: 'RangeError', message: /apertureRadius/ });
 });
 
-test('a frame with a camera and a seed carries them in its block and refuses a bad seed or a camera of another aspect', () => {
+cookTest('a frame with a camera and a seed carries them in its block and refuses a bad seed or a camera of another aspect', () => {
   const input = buildNativeInputV2(floorScene(), cameraFor({ eye: [0, 2.2, 6] }), IMAGE);
   const sessionInput = resolveSessionCreation(input, {});
   const defaults = { width: IMAGE.width, height: IMAGE.height, samples: 4 };

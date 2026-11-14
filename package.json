@@ -164,6 +164,7 @@
     "test:isolated": "node scripts/test-each-file.mjs",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-exclude=\"scripts/**\" --test-coverage-exclude=\"build/**\"",
     "coverage:gate": "node scripts/coverage-gate.mjs",
+    "cook:build": "node node_modules/@codepawlhq/cook/build.mjs",
     "preflight": "node scripts/preflight.mjs",
     "render:file-cook": "node scripts/render-file-native.mjs",
     "smoke": "node scripts/smoke.mjs",
@@ -259,6 +260,7 @@
   },
   "devDependencies": {
     "@codepawlhq/67js-denoise-oidn": "file:packages/denoise-oidn",
+    "@codepawlhq/cook": "git+https://github.com/codepawl/cook.git#5107699e9542df902cde2e55cc9b7ab6672d9ae0",
     "@dimforge/rapier3d-compat": "0.21.0",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/server": "2.4.0",

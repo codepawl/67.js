@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
-import { findNativeAddon, traceNative, upgradeNativeInputV1ToV2 } from '../packages/render-native/index.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { traceFrameNative } from '../scripts/agent-native-trace.mjs';
 import { exportNativeSceneTables } from '../scripts/native-bake-page.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene, refuseLocalVolumes, resolveTexture } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const packInput = await cookModule('pack-input');
+const jobInput = await cookModule('job-input');
+const { findNativeAddon, traceNative, upgradeNativeInputV1ToV2 } = cook ?? {};
+const { buildNativeInput } = packInput ?? {};
+const { buildFlattenedJobNativeInput, buildJobNativeInput } = jobInput ?? {};
 
 const WIDTH = 16;
 const HEIGHT = 16;
@@ -50,7 +54,7 @@ function mainsExport(matrices) {
 
 for (const [name, scene] of Object.entries(scenes)) {
   const { matrices, reason } = scene;
-  test(`${name} makes the emissive copies export flattened with the reason, and the tables equal the flattened job`, () => {
+  cookTest(`${name} makes the emissive copies export flattened with the reason, and the tables equal the flattened job`, () => {
     const exported = jobExport(matrices);
     assert.equal(exported.instancing, 'flattened');
     assert.match(exported.instancingReason, reason);
@@ -65,18 +69,18 @@ for (const [name, scene] of Object.entries(scenes)) {
   });
 }
 
-test('copies that all keep their triangles still export instanced', () => {
+cookTest('copies that all keep their triangles still export instanced', () => {
   const exported = jobExport([scaleAndMove(1, 1, 1, -2), scaleAndMove(0.5, 0.5, 0.5, 1)]);
   assert.equal(exported.instancing, undefined);
   assert.equal(exported.instances, 2);
 });
 
-const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
+const addonSkip = !cookInstalled || !findNativeAddon() ? 'the native addon is not built' : false;
 
 for (const [name, scene] of Object.entries(scenes)) {
   const { matrices, reason } = scene;
-  test(`${name} renders natively in a job frame, equal to the flattened trace`, { skip: addonSkip }, async t => {
-    const real = await import('../packages/render-native/index.mjs');
+  cookTest(`${name} renders natively in a job frame, equal to the flattened trace`, { skip: addonSkip }, async t => {
+    const real = await cookModule();
     let viaJob;
     const capturingTracer = { ...real, traceNative(tables, traceOptions) {
       viaJob = real.traceNative(tables, traceOptions);

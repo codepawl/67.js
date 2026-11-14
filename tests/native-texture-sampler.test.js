@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { STRUCT_STRIDES_V2, buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
-import { TEXTURE_POOL_MAX_BYTES } from '../packages/render-native/pack-input-v2.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { createCamera } from '../src/path-tracer.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const { STRUCT_STRIDES_V2, buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
+const { TEXTURE_POOL_MAX_BYTES } = packV2 ?? {};
+const addonIsBuilt = cookInstalled && findNativeAddon() !== null;
 
 const QUAD_UVS = new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]);
 
@@ -38,7 +42,7 @@ function readDescriptorWord(input, textureIndex, wordIndex) {
   return view[wordIndex];
 }
 
-test('a texture past the pool budget fails at packing with the size, the limit and what to pass', () => {
+cookTest('a texture past the pool budget fails at packing with the size, the limit and what to pass', () => {
   const oversize = { width: 16384, height: 32768, data: new Uint8Array(4) };
   assert.throws(
     () => packWithMaps([{ image: oversize, colorSpace: 'srgb' }]),
@@ -54,7 +58,7 @@ test('a texture past the pool budget fails at packing with the size, the limit a
   assert.equal(TEXTURE_POOL_MAX_BYTES, 1 << 30);
 });
 
-test('the pool holds each texture once, in order, and descriptors point at their own words', () => {
+cookTest('the pool holds each texture once, in order, and descriptors point at their own words', () => {
   const first = solidImage(4, 4, 10);
   const second = solidImage(8, 2, 200);
   const input = packWithMaps([{ image: first }, { image: second }]);
@@ -66,7 +70,7 @@ test('the pool holds each texture once, in order, and descriptors point at their
   assert.equal(input.textureTexels.length, 16 + 16);
 });
 
-test('two uv transforms of one image stay two descriptors (the dedupe key carries uvScale and uvOffset)', () => {
+cookTest('two uv transforms of one image stay two descriptors (the dedupe key carries uvScale and uvOffset)', () => {
   const image = solidImage(4, 4, 90);
   const same = packWithMaps([{ image }, { image }]);
   assert.equal(same.textureCount, 1);
@@ -116,7 +120,7 @@ function renderMirroredCutout(filter) {
 }
 
 for (const [label, filter] of [['nearest', { nearest: true }], ['bilinear', {}]]) {
-  test(`a mirrored alpha cutout is symmetric about its fold (${label}), as its shading is`, { skip: !findNativeAddon() }, () => {
+  cookTest(`a mirrored alpha cutout is symmetric about its fold (${label}), as its shading is`, { skip: !addonIsBuilt }, () => {
     const showsForeground = renderMirroredCutout(filter);
     const covered = showsForeground.filter(Boolean).length;
     assert.ok(covered > 0 && covered < showsForeground.length, 'the quad is partly opaque and partly clear');
@@ -125,7 +129,7 @@ for (const [label, filter] of [['nearest', { nearest: true }], ['bilinear', {}]]
   });
 }
 
-test('a pool of many small textures packs, uploads and renders', { skip: !findNativeAddon() }, () => {
+cookTest('a pool of many small textures packs, uploads and renders', { skip: !addonIsBuilt }, () => {
   const maps = Array.from({ length: 64 }, (_, index) => ({ image: solidImage(8, 8, 3 * index + 1), colorSpace: 'srgb' }));
   const input = packWithMaps(maps);
   assert.equal(input.textureCount, 64);
@@ -142,7 +146,7 @@ function readMaterialWord(input, materialIndex, wordIndex) {
   return view[wordIndex];
 }
 
-test('a masked material reads its base map alpha through base_color_tex, not through alpha_tex (whose red channel it would multiply in)', () => {
+cookTest('a masked material reads its base map alpha through base_color_tex, not through alpha_tex (whose red channel it would multiply in)', () => {
   const image = solidImage(4, 4, 200);
   const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 40 }, 8, 8);
   const input = buildNativeInputV2(
@@ -164,7 +168,7 @@ test('a masked material reads its base map alpha through base_color_tex, not thr
 
 // Two texels, black and white, on a quad seen head on and lit by nothing: the pixel on the seam between them is the blend of the
 // two. Blender Cycles blends the stored 8-bit values (0.5) and decodes the blend (0.214); decoding each texel first gives 0.5 (#1030).
-test('an sRGB colour map is blended on its stored values and decoded after, as Cycles does', { skip: !findNativeAddon() }, () => {
+cookTest('an sRGB colour map is blended on its stored values and decoded after, as Cycles does', { skip: !addonIsBuilt }, () => {
   const size = 9;
   const camera = createCamera({ eye: [0, 0, 2.2], target: [0, 0, 0], fov: 30 }, size, size);
   const blackThenWhite = { width: 2, height: 1, data: new Uint8Array([0, 0, 0, 255, 255, 255, 255, 255]) };
@@ -197,7 +201,7 @@ function meanChannels(rgba) {
 // A floor lit only by an emitter whose map is a high-contrast sRGB checker, seen from above so the emitter is out of the picture.
 // Light sampling and bounce rays estimate the same floor, so their means agree when a light sample carries the map read at the
 // sampled point. A light sample that carried the mean of the decoded texels instead is 10 percent or more too bright (#1030).
-test('a light sample on an emissive map reads the map at the sampled point, like a ray that hits it', { skip: !findNativeAddon() }, () => {
+cookTest('a light sample on an emissive map reads the map at the sampled point, like a ray that hits it', { skip: !addonIsBuilt }, () => {
   const width = 48;
   const height = 32;
   const samples = 512;
@@ -236,7 +240,7 @@ test('a light sample on an emissive map reads the map at the sampled point, like
 // A cutout casts a hard shadow: a texel above the cutoff is solid whatever its stored alpha. The same quad with every texel at an
 // alpha of 0.8 and at 1.0 must shade the floor under it alike; a shadow ray that took 0.8 as partial transparency let 20 percent
 // of the light through (#1030).
-test('a cutout texel above the cutoff blocks light fully, whatever its stored alpha', { skip: !findNativeAddon() }, () => {
+cookTest('a cutout texel above the cutoff blocks light fully, whatever its stored alpha', { skip: !addonIsBuilt }, () => {
   const width = 48;
   const height = 32;
   const samples = 256;

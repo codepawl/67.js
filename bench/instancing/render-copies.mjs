@@ -5,8 +5,8 @@
 // A variant sets how the copies are placed: translate (default), rotscale (rotated, non-uniform scale), mirror (negative
 // determinant), mirror-rotscale, or emissive (translate, with one emissive material).
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { buildNativeInputV2, traceNative } from '../../packages/render-native/index.mjs';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
+import { buildNativeInputV2, traceNative } from '@codepawlhq/cook';
+import { buildNativeInput } from '@codepawlhq/cook/pack-input';
 import * as pack from '../../src/path-tracer-gpu-pack.js';
 import { buildCopyScene } from './copies-scene.mjs';
 import { createCamera } from '../../src/path-tracer.js';

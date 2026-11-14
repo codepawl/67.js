@@ -1,13 +1,17 @@
-import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
-import { buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
+import assert from 'node:assert/strict';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { chooseNativeInstancing, traceFrameNative } from '../scripts/agent-native-trace.mjs';
 import { encodeNativeInputV2 } from '../scripts/native-bake-page.js';
 import { buildCopyScene } from '../bench/instancing/copies-scene.mjs';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const packInput = await cookModule('pack-input');
+const { buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
+const { buildNativeInput } = packInput ?? {};
 
 const WIDTH = 8;
 const HEIGHT = 8;
@@ -30,7 +34,7 @@ function recordingTracer(received) {
   };
 }
 
-test('an instanced scene crosses the page boundary as FORMAT-v2 tables and arrives byte for byte', async () => {
+cookTest('an instanced scene crosses the page boundary as FORMAT-v2 tables and arrives byte for byte', async () => {
   const { input } = instancedInput('rotscale');
   const exported = JSON.parse(JSON.stringify({ ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount,
     instances: input.instanceCount, ignored: [] }));
@@ -51,7 +55,7 @@ test('an instanced scene crosses the page boundary as FORMAT-v2 tables and arriv
   assert.ok(input.triangleCount < 6 * 320, 'six copies of a 320 triangle mesh share one set of triangles');
 });
 
-test('a table with an unknown array type is refused with its name', async () => {
+cookTest('a table with an unknown array type is refused with its name', async () => {
   const { input } = instancedInput('translate');
   const exported = { ...encodeNativeInputV2(input), triangleCount: 0, triangles: 0, ignored: [] };
   exported.types = { ...exported.types, instances: 'Float64Array' };
@@ -61,7 +65,7 @@ test('a table with an unknown array type is refused with its name', async () => 
   );
 });
 
-test('the legacy packer refuses an instanced scene and a scene without shared geometry stays flattened', () => {
+cookTest('the legacy packer refuses an instanced scene and a scene without shared geometry stays flattened', () => {
   const { parts, environment, camera, scene } = instancedInput('translate');
   assert.throws(() => buildNativeInput(scene, camera, { width: WIDTH, height: HEIGHT }, pack), /cannot read instances/);
   const distinct = parts.map(part => ({ ...part, geometry: { ...part.geometry, positions: Float32Array.from(part.geometry.positions) } }));
@@ -77,7 +81,7 @@ test('a job instances on the cycles kernel unless JS67_NATIVE_INSTANCING=off or 
   assert.equal(chooseNativeInstancing({ JS67_NATIVE_KERNEL: 'legacy' }), false);
 });
 
-test('the job report counts the bytes handed to the tracer', async () => {
+cookTest('the job report counts the bytes handed to the tracer', async () => {
   const { input } = instancedInput('translate');
   const exported = JSON.parse(JSON.stringify({ ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, ignored: [] }));
   const traced = await traceFrameNative({ tracer: recordingTracer([]), exported, width: WIDTH, height: HEIGHT, samples: 4, denoise: 'none', kernel: 'cycles' });
@@ -85,13 +89,13 @@ test('the job report counts the bytes handed to the tracer', async () => {
   assert.equal(traced.report.inputBytes, expected);
 });
 
-const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
+const addonSkip = !cookInstalled || !findNativeAddon() ? 'the native addon is not built' : false;
 
-test('a job frame of an instanced scene equals the direct trace of the same input', { skip: addonSkip }, async t => {
+cookTest('a job frame of an instanced scene equals the direct trace of the same input', { skip: addonSkip }, async t => {
   const { input } = instancedInput('rotscale');
   const exported = JSON.parse(JSON.stringify({ ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount,
     instances: input.instanceCount, ignored: [] }));
-  const real = await import('../packages/render-native/index.mjs');
+  const real = await cookModule();
   let direct;
   let viaJob;
   const capturingTracer = { ...real, traceNative(tables, options) {

@@ -3,8 +3,8 @@
 //   node bench/cycles-parity/native-identity-pngs.mjs
 import { createHash } from 'node:crypto';
 import * as pack from '../../src/path-tracer-gpu-pack.js';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../../packages/render-native/job-input.mjs';
+import { buildNativeInput } from '@codepawlhq/cook/pack-input';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '@codepawlhq/cook/job-input';
 import { buildTraceScene, refuseLocalVolumes, resolveTexture } from '../../src/path-tracer-scene.js';
 import { exportNativeSceneTables } from '../../scripts/native-bake-page.js';
 import { NATIVE_CAP_ENVIRONMENT, NATIVE_CAP_PACK_OPTIONS, buildNativeCapParts, nativeCapCamera } from './native-cap-scene.mjs';
@@ -25,7 +25,7 @@ const routes = [
   { name: 'legacy', kernel: 'legacy', instancing: false },
 ];
 
-const tracer = await import('../../packages/render-native/index.mjs');
+const tracer = await import('@codepawlhq/cook');
 const { traceFrameNative } = await import('../../scripts/agent-native-trace.mjs');
 const hashes = {};
 for (const scene of scenes) {

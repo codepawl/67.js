@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
-import * as renderNative from '../../packages/render-native/index.mjs';
+import * as renderNative from '@codepawlhq/cook';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 

@@ -1,10 +1,10 @@
-// One timed trace of the demo room with the native ray query tracer (packages/render-native). Run it through gpu-lock.
+// One timed trace of the demo room with the native ray query tracer (Cook, @codepawlhq/cook). Run it through gpu-lock.
 //   node bench/native-tracer/run.mjs <output directory> [--samples 64] [--width 1920] [--height 1080] [--label run1]
 // Writes native-<label>.png (tone mapped as the browser harness does) and native-<label>.json.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
 import { resolve } from 'node:path';
-import { buildNativeInput, traceNative } from '../../packages/render-native/index.mjs';
+import { buildNativeInput, traceNative } from '@codepawlhq/cook';
 import { createAgentScene, loadAllAgentSceneModules, loadMeshBooleans, needsMeshBooleans, setManifoldModuleLoader } from '../../src/agent-scene.js';
 import { agentEnvironmentMap } from '../../src/agent-look.js';
 import { encodePng } from '../../src/export-png.js';

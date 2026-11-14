@@ -15,7 +15,7 @@ printf '#!/bin/sh\nexec "%s" --use-angle=vulkan --enable-features=Vulkan --ignor
 chmod +x "$chrome_wrapper"
 
 build_tree() {
-  (cd "$1" && npm run build >/dev/null 2>&1 && (cd packages/render-native && node build.mjs 2>&1 | tail -2)) || echo "BUILD-FAILED $1"
+  (cd "$1" && npm run build >/dev/null 2>&1 && (npm run cook:build 2>&1 | tail -2)) || echo "BUILD-FAILED $1"
 }
 
 for stage in "$@"; do

@@ -1,6 +1,6 @@
 """One-call driver for the Classroom parity row of #896: export, both renders, comparisons and a figure.
 
-Run from the repository root on a machine with Blender 5.3 (Cycles OptiX), Node, the built render-native addon and a GPU:
+Run from the repository root on a machine with Blender 5.3 (Cycles OptiX), Node, the Cook native addon built by npm run cook:build and a GPU:
 
   python3 bench/cycles-parity/run-classroom-parity.py [--data-directory <folder>] [--samples 1024] [--force stage,stage] [--keep-glass]
 

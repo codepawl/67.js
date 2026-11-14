@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findNativeAddon, prepareCyclesInput, traceNative } from '../packages/render-native/index.mjs';
-import { buildFlattenedJobNativeInput } from '../packages/render-native/job-input.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
@@ -14,7 +13,11 @@ const HEIGHT = 24;
 const camera = createCamera({ eye: [0, 0, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 30 }, WIDTH, HEIGHT);
 const packOptions = { width: WIDTH, height: HEIGHT, samples: 32, bounces: 3, seed: 3, fireflyClamp: 0, noiseThreshold: 0 };
 const traceOptions = { width: WIDTH, height: HEIGHT, samples: 32, maxSeconds: 60, kernel: 'cycles', noiseThreshold: 0 };
-const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
+const cook = await cookModule();
+const jobInputModule = await cookModule('job-input');
+const { findNativeAddon, prepareCyclesInput, traceNative } = cook ?? {};
+const { buildFlattenedJobNativeInput } = jobInputModule ?? {};
+const addonSkip = cookInstalled && findNativeAddon() ? false : 'the native addon is not built';
 
 const LIGHT_FOG = { density: 0.6, minimum: [-6, -6, 0.5], maximum: [6, 6, 4.5], color: [0.9, 0.9, 1], anisotropy: 0 };
 
@@ -46,7 +49,7 @@ function meanOf(values) {
   return sum / values.length;
 }
 
-test('the depth plane of a pixel in fog is the depth without fog', { skip: addonSkip }, () => {
+cookTest('the depth plane of a pixel in fog is the depth without fog', { skip: addonSkip }, () => {
   const clear = traceScene(null);
   const foggy = traceScene(LIGHT_FOG);
   const pictureShift = Math.abs(meanOf(foggy.rgba) - meanOf(clear.rgba));

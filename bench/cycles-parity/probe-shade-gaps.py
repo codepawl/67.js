@@ -1,6 +1,6 @@
 """Probe matrix for the two small gaps left by #1040 (#1070): prints Cook and Cycles mean radiance and Cook over Cycles ratios.
 
-Run from the repository root on a machine with Blender 5.3, Node, a GPU and the built render-native addon:
+Run from the repository root on a machine with Blender 5.3, Node, a GPU and the Cook native addon built by npm run cook:build:
     uv run --no-project --with numpy python bench/cycles-parity/probe-shade-gaps.py <outputDirectory> [--samples 1024]
 
 Every row renders one scene with Cook and with Cycles (grey diffuse, Soft Falloff off) at one bounce count and prints

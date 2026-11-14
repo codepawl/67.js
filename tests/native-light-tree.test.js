@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { STRUCT_STRIDES_V2, buildNativeInputV2, withLightSamplingFlag } from '../packages/render-native/index.mjs';
 import { readFileSync } from 'node:fs';
-import {
+import { createCamera } from '../src/path-tracer.js';
+import { cookFile, cookModule, cookTest } from './support/cook.js';
+import { buildTraceScene } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const lightTree = await cookModule('light-tree-v2');
+const { STRUCT_STRIDES_V2, buildNativeInputV2, withLightSamplingFlag } = cook ?? {};
+const {
   LIGHT_TREE_EMITTER_BYTES,
   LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS,
   LIGHT_TREE_MAX_EMITTERS,
@@ -10,9 +15,7 @@ import {
   buildLightTree,
   coneMeasure,
   mergeCones,
-} from '../packages/render-native/light-tree-v2.mjs';
-import { createCamera } from '../src/path-tracer.js';
-import { buildTraceScene } from '../src/path-tracer-scene.js';
+} = lightTree ?? {};
 
 const LIGHT_BYTES = 128;
 const TRIANGLE_BYTES = 96;
@@ -301,7 +304,7 @@ function checkTreeInvariants(tree, lights, triangles, lightCount, triangleCount)
 }
 
 
-test('every emitter is in exactly one leaf and the node invariants hold for lights and triangles', () => {
+cookTest('every emitter is in exactly one leaf and the node invariants hold for lights and triangles', () => {
   const lights = makeLights(60, 11);
   const triangles = makeTriangles(140, 12);
   const tree = buildLightTree(lights, 60, triangles, 140);
@@ -312,7 +315,7 @@ test('every emitter is in exactly one leaf and the node invariants hold for ligh
   checkTreeInvariants(tree, lights, triangles, 60, 140);
 });
 
-test('sun lights form one distant leaf on the right of the root, outside the local tree', () => {
+cookTest('sun lights form one distant leaf on the right of the root, outside the local tree', () => {
   const lights = makeLights(40, 21, { includeSun: true });
   const tree = buildLightTree(lights, 40, makeTriangles(30, 22), 30);
   checkTreeInvariants(tree, lights, makeTriangles(30, 22), 40, 30);
@@ -331,7 +334,7 @@ test('sun lights form one distant leaf on the right of the root, outside the loc
   assert.equal(tree.lightLeafIndices[39], root.rightOrFirst);
 });
 
-test('a scene with only a sun is one distant leaf and an empty scene has no nodes', () => {
+cookTest('a scene with only a sun is one distant leaf and an empty scene has no nodes', () => {
   const sunOnly = makeLights(1, 3, { includeSun: true });
   const tree = buildLightTree(sunOnly, 1, new Uint8Array(TRIANGLE_BYTES), 0);
   assert.equal(tree.nodeCount, 1);
@@ -343,7 +346,7 @@ test('a scene with only a sun is one distant leaf and an empty scene has no node
   assert.equal(empty.nodes.byteLength, LIGHT_TREE_NODE_BYTES);
 });
 
-test('the same input gives byte-identical output, also from copied buffers', () => {
+cookTest('the same input gives byte-identical output, also from copied buffers', () => {
   const lights = makeLights(120, 31, { includeSun: true });
   const triangles = makeTriangles(300, 32);
   const first = buildLightTree(lights, 120, triangles, 300);
@@ -353,7 +356,7 @@ test('the same input gives byte-identical output, also from copied buffers', () 
   assert.deepEqual(first.lightToTree, second.lightToTree);
 });
 
-test('co-located emitters and emitters on one plane still build balanced trees within the leaf limit', () => {
+cookTest('co-located emitters and emitters on one plane still build balanced trees within the leaf limit', () => {
   const lights = new Uint8Array(100 * LIGHT_BYTES);
   for (let index = 0; index < 100; index++) {
     writeLight(lights, index, {
@@ -373,7 +376,7 @@ test('co-located emitters and emitters on one plane still build balanced trees w
   checkTreeInvariants(planarTree, planar, new Uint8Array(TRIANGLE_BYTES), 100, 0);
 });
 
-test('a tight spatial cluster of lights splits from a far one so the tree separates them', () => {
+cookTest('a tight spatial cluster of lights splits from a far one so the tree separates them', () => {
   const lights = new Uint8Array(20 * LIGHT_BYTES);
   for (let index = 0; index < 20; index++) {
     const cluster = index < 10 ? 0 : 1000;
@@ -389,7 +392,7 @@ test('a tight spatial cluster of lights splits from a far one so the tree separa
   assert.ok(left.boxMin[0] > 100 || right.boxMin[0] > 100, 'the other holds only the far cluster');
 });
 
-test('cone merge contains both inputs and the measure grows with the cone', () => {
+cookTest('cone merge contains both inputs and the measure grows with the cone', () => {
   const coneA = { axis: [1, 0, 0], thetaO: 0.2, thetaE: 0.3 };
   const coneB = { axis: [0, 1, 0], thetaO: 0.1, thetaE: 0.5 };
   const merged = mergeCones(coneA, coneB);
@@ -414,7 +417,7 @@ test('cone merge contains both inputs and the measure grows with the cone', () =
   }
 });
 
-test('500 lights build in bounded time and 5000 emitters stay within the invariants', () => {
+cookTest('500 lights build in bounded time and 5000 emitters stay within the invariants', () => {
   const lights = makeLights(500, 41);
   const started = performance.now();
   const tree = buildLightTree(lights, 500, new Uint8Array(TRIANGLE_BYTES), 0);
@@ -428,7 +431,7 @@ test('500 lights build in bounded time and 5000 emitters stay within the invaria
   checkTreeInvariants(bigTree, bigLights, bigTriangles, 1000, 4000);
 });
 
-test('the boundary rejects bad counts, short buffers, non-finite values and unknown light types', () => {
+cookTest('the boundary rejects bad counts, short buffers, non-finite values and unknown light types', () => {
   const lights = makeLights(2, 51);
   const triangles = makeTriangles(1, 52);
   assert.throws(() => buildLightTree(lights, -1, triangles, 1), /non-negative integer/);
@@ -448,7 +451,7 @@ test('the boundary rejects bad counts, short buffers, non-finite values and unkn
   assert.throws(() => buildLightTree(unknownType, 2, triangles, 1), /unknown light_type 9/);
 });
 
-test('buildNativeInputV2 packs the tree, fills tree_leaf_index and keeps counts consistent', () => {
+cookTest('buildNativeInputV2 packs the tree, fills tree_leaf_index and keeps counts consistent', () => {
   const camera = createCamera({ eye: [0, 0, 6], target: [0, 0, 0], fov: 50 }, 16, 16);
   const quad = {
     positions: new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]),
@@ -498,14 +501,14 @@ test('buildNativeInputV2 packs the tree, fills tree_leaf_index and keeps counts 
   assert.equal(kp[26], v2.lightTreeNodeCount, 'kernel params carry the node count');
 });
 
-test('the distant leaf limit matches the per-leaf clamp of the kernel', () => {
-  const kernelSource = readFileSync(new URL('../packages/render-native/src/cycles/light_tree.wgsl', import.meta.url), 'utf8');
+cookTest('the distant leaf limit matches the per-leaf clamp of the kernel', () => {
+  const kernelSource = readFileSync(cookFile('src/cycles/light_tree.wgsl'), 'utf8');
   const match = /const LTR_MAX_LEAF_EMITTERS: u32 = (\d+)u;/.exec(kernelSource);
   assert.ok(match, 'light_tree.wgsl declares LTR_MAX_LEAF_EMITTERS');
   assert.equal(Number(match[1]), LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS);
 });
 
-test('more distant lights than the kernel reads from one leaf are rejected with the allowed count', () => {
+cookTest('more distant lights than the kernel reads from one leaf are rejected with the allowed count', () => {
   const allowed = LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS;
   const suns = (count) => {
     const bytes = new Uint8Array(count * LIGHT_BYTES);
@@ -521,7 +524,7 @@ test('more distant lights than the kernel reads from one leaf are rejected with 
   );
 });
 
-test('index words of an emissive triangle are not checked as floats', () => {
+cookTest('index words of an emissive triangle are not checked as floats', () => {
   const triangles = makeTriangles(2, 61);
   const words = new Uint32Array(triangles.buffer);
   words[7] = 0xffffffff;
@@ -530,7 +533,7 @@ test('index words of an emissive triangle are not checked as floats', () => {
   assert.doesNotThrow(() => buildLightTree(makeLights(1, 62), 1, triangles, 2));
 });
 
-test('lightSampling on a packed v2 input without emitter tables is rejected for "tree" and ignored for "auto"', () => {
+cookTest('lightSampling on a packed v2 input without emitter tables is rejected for "tree" and ignored for "auto"', () => {
   const kernelParams = new Uint8Array(320);
   const staleInput = { kernelParams, lightCount: 40, emissiveTriangleCount: 0, lightTreeNodeCount: 1 };
   const flagsOf = (params) => new DataView(params.buffer, params.byteOffset).getUint32(32, true);
@@ -587,7 +590,7 @@ function treeOf(input) {
   return { nodes: input.lightTreeNodes, nodeCount: input.lightTreeNodeCount, emitters: input.lightTreeEmitters, lightToTree: input.lightToTree };
 }
 
-test('the Sobol-Burley sampler is the default, "white" sets the opt-out flag and "pcg" and "sobol" are its earlier names', () => {
+cookTest('the Sobol-Burley sampler is the default, "white" sets the opt-out flag and "pcg" and "sobol" are its earlier names', () => {
   assert.equal(packedKernelFlags(packTraceScene({})) & FLAG_WHITE_NOISE_SAMPLER, 0);
   assert.equal(packedKernelFlags(packTraceScene({}, { sampler: 'sobol-burley' })) & FLAG_WHITE_NOISE_SAMPLER, 0);
   assert.equal(packedKernelFlags(packTraceScene({}, { sampler: 'sobol' })) & FLAG_WHITE_NOISE_SAMPLER, 0);
@@ -596,7 +599,7 @@ test('the Sobol-Burley sampler is the default, "white" sets the opt-out flag and
   assert.throws(() => packTraceScene({}, { sampler: 'halton' }), /sampler.*sobol-burley.*white/);
 });
 
-test('light selection: the tree is the default from two emitters, and lightSampling or its alias useLightTree forces or forbids it', () => {
+cookTest('light selection: the tree is the default from two emitters, and lightSampling or its alias useLightTree forces or forbids it', () => {
   const few = { pointLights: pointLightList(3) };
   const many = { pointLights: pointLightList(20) };
   assert.equal(packedKernelFlags(packTraceScene({ pointLights: pointLightList(1) })) & FLAG_USE_LIGHT_TREE, 0, 'one emitter needs no pick');
@@ -615,7 +618,7 @@ test('light selection: the tree is the default from two emitters, and lightSampl
   assert.throws(() => packTraceScene(many, { lightSampling: 'sometimes' }), /lightSampling/);
 });
 
-test('the light tree built from a trace scene links every light to the root and sums their energy', () => {
+cookTest('the light tree built from a trace scene links every light to the root and sums their energy', () => {
   const lightCount = 20;
   const input = packTraceScene({ pointLights: pointLightList(lightCount) });
   assert.equal(packedKernelFlags(input) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
@@ -628,7 +631,7 @@ test('the light tree built from a trace scene links every light to the root and 
   assert.ok(Math.abs(root.energy - leafEnergy) <= leafEnergy * 1e-5, 'root energy is the sum of the leaves');
 });
 
-test('a sun stays in the tree as a distant leaf, so the other lights keep the tree pick', () => {
+cookTest('a sun stays in the tree as a distant leaf, so the other lights keep the tree pick', () => {
   const input = packTraceScene({ pointLights: pointLightList(20), keyColor: [3, 3, 3], lightDirection: [0, 1, 0] });
   assert.equal(packedKernelFlags(input) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
   const tree = treeOf(input);
@@ -636,7 +639,7 @@ test('a sun stays in the tree as a distant leaf, so the other lights keep the tr
   assert.ok(collectLeaves(tree).some((leaf) => leaf.node.isDistant), 'the sun is a distant leaf');
 });
 
-test('emissive triangles are leaves of the same tree', () => {
+cookTest('emissive triangles are leaves of the same tree', () => {
   const emissivePanels = Array.from({ length: 12 }, (_, index) => {
     const geometry = floorGeometry();
     geometry.positions = geometry.positions.map((value, position) => (position % 3 === 1 ? 3 : value * 0.1 + (index - 6) * 0.6));
@@ -648,7 +651,7 @@ test('emissive triangles are leaves of the same tree', () => {
   checkTreeInvariants(treeOf(input), input.lights, input.emissiveTriangles, input.lightCount, 24);
 });
 
-test('light-link masks do not switch the tree off: every node keeps the OR of the masks below it', () => {
+cookTest('light-link masks do not switch the tree off: every node keeps the OR of the masks below it', () => {
   const input = packTraceScene({ pointLights: pointLightList(20) });
   const lightWords = new Uint32Array(input.lights.buffer, input.lights.byteOffset, input.lights.byteLength / 4);
   let maskOr = 0;

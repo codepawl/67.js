@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
+import { cookModule, cookTest } from './support/cook.js';
 import { exportNativeSceneTables, NATIVE_JOB_MAXIMUM_TRIANGLES } from '../scripts/native-bake-page.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
@@ -13,6 +12,11 @@ import {
   refuseLocalVolumes,
   resolveTexture,
 } from '../src/path-tracer-scene.js';
+
+const jobInputModule = await cookModule('job-input');
+const packInputModule = await cookModule('pack-input');
+const { buildFlattenedJobNativeInput, buildJobNativeInput } = jobInputModule ?? {};
+const { buildNativeInput } = packInputModule ?? {};
 
 // Every triangle reuses the same three vertices: valid for the builder and cheap to allocate.
 function triangleStack(triangleCount) {
@@ -94,7 +98,7 @@ const camera = createCamera({ eye: [0, 0, 8], target: [0, 0, 0], fov: 50 }, 8, 8
 const packOptions = { width: 8, height: 8, bounces: 2, seed: 1, fireflyClamp: 20, noiseThreshold: 0 };
 const modules = { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack };
 
-test('a native render job with the cycles kernel exports an instanced scene above 400,000 unique triangles', () => {
+cookTest('a native render job with the cycles kernel exports an instanced scene above 400,000 unique triangles', () => {
   assert.ok(NATIVE_JOB_MAXIMUM_TRIANGLES > MAX_TRACE_TRIANGLES && NATIVE_JOB_MAXIMUM_TRIANGLES <= MAX_NATIVE_TRACE_TRIANGLES);
   const parts = copiesOf(triangleStack(MAX_TRACE_TRIANGLES + 1), 2);
   const exported = exportNativeSceneTables({ parts, environment: ENVIRONMENT, camera, options: packOptions, kernel: 'cycles', instancing: true, modules });
@@ -103,7 +107,7 @@ test('a native render job with the cycles kernel exports an instanced scene abov
   assert.equal(exported.triangleCount, MAX_TRACE_TRIANGLES + 1);
 });
 
-test('a refused instanced job that is over the bound once flattened says why it was flattened', () => {
+cookTest('a refused instanced job that is over the bound once flattened says why it was flattened', () => {
   const parts = copiesOf(triangleStack(8), 2);
   const smallBound = (sceneParts, environment, options) => buildTraceScene(sceneParts, environment, { ...options, maximumTriangles: 10 });
   const refuseInstances = () => {
@@ -115,7 +119,7 @@ test('a refused instanced job that is over the bound once flattened says why it 
     { name: 'RangeError', message: /could not stay instanced \(copies of this mesh emit different triangles\).*at most 10 triangles/ });
 });
 
-test('a native render job with the legacy kernel keeps the 400,000 bound', () => {
+cookTest('a native render job with the legacy kernel keeps the 400,000 bound', () => {
   const parts = copiesOf(triangleStack(MAX_TRACE_TRIANGLES + 1), 1);
   assert.throws(() => exportNativeSceneTables({ parts, environment: ENVIRONMENT, camera, options: packOptions, kernel: 'legacy', instancing: false, modules }),
     { name: 'RangeError', message: OLD_FLATTENED_MESSAGE });

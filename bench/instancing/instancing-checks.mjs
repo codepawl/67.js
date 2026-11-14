@@ -6,8 +6,8 @@
 //     Instanced against flattened renders: mean ratio, relative MSE (epsilon 0.01) and the 8x8 tiles within 5 percent.
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
-import { buildNativeInputV2, findNativeAddon, traceNative } from '../../packages/render-native/index.mjs';
-import { buildNativeInput, buildNativeTexelInput } from '../../packages/render-native/pack-input.mjs';
+import { buildNativeInputV2, findNativeAddon, traceNative } from '@codepawlhq/cook';
+import { buildNativeInput, buildNativeTexelInput } from '@codepawlhq/cook/pack-input';
 import { buildCopyScene } from './copies-scene.mjs';
 import { meanRatioRgb, relativeMeanSquaredError, tileMeanRatios } from './image-compare.mjs';
 import { createCamera } from '../../src/path-tracer.js';

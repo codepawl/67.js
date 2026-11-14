@@ -1,5 +1,5 @@
 // Path traces a scene.json file scene (GLB + HDRI, as scripts/render-media.mjs --scene file reads it) on Cook, the native
-// tracer of packages/render-native. A headless Chrome page loads the GLB with the glTF loader (textures included), packs the
+// tracer in the @codepawlhq/cook package. A headless Chrome page loads the GLB with the glTF loader (textures included), packs the
 // scene into native tables with the same code the MCP render job uses, and this process traces them.
 //   node scripts/render-file-native.mjs --config <scene.json> --out <prefix> [options]   (--help lists the options)
 // Writes <prefix>.png (ACES + gamma, 67js tone map), <prefix>.linear.f32 (width*height*3 little-endian floats) and <prefix>.json.
@@ -47,7 +47,7 @@ async function startViteServer(root) {
 async function exportTablesInPage({ width, height, bounces, seed, instancing, camera, listParts, hideParts, patchMaterials }) {
   const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes, resolveTexture }, pack, { buildNativeInput }, { buildJobNativeInput, buildFlattenedJobNativeInput }, { exportNativeSceneTables }] = await Promise.all([
     import('/src/path-tracer.js'), import('/src/path-tracer-scene.js'), import('/src/path-tracer-gpu-pack.js'),
-    import('/packages/render-native/pack-input.mjs'), import('/packages/render-native/job-input.mjs'), import('/scripts/native-bake-page.js'),
+    import('/node_modules/@codepawlhq/cook/pack-input.mjs'), import('/node_modules/@codepawlhq/cook/job-input.mjs'), import('/scripts/native-bake-page.js'),
   ]);
   const { environment } = window.__scene;
   const describePart = part => ({
@@ -82,7 +82,7 @@ async function loadOidnIfAvailable() {
 async function loadNativeTracer() {
   let tracer;
   try {
-    tracer = await import('../packages/render-native/index.mjs');
+    tracer = await import('@codepawlhq/cook');
   } catch {
     throw new MissingAddonError();
   }

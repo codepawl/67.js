@@ -5,8 +5,8 @@
 // node bench/cycles-parity/pane-shadow-visibility.mjs <output directory>
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { buildFlattenedJobNativeInput } from '../../packages/render-native/job-input.mjs';
-import { traceNative } from '../../packages/render-native/index.mjs';
+import { buildFlattenedJobNativeInput } from '@codepawlhq/cook/job-input';
+import { traceNative } from '@codepawlhq/cook';
 import { box } from '../../src/geometry.js';
 import { createCamera } from '../../src/path-tracer.js';
 import * as pack from '../../src/path-tracer-gpu-pack.js';

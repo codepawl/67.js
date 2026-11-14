@@ -9,7 +9,7 @@ import { createEnvironmentMap } from '../../src/hdri.js';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../../src/path-tracer-scene.js';
-import * as renderNative from '../../packages/render-native/index.mjs';
+import * as renderNative from '@codepawlhq/cook';
 import { writeFloat32Npy } from './npy.mjs';
 
 const MATERIAL_RECORD_BYTE_LENGTH = 256;
@@ -662,13 +662,13 @@ async function runCli() {
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   const options = parseCliArguments(process.argv.slice(2));
   if (!renderNative.findNativeAddon()) {
-    throw new Error('The render-native addon is missing. Build packages/render-native before running check-lobes.mjs.');
+    throw new Error('The Cook native addon is missing. Run npm run cook:build before running check-lobes.mjs.');
   }
   await mkdir(options.outputDirectory, { recursive: true });
   const probeManifestEntries = [];
   if (!options.skipProbes) {
     if (typeof renderNative.probeCyclesLobe !== 'function') {
-      throw new Error('packages/render-native/index.mjs does not export probeCyclesLobe yet. Merge the host and closures lanes before running lobe probes.');
+      throw new Error('@codepawlhq/cook does not export probeCyclesLobe yet. Merge the host and closures lanes before running lobe probes.');
     }
     const selectedProbes = LOBE_PROBE_CASES.filter((item) => !options.filter || item.id.includes(options.filter));
     for (const probeCase of selectedProbes) {

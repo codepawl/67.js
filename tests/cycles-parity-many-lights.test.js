@@ -3,9 +3,11 @@ import test from 'node:test';
 import { createCamera } from '../src/path-tracer.js';
 import * as packModule from '../src/path-tracer-gpu-pack.js';
 import { MAX_TRACE_LIGHTS } from '../src/path-tracer-scene.js';
-import { buildNativeInputV2 } from '../packages/render-native/index.mjs';
 import { loadReferenceScene } from '../bench/cycles-parity/scene-bridge.mjs';
 import { buildTraceSceneWithManyLights } from '../bench/cycles-parity/trace-scene-many-lights.mjs';
+import { cookModule, cookTest } from './support/cook.js';
+
+const { buildNativeInputV2 } = (await cookModule()) ?? {};
 
 const SCENE_ID = 'many-lights-500';
 const POINT_LIGHT_COUNT = 200;
@@ -45,7 +47,7 @@ test('buildTraceSceneWithManyLights joins chunks beyond the trace light limit an
   assert.equal(smallScene.lights.points[2].bit, 3);
 });
 
-test('many-lights-500 packs for the cycles kernel with a light tree over 350 lights and 200 emissive triangles', async () => {
+cookTest('many-lights-500 packs for the cycles kernel with a light tree over 350 lights and 200 emissive triangles', async () => {
   const { traceSource } = await loadReferenceScene(SCENE_ID);
   const traceScene = buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, 64, 36);

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { buildCopyScene } from '../bench/instancing/copies-scene.mjs';
 import { meanRatioRgb, relativeMeanSquaredError, tileMeanRatios } from '../bench/instancing/image-compare.mjs';
 import { createCamera } from '../src/path-tracer.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const { buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
 
 // Instanced copies against the same scene flattened, on the native "cycles" kernel. Skipped without the built addon or a
 // ray query adapter. The bounds sit well above what Modal's A10 measured at 1024 samples (relMSE under 6e-5, tiles within
@@ -23,10 +25,10 @@ function render(variant, instancing, seed) {
   return traceNative(input, { width: WIDTH, height: HEIGHT, samples: SAMPLES, kernel: 'cycles' }).rgba;
 }
 
-const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
+const addonSkip = !cookInstalled || !findNativeAddon() ? 'the native addon is not built' : false;
 
 for (const variant of ['translate', 'rotscale', 'mirror', 'mirror-rotscale', 'emissive', 'emissive-rotscale', 'emissive-degenerate']) {
-  test(`instanced ${variant} copies render the flattened image within tolerance`, { skip: addonSkip }, t => {
+  cookTest(`instanced ${variant} copies render the flattened image within tolerance`, { skip: addonSkip }, t => {
     let flattened;
     try {
       flattened = render(variant, false, 1);

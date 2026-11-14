@@ -2,8 +2,8 @@
 // not inside one message, so the export must refuse with the new RangeError; the same triangles with 20,000 instances must export.
 //   NODE_OPTIONS=--max-old-space-size=16384 node bench/cycles-parity/native-export-size-check.mjs [card counts]
 import * as pack from '../../src/path-tracer-gpu-pack.js';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../../packages/render-native/job-input.mjs';
+import { buildNativeInput } from '@codepawlhq/cook/pack-input';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '@codepawlhq/cook/job-input';
 import { buildTraceScene, refuseLocalVolumes, resolveTexture } from '../../src/path-tracer-scene.js';
 import { NATIVE_EXPORT_MAXIMUM_CHARACTERS, exportNativeSceneTables } from '../../scripts/native-bake-page.js';
 import { NATIVE_CAP_ENVIRONMENT, NATIVE_CAP_PACK_OPTIONS, buildNativeCapParts, nativeCapCamera } from './native-cap-scene.mjs';

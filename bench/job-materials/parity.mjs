@@ -26,8 +26,8 @@ async function describe(folder, names) {
 async function cook(folder, samples, names, before, bench) {
   const [{ exportNativeSceneTables }, { createCamera }, pack, { buildTraceScene, refuseLocalVolumes, resolveTexture }, { buildNativeInput }, jobInput, { traceFrameNative }, tracer] = await Promise.all([
     import('../../scripts/native-bake-page.js'), import('../../src/path-tracer.js'), import('../../src/path-tracer-gpu-pack.js'),
-    import('../../src/path-tracer-scene.js'), import('../../packages/render-native/pack-input.mjs'), import('../../packages/render-native/job-input.mjs'),
-    import('../../scripts/agent-native-trace.mjs'), import('../../packages/render-native/index.mjs'),
+    import('../../src/path-tracer-scene.js'), import('@codepawlhq/cook/pack-input'), import('@codepawlhq/cook/job-input'),
+    import('../../scripts/agent-native-trace.mjs'), import('@codepawlhq/cook'),
   ]);
   const modules = { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput: jobInput.buildJobNativeInput,
     buildFlattenedJobNativeInput: before ? () => { throw new RangeError('before #1036'); } : jobInput.buildFlattenedJobNativeInput, pack };
@@ -37,7 +37,7 @@ async function cook(folder, samples, names, before, bench) {
     const camera = createCamera(source.camera, WIDTH, HEIGHT);
     const options = { width: WIDTH, height: HEIGHT, bounces: 8, seed: 1, fireflyClamp: 20, noiseThreshold: 0, samples };
     if (bench) {
-      const { buildNativeInputV2 } = await import('../../packages/render-native/index.mjs');
+      const { buildNativeInputV2 } = await import('@codepawlhq/cook');
       const input = buildNativeInputV2(buildTraceScene(source.parts, source.environment), camera, { ...options, parts: source.parts });
       const direct = tracer.traceNative(input, { width: WIDTH, height: HEIGHT, samples, kernel: 'cycles' });
       const benchLinear = new Float32Array(WIDTH * HEIGHT * 3);

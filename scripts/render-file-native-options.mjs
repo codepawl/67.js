@@ -32,7 +32,7 @@ const VALUE_FLAGS = new Set(['--config', '--out', '--width', '--height', '--samp
 const SWITCH_FLAGS = new Set(['--instancing', '--software-gl', '--write-raw', '--help', '-h']);
 const DENOISERS = ['oidn', 'atrous', 'none'];
 
-/** Thrown when the render-native package or its built addon is missing; the command exits with code 2 for it. */
+/** Thrown when the Cook package or its built addon is missing; the command exits with code 2 for it. */
 export class MissingAddonError extends Error {
   constructor(message = missingAddonMessage()) {
     super(message);
@@ -42,7 +42,7 @@ export class MissingAddonError extends Error {
 
 /** The one message for a missing package or addon: what is missing and the command that builds it. */
 export function missingAddonMessage() {
-  return 'Cook needs the render-native addon, and it is not built. Run "node build.mjs" in packages/render-native (it needs the Rust toolchain), then run this command again.';
+  return 'Cook needs its native addon, and it is not built. Run "npm run cook:build" (it builds the installed @codepawlhq/cook package and needs the Rust toolchain), then run this command again.';
 }
 
 function readOption(argumentList, flagName, fallbackValue) {

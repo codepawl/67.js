@@ -6,7 +6,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
 import { resolve } from 'node:path';
-import { buildNativeInput, traceNative } from '../../packages/render-native/index.mjs';
+import { buildNativeInput, traceNative } from '@codepawlhq/cook';
 import { encodePng } from '../../src/export-png.js';
 import * as pack from '../../src/path-tracer-gpu-pack.js';
 import { createCamera, renderPathTracedImage, toneMapToRgba8 } from '../../src/path-tracer.js';

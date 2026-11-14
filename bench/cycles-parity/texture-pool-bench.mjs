@@ -2,7 +2,7 @@
 // peak resident memory of this process (one scene per process, so the peak is the scene's).
 //   node bench/cycles-parity/texture-pool-bench.mjs [--textures 256] [--size 512]
 // Prints one JSON line. A scene whose textures do not fit one pool prints the error text instead of a trace.
-import { buildNativeInputV2, findNativeAddon, traceNative } from '../../packages/render-native/index.mjs';
+import { buildNativeInputV2, findNativeAddon, traceNative } from '@codepawlhq/cook';
 import { createCamera } from '../../src/path-tracer.js';
 
 const IMAGE_WIDTH = 64;

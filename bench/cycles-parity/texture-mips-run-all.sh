@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Everything the texture mip levels of #896 are checked with, in one run on a machine with a GPU, Rust and Node:
 #   bash bench/cycles-parity/texture-mips-run-all.sh <outputDirectory>
-# 1. builds the addon of this checkout, and of the commit it was cut from (a second checkout beside it, its own cargo target);
-# 2. cargo test of the addon, then the node tests of the textures (the ones that need a GPU run, not skip);
+# 1. builds the Cook addon of this checkout, and of a second Cook checkout for the baseline (COOK_BASE_DIR, its own cargo target);
+# 2. cargo test of Cook (it lives in https://github.com/codepawl/cook, so it runs in COOK_DIR), then the node tests of the textures (the ones that need a GPU run, not skip);
 # 3. the byte identity of five existing scenes on both kernels against the base build;
 # 4. the error of a minified and a magnified checker with and without levels (texture-mips-bench.mjs).
 # Each step keeps going after a failure and the last lines say which steps failed.
+# COOK_DIR is the Cook checkout under test (default: the installed package), COOK_BASE_DIR the Cook checkout to compare against.
 set -uo pipefail
 
 output_directory=$(mkdir -p "$1" && cd "$1" && pwd)
 candidate_checkout=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 baseline_checkout="${candidate_checkout}-base"
+cook_directory="${COOK_DIR:-$candidate_checkout/node_modules/@codepawlhq/cook}"
+: "${COOK_BASE_DIR:?set COOK_BASE_DIR to the Cook checkout to compare against}"
+export COOK_DIR="$cook_directory" COOK_BASE_DIR
 failed_steps=()
 
 run_step() {
@@ -33,13 +37,13 @@ prepare_baseline_checkout() {
 }
 
 build_addon() {
-  (cd "$1/packages/render-native" && CARGO_TARGET_DIR="$2" node build.mjs)
+  (cd "$1" && CARGO_TARGET_DIR="$2" node build.mjs)
 }
 
-run_step build-candidate build_addon "$candidate_checkout" "${CARGO_TARGET_DIR:-/root/cargo-target/candidate}"
+run_step build-candidate build_addon "$cook_directory" "${CARGO_TARGET_DIR:-/root/cargo-target/candidate}"
 run_step prepare-baseline prepare_baseline_checkout
-run_step build-baseline build_addon "$baseline_checkout" /root/cargo-target/baseline
-run_step cargo-test bash -c "set -o pipefail; cd '$candidate_checkout/packages/render-native' && cargo test 2>&1 | tail -n 80"
+run_step build-baseline build_addon "$COOK_BASE_DIR" /root/cargo-target/baseline
+run_step cargo-test bash -c "set -o pipefail; cd '$cook_directory' && cargo test 2>&1 | tail -n 80"
 run_step node-tests bash -c "cd '$candidate_checkout' && node --test tests/native-texture-mips.test.js tests/native-texture-sampler.test.js tests/native-pack-v2.test.js tests/native-job-materials.test.js"
 run_step identity bash "$candidate_checkout/bench/cycles-parity/texture-mips-identity.sh" "$baseline_checkout" "$output_directory/identity"
 run_step mips-bench node "$candidate_checkout/bench/cycles-parity/texture-mips-bench.mjs" "$output_directory/bench"

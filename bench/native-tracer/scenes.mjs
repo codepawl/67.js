@@ -50,7 +50,7 @@ try {
       const exported = await page.evaluate(async ([sceneId, tracerOptions]) => {
         const [{ createCamera }, { buildTraceScene }, pack, { buildNativeInput }, { encodeNativeTables }] = await Promise.all([
           import('/src/path-tracer.js'), import('/src/path-tracer-scene.js'), import('/src/path-tracer-gpu-pack.js'),
-          import('/packages/render-native/pack-input.mjs'), import('/scripts/native-bake-page.js'),
+          import('/node_modules/@codepawlhq/cook/pack-input.mjs'), import('/scripts/native-bake-page.js'),
         ]);
         const source = await window.loadTraceSceneFor(sceneId);
         const traceScene = buildTraceScene(source.parts, source.environment);
