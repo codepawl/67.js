@@ -502,7 +502,9 @@ float fillHit(vec3 origin, vec3 direction, float distance) {
 
 /** True when the nearest hit belongs to a shadow-only part (the flag sits in texel 5 of the material); camera rays step through it. */
 bool nearestHitIsShadowOnly() {
-  return fetchData(uMaterials, int(fetchData(uTriangles, nearestSlot * TRIANGLE_TEXELS).w) * MATERIAL_TEXELS + 5).y > 0.0;
+  vec4 cornerData = fetchData(uTriangles, nearestSlot * TRIANGLE_TEXELS);
+  vec4 flags = fetchData(uMaterials, int(cornerData.w) * MATERIAL_TEXELS + 5);
+  return flags.y > 0.0;
 }
 
 /** The nearest solid hit, stepping through the transparent texels of cutout materials and, for a camera ray, shadow-only parts. */

@@ -580,7 +580,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     // One job runs at a time, so the estimate made at submission belongs to the job that starts next.
     const estimate = estimateForNextJob;
     estimateForNextJob = undefined;
-    const metrics = { backend, requestedWidth: settings.width, requestedHeight: settings.height,
+    const metrics = { backend, memoryBudgetMiB: memory, requestedWidth: settings.width, requestedHeight: settings.height,
       renderSeconds: 0, captureSeconds: 0, peakNodeBytes: 0, peakBrowserHeap: 0, maximumPendingFrames: 1 };
     async function recordPeakMemory() {
       metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
@@ -609,6 +609,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         ...(snapshot.assetBytes ? { data: snapshot.assetBytes.toString('base64'), ...(await motionSources([snapshot.recipe.motion])) } : await placedAssetData(snapshot.recipe)) };
       const created = await jobPage.evaluate(({ method, input }) => window.__agentPreview[method](input),
         { method: snapshot.assetBytes ? 'createAsset' : 'create', input });
+      // The plan made at creation sees the requested size; later plans see the viewport already cut to the budget.
+      metrics.requiredMemoryMiB = created.render.requiredMemoryMiB;
       const width = settings.kind === 'video' ? Math.floor(created.render.width / 2) * 2 : created.render.width;
       const height = settings.kind === 'video' ? Math.floor(created.render.height / 2) * 2 : created.render.height;
       if (width < 64 || height < 64) throw new Error('Render budget reduced the job below its minimum output size.');

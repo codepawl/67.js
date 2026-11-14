@@ -63,5 +63,5 @@ export function planRenderSize({ width, height, pixelRatio = 1, samples = 4, mem
     renderWidth = Math.max(1, renderWidth - 1);
     renderHeight = Math.max(1, renderHeight - 1);
   }
-  return { width: renderWidth, height: renderHeight, samples, hdr, bloom, depth, textureBytes, estimatedBytes: estimateFrameBytes(renderWidth, renderHeight, samples, shadowResolution, { hdr, bloom, depth }) + geometryBytes + textureBytes, memoryBudgetMiB, reduced: renderWidth < requestedWidth || renderHeight < requestedHeight };
+  return { width: renderWidth, height: renderHeight, samples, hdr, bloom, depth, textureBytes, estimatedBytes: estimateFrameBytes(renderWidth, renderHeight, samples, shadowResolution, { hdr, bloom, depth }) + geometryBytes + textureBytes, memoryBudgetMiB, requiredMemoryMiB: Math.ceil((fullFrameBytes + geometryBytes + textureBytes) / MEBIBYTE), reduced: renderWidth < requestedWidth || renderHeight < requestedHeight };
 }

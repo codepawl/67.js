@@ -213,6 +213,7 @@ function renderInfo(renderer, viewWarnings = []) {
   return {
     graphics: context.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : context.RENDERER),
     estimatedBytes: renderer.memoryPlan.estimatedBytes,
+    requiredMemoryMiB: renderer.memoryPlan.requiredMemoryMiB,
     width: canvas.width,
     height: canvas.height,
     samples: renderer.capabilities.samples,

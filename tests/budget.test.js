@@ -68,3 +68,14 @@ test('without memoryBudgetMiB the budget fits the scene, from 256 MiB up to a de
   assert.equal(large.reduced, false);
   assert.throws(() => planRenderSize({ width: 1280, height: 720, geometryBytes: 600 * 1024 ** 2 }), /Fix: pass \{ memoryBudgetMiB: \d+ \}/);
 });
+
+test('a reduced plan names the budget its full frame needs, and that budget fits the requested frame', () => {
+  const sceneTextureBytes = 75 * 1024 ** 2;
+  const reducedPlan = planRenderSize({ width: 1920, height: 1080, samples: 4, memoryBudgetMiB: 192, hdr: true, bloom: true, depth: true, textureBytes: sceneTextureBytes });
+  assert.ok(reducedPlan.reduced);
+  assert.ok(reducedPlan.requiredMemoryMiB > 192);
+  const fittedPlan = planRenderSize({ width: 1920, height: 1080, samples: 4, memoryBudgetMiB: reducedPlan.requiredMemoryMiB, hdr: true, bloom: true, depth: true, textureBytes: sceneTextureBytes });
+  assert.equal(fittedPlan.reduced, false);
+  assert.equal(fittedPlan.width, 1920);
+  assert.equal(fittedPlan.height, 1080);
+});
