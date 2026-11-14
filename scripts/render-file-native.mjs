@@ -202,7 +202,7 @@ async function main() {
     if (exported.listedParts) await writeFile(`${options.outputPrefix}.parts.json`, `${JSON.stringify(exported.listedParts, null, 1)}\n`);
     const report = { ...traced.report, tracerSetupSeconds: traced.report.setupSeconds, partCount: exported.partCount, hiddenCount: exported.hiddenCount,
       loadSeconds, packSeconds, setupSeconds: loadSeconds + packSeconds, samplingSeconds: traced.report.tracedSeconds,
-      triangleCount: exported.triangles, instanceCount: exported.instances ?? null,
+      triangleCount: exported.triangles, instanceCount: exported.instances ?? null, lightCount: exported.counts?.lightCount ?? null,
       peakGpuMemoryMiB: peak.peakMiB, ...(peak.note ? { peakGpuMemoryNote: peak.note } : {}),
       ignoredFrameEffects: listIgnoredFrameEffects(description), ignored: exported.ignored, materialsReason: exported.materialsReason };
     await writeFile(`${options.outputPrefix}.json`, `${JSON.stringify(report, null, 2)}\n`);

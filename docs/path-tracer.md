@@ -201,6 +201,7 @@ The report holds everything `traceFrameNative` reports (adapter, kernel, samples
 
 - `loadSeconds` (Chrome loads the GLB and textures), `packSeconds` (the native tables), `setupSeconds` (both) and `samplingSeconds` (the trace). The tracer's own set-up time is `tracerSetupSeconds`.
 - `triangleCount` (unique triangles) and `instanceCount` (`null` when the scene is flattened).
+- `lightCount`: the sun, point, spot and area lights packed for the kernel (emissive meshes are not counted), or `null` when the packer reports none.
 - `peakGpuMemoryMiB`: the highest `memory.used` that `nvidia-smi` showed, sampled every 250 ms during the trace. It is the whole card, so other programs count; it is `null` with `peakGpuMemoryNote` when `nvidia-smi` is missing.
 - `ignoredFrameEffects`: frame effects of the scene description that the traced picture does not get, such as `exposure`, `saturation`, `contrast`, `temperature`, `vignette`, `grain`, `bloom`, `monochrome`, `fade` and `cinematic`. The traced picture is only tone mapped.
 
