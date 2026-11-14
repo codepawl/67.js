@@ -39,7 +39,9 @@ const EXECUTABLE_EXTENSIONS = new Set([
 ]);
 
 const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// The running Crucible version may carry a prerelease tag or build metadata ("0.21.0-rc.1", "0.21.0+build"); only its x.y.z is compared.
 const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
+const RUNNING_VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const COMPARATOR_PATTERN = /^(>=|<=|>|<|=|\^|~)?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/;
 const PATH_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/;
 const REMOTE_URL_PATTERN = /(?:^|[\s"'(=])(?:https?|ftp|wss?|file|blob|javascript):/i;
@@ -68,8 +70,8 @@ export function fileExtension(filename) {
   return dot >= 0 ? lower.slice(dot) : '';
 }
 
-function parseVersion(text) {
-  const match = VERSION_PATTERN.exec(text);
+function parseVersion(text, pattern = VERSION_PATTERN) {
+  const match = pattern.exec(text);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
@@ -109,7 +111,7 @@ function comparatorBounds(comparator) {
  * Returns null for a range that cannot be read, so the caller can say what to pass.
  */
 export function semverSatisfies(version, range) {
-  const current = parseVersion(version);
+  const current = parseVersion(version, RUNNING_VERSION_PATTERN);
   if (!current || typeof range !== 'string' || range.length === 0 || range.length > MAXIMUM_RANGE_CHARACTERS) return null;
   const comparators = range.trim().split(/\s+/);
   if (comparators.length > MAXIMUM_RANGE_COMPARATORS) return null;

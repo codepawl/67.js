@@ -294,3 +294,13 @@ test('the GPU backend takes up to 1024 parts where the CPU bake takes 256', () =
   const tooMany = Array.from({ length: MAX_GPU_BAKE_PARTS + 1 }, (_, index) => placed(`part-${index}`, [index, 0, 0], [0.5, 0.5, 0.5]));
   assert.throws(() => planLightmaps(tooMany, lamp, { ...fastOptions, backend: 'gpu' }), { name: 'RangeError', message: /1 to 1024 parts/ });
 });
+
+test('a light map that the export skips because the part has an emissive map needs no lightUvs', () => {
+  const image = { width: 1, height: 1, data: new Uint8ClampedArray([255, 255, 255, 255]) };
+  const withEmissive = placed('lamp', [0, 0, 0], [1, 1, 1], { lightMap: { image, colorSpace: 'srgb' }, emissiveMap: { image, colorSpace: 'srgb' } });
+  const part = { ...withEmissive, geometry: { ...cube, uvs: new Float32Array(cube.positions.length / 3 * 2) } };
+  const view = new DataView(exportGlb([part]));
+  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(view.buffer, 20, view.getUint32(12, true))));
+  assert.equal(json.meshes[0].primitives[0].attributes.TEXCOORD_1, undefined);
+  assert.equal(json.materials[0].emissiveTexture.texCoord, undefined);
+});

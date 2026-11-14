@@ -231,6 +231,15 @@ function requireUvsForTextures(part) {
   if (textured && !boxMapped && !part.geometry.uvs) {
     throw new RangeError(`GLB part ${part.name} has textures but its geometry has no uvs. Add a uv_unwrap node to the mesh stack, or set geometry.uvs.`);
   }
+  if (usesSecondUvSet(part.material) && !part.geometry.lightUvs) {
+    throw new RangeError(`GLB part ${part.name} has a lightMap or a map with uvChannel 1 but its geometry has no lightUvs. Set geometry.lightUvs, or use uvChannel 0 and remove the lightMap.`);
+  }
+}
+
+function usesSecondUvSet(material) {
+  const descriptors = [...TEXTURE_CHANNELS.map(channel => material[channel]), ...Object.values(material.layerMaps ?? {})];
+  const lightMapWritten = Boolean(material.lightMap) && !material.emissiveMap && (material.emission ?? 0) === 0;
+  return lightMapWritten || descriptors.some(descriptor => descriptor?.uvChannel === 1);
 }
 
 /**
