@@ -600,6 +600,43 @@ vec3 mappedNormal(vec3 normal) {
   return dot(mapped, mapped) > 1e-12 ? normalize(mapped) : normal;
 }
 
+// A mapped normal can turn the reflected view ray below the geometric surface (a colour photo wired in as a normal map does).
+// Cycles' ensure_valid_reflection bends such a normal toward the geometric one until the reflection just clears the surface.
+// A normal that already reflects above the surface comes back unchanged.
+vec3 ensureValidReflection(vec3 geometricNormal, vec3 viewDirection, vec3 normal) {
+  // A tangent-space z below zero (a colour photo read as a normal) points into the surface: fold it out, keeping its tilt.
+  float normalHeight = dot(normal, geometricNormal);
+  if (normalHeight < 0.0) normal -= 2.0 * normalHeight * geometricNormal;
+  vec3 reflected = 2.0 * dot(normal, viewDirection) * normal - viewDirection;
+  float threshold = min(0.9 * dot(geometricNormal, viewDirection), 0.01);
+  if (dot(geometricNormal, reflected) >= threshold) return normal;
+  vec3 tangentPart = normal - dot(normal, geometricNormal) * geometricNormal;
+  if (dot(tangentPart, tangentPart) < 1e-12) return normal;
+  vec3 axisX = normalize(tangentPart);
+  float viewX = dot(viewDirection, axisX);
+  float viewZ = dot(viewDirection, geometricNormal);
+  float lengthSquared = viewX * viewX + viewZ * viewZ;
+  float root = sqrt(max(viewX * viewX * (lengthSquared - threshold * threshold), 0.0));
+  float offset = viewZ * threshold + lengthSquared;
+  float firstZ2 = 0.5 * (root + offset) / lengthSquared;
+  float secondZ2 = 0.5 * (offset - root) / lengthSquared;
+  bool firstValid = firstZ2 > 1e-5 && firstZ2 <= 1.00001;
+  bool secondValid = secondZ2 > 1e-5 && secondZ2 <= 1.00001;
+  if (!firstValid && !secondValid) return geometricNormal;
+  vec2 first = vec2(sqrt(max(1.0 - firstZ2, 0.0)), sqrt(firstZ2));
+  vec2 second = vec2(sqrt(max(1.0 - secondZ2, 0.0)), sqrt(secondZ2));
+  vec2 bent = firstValid ? first : second;
+  if (firstValid && secondValid) {
+    float firstHeight = 2.0 * dot(first, vec2(viewX, viewZ)) * first.y - viewZ;
+    float secondHeight = 2.0 * dot(second, vec2(viewX, viewZ)) * second.y - viewZ;
+    bool firstClears = firstHeight >= 1e-5;
+    bool secondClears = secondHeight >= 1e-5;
+    if (firstClears && secondClears) bent = firstHeight < secondHeight ? first : second;
+    else bent = firstHeight > secondHeight ? first : second;
+  }
+  return normalize(axisX * bent.x + geometricNormal * bent.y);
+}
+
 ${featureCode("libraries")}
 
 ${featureCode("worldMossFunction")}// Opaque draws 1, mask resolves to a cutout (smooth coverage with MSAA), blend and add keep the fraction (per instance opacity times the batch one).
@@ -674,9 +711,9 @@ void main() {
   // canopy, so the back face keeps it instead of flipping to point into the crown.
   bool canopyShaded = CANOPY_TAG;
   if (doubleSided > 0.5 && !gl_FrontFacing && !canopyShaded) normal = -normal;
-  vec3 geometricNormal = normal;
-  if (USES_NORMAL_MAP) normal = BOX_MAPPED ? boxMappedNormal(normal) : mappedNormal(normal);
   vec3 viewDirection = normalize(eye - worldPosition);
+  vec3 geometricNormal = normal;
+  if (USES_NORMAL_MAP) normal = ensureValidReflection(geometricNormal, viewDirection, BOX_MAPPED ? boxMappedNormal(normal) : mappedNormal(normal));
   vec3 color = mix(baseColor, armorColor, step(0.5, surface.w) * (1.0 - step(1.5, surface.w)));
   if (!USES_SPLAT) color *= vertexTint;
   float textureAlpha = 1.0;
