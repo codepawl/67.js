@@ -18,36 +18,32 @@
  },
  "scores": {
   "shapes": {
-   "eevee": 0.0411,
    "crucible-default": 0.0565,
-   "crucible-ao": 0.061,
+   "crucible-ao": 0.0601,
    "crucible-samples8": 0.0565,
    "crucible-hdr": 0.0563,
    "three-default": 0.1621,
    "three-aces": 0.1291
   },
   "corner": {
-   "eevee": 0.0815,
    "crucible-default": 0.1064,
-   "crucible-ao": 0.1253,
+   "crucible-ao": 0.1085,
    "crucible-samples8": 0.1065,
    "crucible-hdr": 0.1062,
    "three-default": 0.212,
    "three-aces": 0.1582
   },
   "material-row": {
-   "eevee": 0.074,
    "crucible-default": 0.0991,
-   "crucible-ao": 0.0994,
+   "crucible-ao": 0.0985,
    "crucible-samples8": 0.0991,
    "crucible-hdr": 0.0993,
    "three-default": 0.1861,
    "three-aces": 0.15
   },
   "colonnade": {
-   "eevee": 0.0502,
    "crucible-default": 0.0513,
-   "crucible-ao": 0.062,
+   "crucible-ao": 0.0618,
    "crucible-samples8": 0.0513,
    "crucible-hdr": 0.0511,
    "three-default": 0.1846,
@@ -56,12 +52,11 @@
  },
  "means": {
   "crucible-default": 0.0783,
-  "crucible-ao": 0.0869,
+  "crucible-ao": 0.0822,
   "crucible-samples8": 0.0784,
   "crucible-hdr": 0.0782,
   "three-default": 0.1862,
-  "three-aces": 0.1425,
-  "eevee": 0.0617
+  "three-aces": 0.1425
  },
  "images": {
   "shapes": {
