@@ -3,13 +3,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { planChecks } from '../scripts/preflight.mjs';
+import { changedPathsSince, planChecks, planFromArguments } from '../scripts/preflight.mjs';
 import { failingGatesFor } from '../scripts/check-change-note.mjs';
-import { releaseProblem } from '../scripts/check-release-changelog.mjs';
+import { isVersionPublished, readPublishReleaseProblem, releaseProblem } from '../scripts/check-release-changelog.mjs';
 import { skipOrThrow } from './helpers/dev-server-browser.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -76,6 +76,108 @@ test('renaming a protected file fails the protected files gate', () => {
     const result = spawnSync(process.execPath, [join(root, 'scripts', 'check-change-note.mjs'), '--base', 'HEAD~1'], { cwd: folder, encoding: 'utf8' });
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stderr, /protected files: CHANGELOG\.md/);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+function fakeRegistry(status) {
+  return async () => ({ ok: status >= 200 && status < 300, status });
+}
+
+const COMPLETE_CHANGELOG = '# Changelog\n\n## 1.1.0\n\n- New (#5)\n\n## 1.0.0\n\n- First (#1)\n';
+const OLD_CHANGELOG = '# Changelog\n\n## 1.0.0\n\n- First (#1)\n';
+
+function makeBumpRepository(changelogText) {
+  const folder = mkdtempSync(join(tmpdir(), 'release-gate-'));
+  runGit(folder, 'init', '-q');
+  writeFileSync(join(folder, 'package.json'), '{"name":"@example/pkg","version":"1.0.0"}\n');
+  writeFileSync(join(folder, 'CHANGELOG.md'), OLD_CHANGELOG);
+  mkdirSync(join(folder, 'changes'));
+  writeFileSync(join(folder, 'changes', 'README.md'), 'notes\n');
+  runGit(folder, 'add', '.');
+  runGit(folder, 'commit', '-q', '-m', 'base');
+  writeFileSync(join(folder, 'package.json'), '{"name":"@example/pkg","version":"1.1.0"}\n');
+  writeFileSync(join(folder, 'CHANGELOG.md'), changelogText);
+  runGit(folder, 'add', '.');
+  runGit(folder, 'commit', '-q', '-m', 'bump');
+  return folder;
+}
+
+function runChangeNoteGate(folder) {
+  return spawnSync(process.execPath, [join(root, 'scripts', 'check-change-note.mjs'), '--base', 'HEAD~1'], { cwd: folder, encoding: 'utf8' });
+}
+
+test('the publish check passes a non-bump package.json change while notes sit in changes/', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'publish-gate-'));
+  try {
+    writeFileSync(join(folder, 'package.json'), '{"name":"@example/pkg","version":"0.20.0"}\n');
+    writeFileSync(join(folder, 'CHANGELOG.md'), changelog);
+    mkdirSync(join(folder, 'changes'));
+    writeFileSync(join(folder, 'changes', '9.md'), '- Pending note (#9)\n');
+    const published = await readPublishReleaseProblem(folder, fakeRegistry(200));
+    assert.match(published.skipped, /already published/);
+    assert.equal(published.problem, null);
+    const unpublished = await readPublishReleaseProblem(folder, fakeRegistry(404));
+    assert.equal(unpublished.skipped, null);
+    assert.match(unpublished.problem, /unfolded note/);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('a registry error is not read as "not published"', async () => {
+  assert.equal(await isVersionPublished('@example/pkg', '1.0.0', fakeRegistry(200)), true);
+  assert.equal(await isVersionPublished('@example/pkg', '1.0.0', fakeRegistry(404)), false);
+  await assert.rejects(isVersionPublished('@example/pkg', '1.0.0', fakeRegistry(503)), /HTTP 503/);
+});
+
+test('check-change-note fails a bump with no changelog section and names the release changelog gate', () => {
+  const folder = makeBumpRepository(OLD_CHANGELOG);
+  try {
+    const result = runChangeNoteGate(folder);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /release changelog: CHANGELOG\.md has no "## 1\.1\.0" section/);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('check-change-note passes a complete bump', () => {
+  const folder = makeBumpRepository(COMPLETE_CHANGELOG);
+  try {
+    const result = runChangeNoteGate(folder);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('preflight lists a renamed file on both sides', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'rename-list-'));
+  try {
+    runGit(folder, 'init', '-q');
+    writeFileSync(join(folder, 'CHANGELOG.md'), changelog);
+    runGit(folder, 'add', '.');
+    runGit(folder, 'commit', '-q', '-m', 'base');
+    runGit(folder, 'mv', 'CHANGELOG.md', 'CHANGELOG-old.md');
+    runGit(folder, 'commit', '-q', '-m', 'rename');
+    assert.deepEqual(changedPathsSince('HEAD~1', folder), ['CHANGELOG-old.md', 'CHANGELOG.md']);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('preflight hands --base to size and checks the release changelog of a bump', async () => {
+  const folder = makeBumpRepository(OLD_CHANGELOG);
+  try {
+    mkdirSync(join(folder, 'src'));
+    writeFileSync(join(folder, 'src', 'thing.js'), 'export const thing = 1;\n');
+    runGit(folder, 'add', '.');
+    runGit(folder, 'commit', '-q', '-m', 'code');
+    const { checks } = await planFromArguments(['--skip-tests'], 'HEAD~2', folder);
+    assert.deepEqual(checkNamed(checks, 'size').command, ['npm', 'run', 'size', '--', '--base', 'HEAD~2']);
+    assert.match(checkNamed(checks, 'release changelog').failure, /no "## 1\.1\.0" section/);
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }

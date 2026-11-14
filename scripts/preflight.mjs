@@ -155,15 +155,16 @@ export function manualChecksFor(changedPaths) {
   return MANUAL_CHECKS.filter(check => paths.some(path => check.pattern.test(path)));
 }
 
-function git(args) {
-  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+function git(args, folder = root) {
+  const result = spawnSync('git', args, { cwd: folder, encoding: 'utf8' });
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
-function changedPathsSince(baseRef) {
-  const mergeBase = git(['merge-base', baseRef, 'HEAD']) ?? baseRef;
-  const committedAndStaged = git(['diff', '--name-only', '--no-renames', mergeBase]) ?? '';
-  const untracked = git(['ls-files', '--others', '--exclude-standard']) ?? '';
+// --no-renames lists both sides of a rename, so a moved protected file still counts as a change to it.
+export function changedPathsSince(baseRef, folder = root) {
+  const mergeBase = git(['merge-base', baseRef, 'HEAD'], folder) ?? baseRef;
+  const committedAndStaged = git(['diff', '--name-only', '--no-renames', mergeBase], folder) ?? '';
+  const untracked = git(['ls-files', '--others', '--exclude-standard'], folder) ?? '';
   const lines = `${committedAndStaged}\n${untracked}`.split('\n').filter(Boolean);
   return [...new Set(lines)].sort();
 }
@@ -243,6 +244,15 @@ function valueAfter(args, flag) {
   return index < 0 ? null : args[index + 1];
 }
 
+// Builds the checks for one run: what changed since `baseRef`, whether it is a release, and the plan with `baseRef` handed to size and tool cost.
+export async function planFromArguments(args, baseRef, folder = root) {
+  const changedPaths = changedPathsSince(baseRef, folder);
+  const release = isVersionBump(git(['show', `${baseRef}:package.json`], folder), readFileSync(join(folder, 'package.json'), 'utf8'));
+  const releaseProblem = release ? await readReleaseProblem(folder) : null;
+  const checks = planChecks(changedPaths, { skipTests: args.includes('--skip-tests'), release, baseRef, releaseProblem });
+  return { changedPaths, checks };
+}
+
 async function main(args) {
   const baseRef = valueAfter(args, '--base') ?? 'origin/main';
   if (baseRef === 'origin/main' && git(['fetch', '--quiet', 'origin', 'main']) === null) {
@@ -255,11 +265,8 @@ async function main(args) {
   mkdirSync(logFolder, { recursive: true });
   mkdirSync(join(root, 'coverage'), { recursive: true });
 
-  const changedPaths = changedPathsSince(baseRef);
+  const { changedPaths, checks } = await planFromArguments(args, baseRef);
   console.log(`${changedPaths.length} files changed since ${baseRef}.`);
-  const release = isVersionBump(git(['show', `${baseRef}:package.json`]), readFileSync(join(root, 'package.json'), 'utf8'));
-  const releaseProblem = release ? await readReleaseProblem(root) : null;
-  const checks = planChecks(changedPaths, { skipTests: args.includes('--skip-tests'), release, baseRef, releaseProblem });
   const results = await runChecks(checks);
   const manualChecks = manualChecksFor(changedPaths);
   printSummary(results, manualChecks);

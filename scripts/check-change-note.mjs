@@ -34,7 +34,7 @@ async function main() {
   const changedPaths = git(['diff', '--name-only', '--no-renames', baseRef, 'HEAD']).split('\n').filter(Boolean);
   const release = isVersionBump(git(['show', `${baseRef}:package.json`]), git(['show', 'HEAD:package.json']));
   if (release) console.log('The package version changed, so this is a release: the protected file and change note gates do not apply, the release changelog gate does.');
-  const releaseProblem = release ? await readReleaseProblem() : null;
+  const releaseProblem = release ? await readReleaseProblem(process.cwd()) : null;
   const failing = failingGatesFor(changedPaths, { release, releaseProblem });
   for (const gate of failing) {
     console.error(`FAIL ${gate.name}: ${gate.failure}\n     Fix: ${gate.fix}`);
