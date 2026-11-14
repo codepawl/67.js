@@ -2,8 +2,9 @@
 // failed and were skipped, with the skip reasons, so a green check says what it did not run (#1146).
 // A test that failed with "the GPU device was lost" is counted apart: the software Vulkan adapter of CI (lavapipe) reports ray
 // query support but loses the device on the first trace, so those tests need a real GPU and say nothing about the code.
+// A test whose child process draws on the GPU and only reports an exit code can be named with --gpu-bound "<test name>" (repeatable) to be counted there.
 // Exit code: 1 when any other test failed, 0 otherwise.
-// Usage: node scripts/summarize-addon-tests.mjs <report.tap> [--title "<heading>"]
+// Usage: node scripts/summarize-addon-tests.mjs <report.tap> [--title "<heading>"] [--gpu-bound "<test name>"]...
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -11,7 +12,7 @@ const DEVICE_LOST = /GPU device was lost/;
 const TEST_LINE = /^(\s*)(not ok|ok) \d+ - (.*?)(?: # (SKIP|skip|TODO|todo)\b ?(.*))?$/;
 
 /** Counts the leaf tests of a TAP report. A parent line follows its deeper-indented subtests in TAP, so one that does so is a suite or a file, not a test. */
-export function countTapTests(reportText) {
+export function countTapTests(reportText, gpuBoundNames = []) {
   const entries = [];
   for (const line of reportText.split(/\r?\n/)) {
     const match = TEST_LINE.exec(line);
@@ -22,7 +23,8 @@ export function countTapTests(reportText) {
     entries.push({
       depth: match[1].length,
       failed: match[2] === 'not ok',
-      deviceLost: false,
+      name: match[3],
+      deviceLost: gpuBoundNames.includes(match[3]),
       skipReason: match[4]?.toLowerCase() === 'skip' ? match[5].trim() || 'no reason given' : null,
     });
   }
@@ -70,7 +72,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   }
   const titleIndex = process.argv.indexOf('--title');
   const title = titleIndex > 0 ? process.argv[titleIndex + 1] : 'Addon tests';
-  const counts = countTapTests(readFileSync(reportPath, 'utf8'));
+  const gpuBoundNames = process.argv.flatMap((argument, index) => (argument === '--gpu-bound' ? [process.argv[index + 1]] : []));
+  const counts = countTapTests(readFileSync(reportPath, 'utf8'), gpuBoundNames);
   console.log(formatSummary(counts, title));
   process.exit(counts.failed > 0 ? 1 : 0);
 }

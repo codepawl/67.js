@@ -68,7 +68,7 @@ jobs:
       - name: Write ran and skipped counts to the job summary, fail on a real failure
         run: |
           set +e
-          node scripts/summarize-addon-tests.mjs addon-tests.tap --title 'Tests that load Cook, addon built, lavapipe adapter' > summary.md
+          node scripts/summarize-addon-tests.mjs addon-tests.tap --title 'Tests that load Cook, addon built, lavapipe adapter' \n            --gpu-bound 'a process that rendered with the native addon exits with code 0' > summary.md
           status=$?
           echo "Cargo build ${build_seconds:-?} s, tests ${test_seconds:-?} s." >> summary.md
           cat summary.md >> "$GITHUB_STEP_SUMMARY"

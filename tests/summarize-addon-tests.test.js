@@ -33,6 +33,12 @@ test('countTapTests counts leaf tests and groups skip reasons', () => {
   assert.equal(counts.skipReasons.get('no ray query adapter'), 1);
 });
 
+test('countTapTests counts a named test that only reports an exit code as GPU bound', () => {
+  const counts = countTapTests('not ok 1 - renders in a child process\n', ['renders in a child process']);
+  assert.equal(counts.deviceLost, 1);
+  assert.equal(counts.failed, 0);
+});
+
 test('formatSummary names the skip reasons, most common first', () => {
   const text = formatSummary(countTapTests(REPORT), 'Title');
   assert.match(text, /### Title/);
