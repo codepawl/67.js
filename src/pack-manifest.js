@@ -3,6 +3,7 @@
 // A pack never carries code, and nothing in it is fetched: every file is local and listed by a relative path.
 import { invalidField } from './field-error.js';
 
+import { currentFormatName, LEGACY_ENGINE_KEY } from './legacy-names.js';
 export const PACK_MANIFEST_FILE = 'crucible-pack.json';
 export const PACK_FORMAT = 'crucible.pack';
 export const PACK_SCHEMA_VERSION = 1;
@@ -200,12 +201,12 @@ function normalizeItems(kind, items, label, prefix) {
 export function validatePackManifest(manifest, { label, packageVersion }) {
   const prefix = `pack "${label}" ${PACK_MANIFEST_FILE}`;
   assertKnownKeys(manifest, ['format', 'schemaVersion', 'name', 'version', 'engines', 'license', 'author', 'description', 'contents'], prefix);
-  if (manifest.format !== PACK_FORMAT) throw invalidField(`${prefix}.format`, manifest.format, `"${PACK_FORMAT}"`);
+  if (currentFormatName(manifest.format) !== PACK_FORMAT) throw invalidField(`${prefix}.format`, manifest.format, `"${PACK_FORMAT}"`);
   if (manifest.schemaVersion !== PACK_SCHEMA_VERSION) throw invalidField(`${prefix}.schemaVersion`, manifest.schemaVersion, String(PACK_SCHEMA_VERSION));
   const name = assertIdentifier(manifest.name, `${prefix}.name`);
   if (typeof manifest.version !== 'string' || !parseVersion(manifest.version)) throw invalidField(`${prefix}.version`, manifest.version, 'a version of three numbers, such as "1.0.0"');
-  assertKnownKeys(manifest.engines, ['crucible'], `${prefix}.engines`);
-  const range = manifest.engines['crucible'];
+  assertKnownKeys(manifest.engines, ['crucible', LEGACY_ENGINE_KEY], `${prefix}.engines`);
+  const range = manifest.engines['crucible'] ?? manifest.engines[LEGACY_ENGINE_KEY];
   const admitted = semverSatisfies(packageVersion, range);
   if (admitted === null) throw invalidField(`${prefix}.engines.crucible`, range, 'a range of space-separated comparators >=, >, <, <=, =, ^ or ~ with numbers, such as ">=0.19.0"');
   if (!admitted) throw invalidField(`${prefix}.engines.crucible`, range, `a range that admits the installed Crucible ${packageVersion}, such as ">=${packageVersion}"; this pack needs another Crucible version`);

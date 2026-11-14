@@ -22,6 +22,13 @@ import { createCallLogger, CALL_LOG_ENVIRONMENT_VARIABLE } from './mcp-call-log.
 import { startUpdateCheck, updateNoticeText, describeUpdateCheck } from '../src/mcp-update-check.js';
 import { installVolumeGridFiles } from '../src/mcp-volume-grids.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
+import { currentFormatName, warnLegacyOnce } from '../src/legacy-names.js';
+
+function acceptLegacyFormat(value) {
+  const current = currentFormatName(value);
+  if (current !== value) warnLegacyOnce(`recipe format "${value}" is now "${current}"; the old name stops working in the next release.`);
+  return current;
+}
 
 describeSchemaInputsWithReceivedValues();
 
@@ -690,7 +697,7 @@ const clothListed = listed('cloth', cloth, 'Baked cloth sheets: duration, gravit
 const armatureListed = listed('armatures', armature, 'A skeleton { id, parent, preset humanoid|quadruped, fit, bones [{name, parent, head, tail}], prefix, translation, rotation }; see scene_capabilities armatures.', { id: identifier });
 const gameReference = z.record(z.string(), z.unknown()).describe('Playable setup as plain JSON, never code: {player:{node}, camera, input, physics, ground, rules}. Fields and an example: scene_capabilities game.');
 const recipe = z.strictObject({
-  format: z.literal('crucible.scene'),
+  format: z.preprocess(acceptLegacyFormat, z.literal('crucible.scene')),
   schemaVersion: z.literal(1),
   geometries: z.array(geometryListed).max(256).optional(),
   materials: z.array(materialListed(z.strictObject({ id: identifier, tag: materialTag, ...materialFields }), 'Material.', { id: identifier })).max(256).optional().describe('Omit for none.'),
@@ -710,7 +717,7 @@ const recipe = z.strictObject({
   game: gameReference.nullable().optional(),
 }).describe('Bounded scene recipe; the backend validates it.');
 const assetRecipe = z.strictObject({
-  format: z.literal('crucible.asset'),
+  format: z.preprocess(acceptLegacyFormat, z.literal('crucible.asset')),
   schemaVersion: z.literal(1),
   assetId: z.string().regex(/^[a-f0-9]{64}$/).describe('SHA-256 asset ID from scene_asset_catalog.'),
   camera: z.strictObject(cameraFields).optional(),

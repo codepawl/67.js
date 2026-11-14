@@ -5,6 +5,7 @@ import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
 
 import { invalidField } from '../src/field-error.js';
+import { currentFormatName, LEGACY_PACK_MANIFEST_FILE, warnLegacyOnce } from '../src/legacy-names.js';
 import {
   MAXIMUM_INSTALLED_PACKS, MAXIMUM_JSON_DEPTH, MAXIMUM_PACK_BYTES, MAXIMUM_PACK_FILES, MAXIMUM_PACK_FILE_BYTES, MAXIMUM_PACK_JSON_BYTES,
   PACK_MANIFEST_FILE, findRemoteUrl, isExecutableLookingName, isPackDocumentName, validatePackManifest,
@@ -88,7 +89,7 @@ async function validateJsonContent(kind, id, json, label, file, validateScene) {
   if (remote?.tooDeep) throw invalidField(`pack "${label}" ${file}`, `JSON nested over ${MAXIMUM_JSON_DEPTH} levels`, `at most ${MAXIMUM_JSON_DEPTH} levels of nested objects and lists; flatten ${remote.path}`);
   if (remote) throw invalidField(`pack "${label}" ${file} ${remote.path}`, remote.value, 'no remote URL: a pack is data only. Reference pack files by their catalog ID, and use data:image/png|jpeg|webp;base64 only for small images');
   if (!json || typeof json !== 'object' || Array.isArray(json)) throw invalidField(`pack "${label}" ${file}`, json, 'one JSON object');
-  if (kind === 'recipes' && json.format !== 'crucible.scene') throw invalidField(`pack "${label}" ${file} format`, json.format, '"crucible.scene", the recipe format scene_create takes');
+  if (kind === 'recipes' && currentFormatName(json.format) !== 'crucible.scene') throw invalidField(`pack "${label}" ${file} format`, json.format, '"crucible.scene", the recipe format scene_create takes');
   if (!validateScene) return;
   try {
     await validateScene(kind, id, json);
@@ -105,9 +106,12 @@ export async function loadPack(folder, { packageVersion, label = basename(String
   if (folderDetails.isSymbolicLink() || !folderDetails.isDirectory()) throw packError(label, 'the pack must be a real folder, not a link or a file.');
   const directory = await realpath(folder);
   const files = await listPackFiles(directory, label);
-  if (!files.has(PACK_MANIFEST_FILE)) throw invalidField(`pack "${label}"`, `no ${PACK_MANIFEST_FILE}`, `a ${PACK_MANIFEST_FILE} file at the pack root`);
-  const manifest = validatePackManifest(await readJsonFile(directory, PACK_MANIFEST_FILE, label, PACK_MANIFEST_FILE, files.get(PACK_MANIFEST_FILE)), { label, packageVersion });
-  const listedFiles = new Set([PACK_MANIFEST_FILE]);
+  const usesLegacyManifest = !files.has(PACK_MANIFEST_FILE) && files.has(LEGACY_PACK_MANIFEST_FILE);
+  const manifestFile = usesLegacyManifest ? LEGACY_PACK_MANIFEST_FILE : PACK_MANIFEST_FILE;
+  if (!files.has(manifestFile)) throw invalidField(`pack "${label}"`, `no ${PACK_MANIFEST_FILE}`, `a ${PACK_MANIFEST_FILE} file at the pack root`);
+  if (usesLegacyManifest) warnLegacyOnce(`pack "${label}" uses ${LEGACY_PACK_MANIFEST_FILE}; rename it to ${PACK_MANIFEST_FILE}. The old name stops working in the next release.`);
+  const manifest = validatePackManifest(await readJsonFile(directory, manifestFile, label, manifestFile, files.get(manifestFile)), { label, packageVersion });
+  const listedFiles = new Set([manifestFile]);
   for (const [kind, list] of Object.entries(manifest.contents)) {
     for (const [index, item] of list.entries()) {
       for (const key of ['file', 'preview']) {
