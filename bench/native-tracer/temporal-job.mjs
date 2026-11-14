@@ -1,9 +1,10 @@
 // Measures frame-to-frame flicker of a native path traced video with and without the temporal blend (issue 1120).
-//   node bench/native-tracer/temporal-job.mjs <output directory> [--browser <chrome path>] [--runtime-backend gpu|cpu] [--samples 32] [--width 960] [--height 540] [--memory 1024] [--ffmpeg ffmpeg]
+//   node bench/native-tracer/temporal-job.mjs <output directory> [--browser <chrome path>] [--runtime-backend gpu|cpu] [--samples 32] [--width 960] [--height 540] [--ffmpeg ffmpeg]
 // The scene is the demo room lit only by the area light in its window and the sky through the open front, with the particle
 // systems and every track but the camera removed, so the session reuses the scene and only the camera moves. The camera flies
-// through the room for 2 s, then cuts to another view for 1 s. The job runs twice through the MCP server, with the blend and
-// with JS67_NATIVE_TEMPORAL=off, and both videos are read back as 8-bit grey frames.
+// slowly into the room for 2 s, then cuts to another view and holds it for 1 s. The job runs three times through the MCP
+// server: with the blend, with JS67_NATIVE_TEMPORAL=off, and with it off at 512 samples as the reference that shows how much of
+// the score is the camera's own motion. The videos are read back as 8-bit grey frames.
 // The score is the mean of |f[t+1] - 2 f[t] + f[t-1]| over the pixels and the frames of the fly-through: smooth camera motion
 // cancels in it and noise that changes from frame to frame stays. Prints one TEMPORAL_JOB line of JSON and exits 1 when the
 // blended video scores 1.5 or more, or when a frame did not render on the native tracer.
@@ -26,13 +27,12 @@ const samples = Number(flag('--samples', 32));
 const browserPath = flag('--browser', '');
 const runtimeBackend = flag('--runtime-backend', 'gpu');
 const ffmpegPath = flag('--ffmpeg', 'ffmpeg');
-// The memory guard of the MCP server in MiB: a 960 x 540 native frame with OIDN in process needs more than the 384 of the sequence bench.
-const memoryMebibytes = flag('--memory', '1024');
 const FPS = 24;
 const FLY_SECONDS = 2;
 const TOTAL_SECONDS = 3;
 const FLY_FRAMES = FPS * FLY_SECONDS;
 const SCORE_LIMIT = 1.5;
+const REFERENCE_SAMPLES = 512;
 const WINDOW_LIGHT_INTENSITY = 220;
 
 function cameraTrack(property, flyStart, flyEnd, afterCut) {
@@ -50,17 +50,17 @@ function windowLitRoom(recipe) {
   const windowLight = { ...recipe.environment.areaLights[0], intensity: WINDOW_LIGHT_INTENSITY };
   const environment = { ...recipe.environment, pointLights: [], spotLights: [], areaLights: [windowLight] };
   const tracks = [
-    cameraTrack('eye', [1.4, 2.1, 7], [-0.6, 1.8, 3.4], [3.9, 0.6, 2.8]),
-    cameraTrack('target', [0, 1.6, -2], [0.4, 1.7, -2.5], [0.3, 1.5, -2.3]),
+    cameraTrack('eye', [1.4, 2.1, 7], [1.0, 2.0, 6.4], [3.9, 0.6, 2.8]),
+    cameraTrack('target', [0, 1.6, -2], [0.1, 1.65, -2], [0.3, 1.5, -2.3]),
     cameraTrack('fov', 50, 50, 55),
   ];
   return { ...kept, environment, motion: { duration: TOTAL_SECONDS, loop: false, tracks } };
 }
 
-async function renderVideo(recipe, blend) {
+async function renderVideo(recipe, { name, blend, jobSamples }) {
   const workDirectory = await mkdtemp(join(tmpdir(), '67js-temporal-job-'));
   const transport = new StdioClientTransport({ command: process.execPath,
-    args: [resolve('bin/67js-mcp.mjs'), '--backend', runtimeBackend, '--memory', memoryMebibytes, '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
+    args: [resolve('bin/67js-mcp.mjs'), '--backend', runtimeBackend, '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(browserPath ? ['--browser', browserPath] : [])],
     cwd: workDirectory, stderr: 'pipe', env: { ...process.env, JS67_NATIVE_TEMPORAL: blend ? 'on' : 'off' } });
   let diagnostics = '';
   transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
@@ -72,7 +72,7 @@ async function renderVideo(recipe, blend) {
     const created = createResult.structuredContent;
     if (!created) throw new Error(`scene_create failed: ${createResult.content?.[0]?.text}`);
     const settings = { kind: 'video', fps: FPS, duration: TOTAL_SECONDS, motion: { start: 0 }, width, height,
-      renderer: { type: 'pathTracer', backend: 'native', samples, bounces: 6, maxSeconds: 120, seed: 3 } };
+      renderer: { type: 'pathTracer', backend: 'native', samples: jobSamples, bounces: 6, maxSeconds: 120, seed: 3 } };
     const submitted = await call('scene_render_submit', { sessionId: created.sessionId, expectedRevision: 0, settings });
     if (submitted.isError) throw new Error(submitted.content?.[0]?.text);
     const { jobId } = submitted.structuredContent;
@@ -86,7 +86,7 @@ async function renderVideo(recipe, blend) {
     const result = (await call('scene_render_result', { jobId })).structuredContent;
     const video = result.artifacts.find(artifact => artifact.path.endsWith('.mp4'));
     if (!video) throw new Error(`the job wrote no mp4: ${JSON.stringify(result.artifacts.map(artifact => artifact.path))}`);
-    const videoPath = join(outputDirectory, blend ? 'blended.mp4' : 'plain.mp4');
+    const videoPath = join(outputDirectory, `${name}.mp4`);
     await copyFile(video.path, videoPath);
     const pathTracer = result.metrics.pathTracer ?? {};
     await call('scene_render_release', { jobId });
@@ -140,8 +140,14 @@ await mkdir(outputDirectory, { recursive: true });
 const recipe = windowLitRoom(JSON.parse(await readFile('tests/fixtures/demo-room.recipe.json', 'utf8')));
 const report = { width, height, samples, fps: FPS, flyFrames: FLY_FRAMES, frames: FPS * TOTAL_SECONDS, scoreLimit: SCORE_LIMIT };
 let failed = false;
-for (const [name, blend] of [['blended', true], ['plain', false]]) {
-  const rendered = await renderVideo(recipe, blend);
+const variants = [
+  { name: 'blended', blend: true, jobSamples: samples },
+  { name: 'plain', blend: false, jobSamples: samples },
+  { name: 'reference', blend: false, jobSamples: REFERENCE_SAMPLES },
+];
+for (const variant of variants) {
+  const { name } = variant;
+  const rendered = await renderVideo(recipe, variant);
   const frames = await greyFrames(rendered.videoPath);
   const fly = summarize(flickerScores(frames, 0, FLY_FRAMES - 1));
   const afterCut = summarize(flickerScores(frames, FLY_FRAMES, frames.length - 1));
@@ -150,7 +156,7 @@ for (const [name, blend] of [['blended', true], ['plain', false]]) {
   }
   const laterRoutes = rendered.routes.slice(1);
   const allReused = laterRoutes.length === frames.length - 1 && laterRoutes.every(route => route === 'reused');
-  report[name] = { fly, afterCut, frameCount: frames.length, backend: rendered.backend, backendNote: rendered.backendNote, denoiser: rendered.denoiser,
+  report[name] = { samples: variant.jobSamples, fly, afterCut, frameCount: frames.length, backend: rendered.backend, backendNote: rendered.backendNote, denoiser: rendered.denoiser,
     allLaterFramesReused: allReused, lastFrameTemporal: rendered.lastFrameTemporal, renderSeconds: rendered.renderSeconds };
   if (rendered.backend !== 'native' || !allReused) failed = true;
 }

@@ -21,7 +21,9 @@ const CAMERA_UP_BYTE = 160;
 const LENS_SHIFT_BYTE = 176;
 
 export const TEMPORAL_DEFAULTS = Object.freeze({
-  // The share of a new frame in a pixel with a long history: a pixel never averages more than 1 / minimumWeight frames.
+  // The share of a new frame in a pixel with a long history while the camera moves: a pixel then never averages more than
+  // 1 / minimumWeight frames, so light that depends on the view catches up. Under a camera that stands still every frame
+  // counts the same and the picture converges.
   minimumWeight: 0.1,
   // A history texel belongs to the same surface when its distance is within this share of the expected one.
   depthTolerance: 0.04,
@@ -68,6 +70,15 @@ export function readCameraView(kernelParams) {
     lensShift: [view.getFloat32(LENS_SHIFT_BYTE, true), view.getFloat32(LENS_SHIFT_BYTE + 4, true)],
     orthographic: (view.getUint32(KERNEL_FLAGS_BYTE, true) & ORTHOGRAPHIC_CAMERA_FLAG) !== 0,
   };
+}
+
+function sameCameraBytes(firstParams, secondParams) {
+  for (let byteOffset = CAMERA_BYTES[0]; byteOffset < CAMERA_BYTES[1]; byteOffset++) {
+    if (firstParams[byteOffset] !== secondParams[byteOffset]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function insideRange(byteOffset, range) {
@@ -164,7 +175,8 @@ export function createTemporalAccumulator(options = {}) {
       blended.set(color);
       counts.fill(1);
     } else {
-      pixelsWithHistory = blendWithHistory({ color, depth, normal, camera, blended, counts });
+      const minimumShare = sameCameraBytes(history.kernelParams, kernelParams) ? 0 : settings.minimumWeight;
+      pixelsWithHistory = blendWithHistory({ color, depth, normal, camera, blended, counts, minimumShare });
     }
     history = { color: blended, depth, normal, counts, camera, kernelParams: Uint8Array.from(kernelParams) };
     pendingRestartReason = null;
@@ -172,7 +184,7 @@ export function createTemporalAccumulator(options = {}) {
   }
 
   // Writes `blended` and `counts`, and returns how many pixels found their surface in the history.
-  function blendWithHistory({ color, depth, normal, camera, blended, counts }) {
+  function blendWithHistory({ color, depth, normal, camera, blended, counts, minimumShare }) {
     const past = history;
     const pastCamera = past.camera;
     const { position, forward, right, up, lensShift } = camera;
@@ -244,7 +256,7 @@ export function createTemporalAccumulator(options = {}) {
         }
         if (fetchWeight > settings.minimumFetchWeight) {
           const count = pastCount / fetchWeight + 1;
-          const share = Math.max(1 / count, settings.minimumWeight);
+          const share = Math.max(1 / count, minimumShare);
           const kept = (1 - share) / fetchWeight;
           blended[colorIndex] = pastRed * kept + color[colorIndex] * share;
           blended[colorIndex + 1] = pastGreen * kept + color[colorIndex + 1] * share;

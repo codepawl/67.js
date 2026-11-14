@@ -79,7 +79,7 @@ test('the first frame passes through and says the history started', () => {
   assert.notEqual(result.color, frame.color, 'the result is a new buffer');
 });
 
-test('a still camera averages the frames, then holds the newest frame at the minimum weight', () => {
+test('a still camera averages every frame it has seen, and a moving one holds the newest frame at the minimum weight', () => {
   const accumulator = createTemporalAccumulator({ width: WIDTH, height: HEIGHT });
   const kernelParams = paramsForCamera([0, 0, 0]);
   accumulator.accumulate({ ...flatFrame(1), kernelParams });
@@ -93,8 +93,10 @@ test('a still camera averages the frames, then holds the newest frame at the min
   for (let frame = 0; frame < 20; frame++) {
     last = accumulator.accumulate({ ...flatFrame(0), kernelParams });
   }
+  assert.ok(Math.abs(last.color[0] - 1 / 23) < 1e-6, 'the 23 frames of a still camera count the same');
   const beforeStep = last.color[0];
-  const step = accumulator.accumulate({ ...flatFrame(1), kernelParams });
+  // The same wall from a camera one pixel to the side: the history is as long, and the camera moved.
+  const step = accumulator.accumulate({ ...flatFrame(1), kernelParams: paramsForCamera([0.25, 0, 0]) });
   const share = (step.color[0] - beforeStep) / (1 - beforeStep);
   assert.ok(Math.abs(share - TEMPORAL_DEFAULTS.minimumWeight) < 1e-4, `a long history takes ${TEMPORAL_DEFAULTS.minimumWeight} of the new frame, got ${share}`);
 });
