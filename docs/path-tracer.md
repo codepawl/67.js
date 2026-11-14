@@ -49,6 +49,8 @@ A part with a material `subsurface` weight above 0 sends that share of its diffu
 `report.ignored` lists the ones this scene asks for; a render job returns it as `metrics.pathTracer.ignored`. It names occlusion maps, anisotropy, iridescence, sheen, moss, splat layers, baked `lightMap`s, tagged materials (foliage, liquid, water and the like, traced as plain surfaces), blended transparency, and the fog fields above.
 
 - The procedural sky when there is no environment map (the sky is black).
+
+The native `cycles` kernel reads an environment map as it is, as Blender Cycles does: a sun stored at tens of thousands lights the scene with all of it. Until #1172 its packer capped every texel at 16, which left a sunlit scene (Pavilion) at 0.77 of its Cycles brightness; without the cap it is at 1.01 ([numbers](cycles-parity.md#the-environment-limit-of-16-1172)). A caller of the Cook package can still pass `hdriRadianceLimit` to cap the texels and trade that energy for less noise at low sample counts.
 - Occlusion maps. Normal and metallic-roughness maps are drawn on UV-mapped and on box-projected materials. Material graphs and patterns are drawn through the colour map they bake.
 - Translucent leaves without a `subsurface` block (foliage looks darker than in the rasterizer), liquids, foam and blended transparency (traced as plain or opaque surfaces).
 - Lights seen in mirrors (area lights and spot lights are lit but not visible), caustics, motion blur, bloom and colour grade. Depth of field is drawn only by the native `cycles` kernel, for a camera with an `fStop` (a thin lens with Cycles' aperture, focus distance and blades; see the Cook README); the CPU, GPU and legacy native tracers draw a pinhole.

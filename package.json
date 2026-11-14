@@ -260,7 +260,7 @@
   },
   "devDependencies": {
     "@codepawlhq/67js-denoise-oidn": "file:packages/denoise-oidn",
-    "@codepawlhq/cook": "git+https://github.com/codepawl/cook.git#087239334cf5303caf72c6ce98de512227a53cbe",
+    "@codepawlhq/cook": "git+https://github.com/codepawl/cook.git#5d9eda89d3a931ace15f1a743a7ca1fd0462030a",
     "@dimforge/rapier3d-compat": "0.21.0",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/server": "2.4.0",
