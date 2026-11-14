@@ -225,6 +225,10 @@ Lights go in the scene description under `renderer.environment`: `keyColor` and 
 
 Scores and times are in the table of `bench/reference/README.md`. Cycles used 256 samples with a denoiser, and the tracer 32 samples with its own filter, so the remaining gap is partly noise and partly the differences listed above.
 
+## What CI runs (issue #1146)
+
+The required `test` check builds no addon, so the tests that need it skip there. The `Cook addon` workflow (not required) builds the pinned Cook with a cached cargo target, runs every test file that loads `tests/support/cook.js` on the software Vulkan adapter lavapipe and writes the counts to its job summary: tests that passed, failed, skipped (with the reasons) and tests that lost the GPU device. Lavapipe lists `VK_KHR_ray_query` but loses the device on the first trace, so the tests that draw pixels still need a real GPU: run them with `npm run cook:build` and `node --test tests/native-*.test.js` on a machine with a ray query card.
+
 ## Progressive preview, blue noise and light choice (issue #623)
 
 `crucible/addons/path-tracer-progressive` (`createProgressiveTracer(scene, options)`) draws the GPU tracer one sample per pixel per `step()`. The first two steps draw at a quarter and a half of the size, one sample each, then every step adds a sample at full size; `update({ camera, parts, environment })` starts the image over, and `snapshot()` reads the image back (filtered unless `denoise` is off). It shares the WebGL2 context of the GPU still, so one render at a time owns it. The core bundle does not carry it.
