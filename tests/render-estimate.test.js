@@ -114,7 +114,7 @@ test('a damaged history file counts as no history', () => {
 test('the report puts the estimate, the measurement and what fell back in one record', () => {
   const settings = settingsFor({ width: 1920, height: 1080, renderer: { type: 'pathTracer', backend: 'native', samples: 64 } });
   const metrics = {
-    elapsedSeconds: 12.345, peakNodeBytes: 300 * 1024 ** 2, peakBrowserHeap: 100 * 1024 ** 2, requestedWidth: 1920, requestedHeight: 1080, width: 1280, height: 720,
+    elapsedSeconds: 12.345, peakNodeBytes: 300 * 1024 ** 2, peakBrowserHeap: 100 * 1024 ** 2, requestedWidth: 1920, requestedHeight: 1080, width: 1280, height: 720, requiredMemoryMiB: 250, memoryBudgetMiB: 192,
     pathTracer: { averageSamples: 48, backendNote: 'No native tracer was found. The gpu backend ran instead.', denoiserNote: 'OIDN is not installed; the wavelet denoiser ran.' },
   };
   const report = renderReport({ estimate: { seconds: 10, peakMemoryMiB: 350, basis: 'scene size' }, settings, metrics });
@@ -124,6 +124,7 @@ test('the report puts the estimate, the measurement and what fell back in one re
   assert.equal(report.samplesRequested, 64);
   assert.equal(report.fallbacks.length, 3);
   assert.match(report.fallbacks[0], /1920x1080 to 1280x720/);
+  assert.match(report.fallbacks[0], /needs a render budget of 250 MiB; this server runs with --memory 192. Restart it with --memory 250 or more/);
   assert.deepEqual(renderReport({ settings: settingsFor({}), metrics: { elapsedSeconds: 1 } }).fallbacks, []);
 });
 

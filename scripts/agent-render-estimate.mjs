@@ -171,7 +171,8 @@ function frameWasReduced(metrics) {
 function fallbacksFrom(settings, metrics) {
   const fallbacks = [];
   if (frameWasReduced(metrics)) {
-    fallbacks.push(`The memory budget reduced the frame from ${metrics.requestedWidth}x${metrics.requestedHeight} to ${metrics.width}x${metrics.height}.`);
+    const neededBudget = metrics.requiredMemoryMiB ? ` The full frame needs a render budget of ${metrics.requiredMemoryMiB} MiB${metrics.memoryBudgetMiB ? `; this server runs with --memory ${metrics.memoryBudgetMiB}` : ''}. Restart it with --memory ${metrics.requiredMemoryMiB} or more to render at ${metrics.requestedWidth}x${metrics.requestedHeight}.` : '';
+    fallbacks.push(`The memory budget reduced the frame from ${metrics.requestedWidth}x${metrics.requestedHeight} to ${metrics.width}x${metrics.height}.${neededBudget}`);
   }
   if (metrics.pathTracer?.backendNote) fallbacks.push(metrics.pathTracer.backendNote);
   if (metrics.pathTracer?.denoiserNote) fallbacks.push(metrics.pathTracer.denoiserNote);
