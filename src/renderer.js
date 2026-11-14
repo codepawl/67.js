@@ -2393,7 +2393,7 @@ export class CrucibleRenderer {
       context.uniform1f(uniforms.alphaMasked, masked ? 1 : 0);
       context.uniform1f(uniforms.alphaCutoff, batch.alphaCutoff);
       context.uniform1f(uniforms.materialOpacity, batch.opacity);
-      context.uniform1f(uniforms.hasBaseMap, batch.mapState[0] ? 1 : 0);
+      context.uniform1f(uniforms.hasBaseMap, batch.mapState[0] ? 1 + (batch.mapState[0].uvChannel ?? 0) : 0);
       layerTextureSupport.bindDepth?.(this, batch);
       if (masked || batch.tintedShadow) {
         context.activeTexture(context.TEXTURE0 + 1);

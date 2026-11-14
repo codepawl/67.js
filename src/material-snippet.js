@@ -93,13 +93,13 @@ function prefixedCode(snippet) {
   return { code, declarations, hook: `${prefix}materialHook` };
 }
 
-const DEPTH_FRAGMENT_HEAD = 'void main() {\n  if (alphaMasked < 0.5) return;\n  float alpha = materialOpacity;\n  if (hasBaseMap > 0.5) alpha *= texture(baseMap, textureUV).a;\n';
+const DEPTH_FRAGMENT_HEAD = 'void main() {\n  if (alphaMasked < 0.5) return;\n  float alpha = materialOpacity;\n  if (hasBaseMap > 0.5) alpha *= texture(baseMap, mapUV(hasBaseMap)).a;\n';
 const DEPTH_CODE_MARK = '// u67 material hook code\n';
 const DEPTH_CALL_MARK = '  // u67 material hook calls\n';
 // Same inputs as the colour pass: white colour, the map alpha, the uv and the world position the vertex shader passes on.
 const DEPTH_FRAGMENT_BODY = `void main() {
   vec3 hookColor = vec3(1.0);
-  float hookAlpha = hasBaseMap > 0.5 ? texture(baseMap, textureUV).a : 1.0;
+  float hookAlpha = hasBaseMap > 0.5 ? texture(baseMap, mapUV(hasBaseMap)).a : 1.0;
 ${DEPTH_CALL_MARK}  if (alphaMasked < 0.5) return;
   float alpha = materialOpacity * hookAlpha;
 `;

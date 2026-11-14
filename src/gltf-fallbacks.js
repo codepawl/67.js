@@ -19,9 +19,6 @@ function referenceAt(root, path) {
   return path.reduce((node, key) => node[key], root);
 }
 
-// The shader samples only these slots with the second UV set; the base color map and the layer maps read the first.
-const SECOND_SET_SLOTS = new Set(['normalTexture', 'metallicRoughnessTexture', 'occlusionTexture', 'emissiveTexture']);
-
 /**
  * KHR_materials_pbrSpecularGlossiness to metallic-roughness, the way Blender's importer approximates it: the diffuse
  * color becomes the base color, the surface is dielectric, and roughness is 1 minus the glossiness factor. The specular
@@ -47,10 +44,17 @@ function convertSpecularGlossiness(document, warnings) {
   warnings.push(`${SPECULAR_GLOSSINESS} converted to metallic-roughness (diffuse color as base color, metallic 0, roughness 1 - glossiness, specular color not read) in ${converted.join(', ')}.`);
 }
 
+/** True when the texture reference carries a KHR_texture_transform that moves the UVs. */
+function hasUvTransform(reference) {
+  const transform = reference.extensions?.KHR_texture_transform;
+  return Boolean(transform && (transform.offset || transform.rotation || transform.scale));
+}
+
 /**
- * A base color or layer map on TEXCOORD_1 cannot be sampled. When every map of the material reads TEXCOORD_1 (Blender
- * writes this for a material whose only UV map is the second one), the primitives get that set as TEXCOORD_0 and the maps
- * move with it. When the material also has maps on TEXCOORD_0, the maps that cannot read TEXCOORD_1 are dropped.
+ * Every map can read TEXCOORD_1 itself, but Crucible bakes a KHR_texture_transform into the UVs of one set and cannot do
+ * that for TEXCOORD_1. When every map of the material reads TEXCOORD_1 and one carries a transform, the primitives get
+ * that set as TEXCOORD_0 and the maps move with it, so the transform bakes. When the material also has maps on
+ * TEXCOORD_0, a map on TEXCOORD_1 with a transform is dropped.
  */
 function moveSecondSetTextures(document, warnings) {
   const movedMaterials = new Set();
@@ -58,8 +62,8 @@ function moveSecondSetTextures(document, warnings) {
   const droppedNames = [];
   document.materials?.forEach((material, index) => {
     const secondSet = collectTextureKeys(material, 1);
-    const unsupported = secondSet.filter(path => !SECOND_SET_SLOTS.has(path.at(-1)));
-    if (!unsupported.length) return;
+    const transformed = secondSet.filter(path => hasUvTransform(referenceAt(material, path)));
+    if (!transformed.length) return;
     const name = material.name ?? `material ${index}`;
     if (collectTextureKeys(material, 0).length === 0) {
       for (const path of secondSet) {
@@ -72,7 +76,7 @@ function moveSecondSetTextures(document, warnings) {
       movedNames.push(name);
       return;
     }
-    for (const path of unsupported) {
+    for (const path of transformed) {
       delete referenceAt(material, path.slice(0, -1))[path.at(-1)];
       droppedNames.push(`${path.at(-1)} of ${name}`);
     }
@@ -86,8 +90,8 @@ function moveSecondSetTextures(document, warnings) {
       else primitive.attributes.TEXCOORD_0 = secondSetAccessor;
     }
   }
-  if (movedNames.length) warnings.push(`Read the textures of ${movedNames.join(', ')} from TEXCOORD_1 as the first UV set, because the base color and layer maps can only read the first.`);
-  if (droppedNames.length) warnings.push(`Dropped ${droppedNames.join(', ')}: a base color or layer map on TEXCOORD_1 cannot be sampled beside maps on TEXCOORD_0.`);
+  if (movedNames.length) warnings.push(`Read the textures of ${movedNames.join(', ')} from TEXCOORD_1 as the first UV set, so that their KHR_texture_transform can be baked into it.`);
+  if (droppedNames.length) warnings.push(`Dropped ${droppedNames.join(', ')}: a KHR_texture_transform on TEXCOORD_1 cannot be baked beside maps on TEXCOORD_0.`);
 }
 
 /**
