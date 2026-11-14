@@ -13,9 +13,9 @@
 .showcase-frame {
   position: relative;
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: 16px;
   background: var(--surface);
-  box-shadow: none;
+  box-shadow: 0 0 0 1px var(--line, transparent);
 }
 #showcase-viewport { display: block; width: 100%; height: clamp(360px, 62vh, 760px); touch-action: none; cursor: grab; transition: opacity .25s; }
 #showcase-viewport:active { cursor: grabbing; }
@@ -74,5 +74,5 @@
 .showcase-credits ul { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 4px; }
 .showcase-credits a { color: var(--text); text-decoration: underline; }
 @media (max-width: 600px) {
-  .showcase-frame { border-radius: 20px; }
+  .showcase-frame { border-radius: 12px; }
 }

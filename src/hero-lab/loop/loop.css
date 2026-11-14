@@ -23,7 +23,7 @@
 /* On the home page the site header sits above the hero, so the hero fills what is left of the first screen. */
 .site > .hero-loop { width: var(--page); margin: clamp(24px, 5vh, 56px) auto 0; }
 /* The stage: the poster first, the live canvas fades in over it, then the poster leaves. */
-.hero-loop .stage { position: relative; grid-area: stage; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 28px; background: var(--bg); }
+.hero-loop .stage { position: relative; grid-area: stage; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 16px; background: var(--bg); box-shadow: 0 0 0 1px var(--line, transparent); }
 .hero-loop .stage canvas, .hero-loop .stage .poster { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .hero-loop .stage .poster { object-fit: cover; z-index: 1; transition: opacity 520ms ease 80ms; }
 .hero-loop .stage canvas { z-index: 0; touch-action: pan-y; }
@@ -70,7 +70,7 @@
 .attribution[hidden], .credits-panel[hidden], .hero-loop .play-live[hidden] { display: none; }
 .attribution { flex-basis: 100%; order: 3; display: flex; flex-direction: column; align-items: flex-start; padding: 0 12px; }
 .attribution a { display: inline-flex; align-items: center; min-height: 28px; color: var(--muted); font-size: 13px; transition: color var(--hover) ease; }
-.credits-panel { flex-basis: 100%; order: 4; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 16px; background: var(--bg); }
+.credits-panel { flex-basis: 100%; order: 4; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 12px; background: var(--bg); }
 .credits-panel a { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
 .credits-panel .credit-meta { color: var(--muted); font-size: 12px; }
 .credits-panel p { margin: 0; padding: 8px 10px; color: var(--muted); font-size: 12px; }
@@ -99,7 +99,7 @@ html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: poster-pan 
   .hero-loop .copy { margin-top: 20px; }
 }
 @media (max-width: 700px) {
-  .hero-loop .stage { aspect-ratio: 4 / 3; border-radius: 20px; }
+  .hero-loop .stage { aspect-ratio: 4 / 3; border-radius: 12px; }
   .hero-loop .copy h1 { font-size: 40px; }
   .scene-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'tabs credits' 'attribution attribution' 'panel panel'; align-items: center; gap: 0; }
   .attribution { grid-area: attribution; }

@@ -23,7 +23,7 @@ body.marketplace > main { gap: 40px; }
 .pack-checksum span { white-space: nowrap; }
 .pack-checksum code { min-width: 0; overflow-wrap: anywhere; font-size: 12px; user-select: text; }
 
-.marketplace .market-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--control-height); padding: 8px 18px; border-radius: 999px; background: var(--primary); color: var(--primary-text); font-size: 15px; font-weight: 500; user-select: none; }
+.marketplace .market-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--control-height); padding: 8px 16px; border-radius: var(--radius); background: var(--primary); color: var(--primary-text); font-size: 14px; font-weight: 500; user-select: none; }
 .marketplace .market-button:hover { opacity: .88; }
 .market-button-icon { width: 17px; height: 17px; }
 .marketplace .market-button-quiet { background: var(--tint); color: var(--text); }
