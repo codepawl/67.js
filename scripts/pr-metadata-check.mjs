@@ -39,6 +39,8 @@ const benchOptOutPattern = /(?:\bno|\bwithout|not have|n't have|\bcannot|can't|c
 // A body that says the tool schemas did not change needs no bench table.
 const schemasUnchangedPattern = /\bschemas?\b[^.\n]*\b(?:unchanged|not changed|did not change|do not change|don't change|are the same|stay the same)\b|\bno (?:tool )?schema changes?\b|\bunchanged\b[^.\n]*\bschemas?\b/i;
 const checkedHeadings = ['How I checked it', 'Ran', 'Checks', 'Checked', 'Tests', 'Verification', 'How I tested it'];
+// Pictures, a clip link, numbers from old to new, or one line saying there is nothing to see or measure.
+const evidenceHeadings = ['Evidence', 'Before and after', 'Look change'];
 const fencedBlockPattern = /```/;
 const commandLinePattern = /^\s*(?:[$>]\s*)?(?:npm|node|npx)\s+\S/m;
 
@@ -81,6 +83,12 @@ function hasContent(sectionText) {
 function describesChecks(body, visibleBody) {
   if (checkedHeadings.some(heading => hasContent(sectionOf(body, heading)))) return true;
   return fencedBlockPattern.test(visibleBody) || commandLinePattern.test(visibleBody);
+}
+
+// Evidence is a picture anywhere in the description, or content under an evidence heading.
+function showsEvidence(body, visibleBody) {
+  if (imagePattern.test(visibleBody)) return true;
+  return evidenceHeadings.some(heading => hasContent(sectionOf(body, heading)));
 }
 
 function normalizePath(path) {
@@ -174,6 +182,12 @@ function contributorFixesFor(pr, files, light) {
       'look-without-image',
       'This changes how a scene looks, so add a before and an after picture to the description.',
       'look-changes',
+    ));
+  } else if (needsNote && !showsEvidence(body, visibleBody)) {
+    fixes.push(fix(
+      'missing-evidence',
+      'Under **Evidence**, show what changed from old to new: a before and an after picture or clip for what can be seen, or the numbers before and after for what can be measured (speed, size, memory, a score). When nothing can be seen or measured, write one line that says so.',
+      'show-the-evidence',
     ));
   }
   return fixes;

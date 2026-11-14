@@ -47,6 +47,7 @@ For one test file: `node --test tests/<area>.test.js`.
 
 - Add `changes/<issue>.md` with one bullet when you change `src/`, `bin/`, `packages/` or `skills/` ([changes/README.md](changes/README.md) has the naming rule).
 - Name the branch `<issue>-<slug>` and the pull request `<imperative sentence> (#<issue>)`. Put `Closes #N` or `Part of #N` in the description and paste the commands you ran with their results.
+- Put the evidence in the pull request under **Evidence**: before and after pictures or clips for what can be seen, numbers from old to new for what can be measured, or one line that there is nothing to show. Push pictures to a branch named `evidence-pr-<number>` and link the raw URLs ([CONTRIBUTING.md](CONTRIBUTING.md#show-the-evidence)).
 - A change to an MCP tool schema or a skill needs the Haiku bench table in the pull request ([CONTRIBUTING.md](CONTRIBUTING.md#tool-schema-and-skill-changes)).
 - Look changes (shaders, lighting, materials, default render, post steps) carry `hold:look-approval`. Never remove it and never merge: only the maintainer merges.
 - Never edit `CHANGELOG.md`, `bench/size/budgets.json`, `bench/size/baseline.json` or `bench/tool-cost-budgets.json`. Maintainers reset them at release.

@@ -11,6 +11,10 @@ Closes #
 
 - [ ]
 
+## Evidence
+
+<!-- Show what changed from old to new. For what can be seen: a before and an after picture or clip, rendered by 67js. For what can be measured: the numbers before and after (speed, size, memory, a score, a bench table). Drag pictures and clips into this box. If nothing can be seen or measured, write one line that says so. CONTRIBUTING.md#show-the-evidence -->
+
 ## How I checked it
 
 <!-- Paste the commands you ran and what they printed. Coding agents too: show the commands and their results. -->
@@ -18,10 +22,6 @@ Closes #
 ## GPU or person checks
 
 <!-- Name each check from CONTRIBUTING.md#checks that applies and what you saw. If you could not run one, say so: a maintainer runs it and adds status:needs-gpu-check. Delete this section if none applies. -->
-
-## Look change
-
-<!-- Only for shaders, lighting, materials, the default render or post steps. Add a before and an after picture. The label hold:look-approval is added by a bot, and only the owner removes it. Delete this section otherwise. -->
 
 ## Tool schema or skill bench
 
