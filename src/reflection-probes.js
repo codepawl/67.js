@@ -87,13 +87,21 @@ registerShaderFeatureCode('probe', Object.freeze({
 
 const rendererStates = new WeakMap();
 
+// Adding a feature (a render pass asks for its own) links a new program, whose uniforms sit at new locations and start at their
+// defaults, so the locations are looked up again for each program. A location of another program makes the next uniform call fail.
 function stateOf(renderer) {
   if (!rendererStates.has(renderer)) {
-    const enabledLocation = renderer.context.getUniformLocation(renderer.program, 'probeEnabled');
-    const floorLocation = renderer.context.getUniformLocation(renderer.program, 'probeFloor');
-    rendererStates.set(renderer, { resources: new Map(), enabledLocation, floorLocation, bound: false });
+    rendererStates.set(renderer, { resources: new Map(), program: null, enabledLocation: null, floorLocation: null, bound: false });
   }
-  return rendererStates.get(renderer);
+  const state = rendererStates.get(renderer);
+  if (state.program !== renderer.program) {
+    state.program = renderer.program;
+    state.enabledLocation = renderer.context.getUniformLocation(renderer.program, 'probeEnabled');
+    state.floorLocation = renderer.context.getUniformLocation(renderer.program, 'probeFloor');
+    // The new program starts with its probe off, and the global environment is what it was given.
+    state.bound = false;
+  }
+  return state;
 }
 
 // Prefiltering draws into framebuffers, so the state a draw call depends on is put back after it.

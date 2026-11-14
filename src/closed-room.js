@@ -20,20 +20,63 @@ function worldTriangles(parts, worldMatrices) {
   const corners = new Float64Array(triangleCount * 9);
   const minimum = [Infinity, Infinity, Infinity];
   const maximum = [-Infinity, -Infinity, -Infinity];
+  const partBounds = [];
   let write = 0;
   for (const part of parts) {
     const matrix = worldMatrices.get(part.name);
     const { positions, indices } = part.geometry;
+    const partMinimum = [Infinity, Infinity, Infinity];
+    const partMaximum = [-Infinity, -Infinity, -Infinity];
     for (const index of indices) {
       for (let axis = 0; axis < 3; axis++) {
         const value = matrix[axis] * positions[index * 3] + matrix[4 + axis] * positions[index * 3 + 1] + matrix[8 + axis] * positions[index * 3 + 2] + matrix[12 + axis];
         corners[write++] = value;
         minimum[axis] = Math.min(minimum[axis], value);
         maximum[axis] = Math.max(maximum[axis], value);
+        partMinimum[axis] = Math.min(partMinimum[axis], value);
+        partMaximum[axis] = Math.max(partMaximum[axis], value);
+      }
+    }
+    partBounds.push({ minimum: partMinimum, maximum: partMaximum });
+  }
+  return { corners, triangleCount, partBounds, minimum, maximum, centre: minimum.map((value, axis) => (value + maximum[axis]) / 2) };
+}
+
+// Fractions of the scene bounds tried for a ray origin, the middle first.
+const ORIGIN_FRACTIONS = [0.5, 0.25, 0.75];
+
+// A part blocks an origin only when it is small next to the scene (under this share of the scene's extent on two axes or
+// more). A room shell that encloses the whole scene never blocks, so a room built as one part still counts as a room.
+const BLOCKING_PART_SHARE = 0.5;
+
+function isSmallPart(bounds, sceneMinimum, sceneMaximum) {
+  const narrowAxes = bounds.minimum.filter((low, axis) => bounds.maximum[axis] - low < BLOCKING_PART_SHARE * (sceneMaximum[axis] - sceneMinimum[axis]));
+  return narrowAxes.length >= 2;
+}
+
+function insideAnyPart(point, triangles) {
+  return triangles.partBounds.some(bounds => isSmallPart(bounds, triangles.minimum, triangles.maximum)
+    && point.every((value, axis) => value > bounds.minimum[axis] && value < bounds.maximum[axis]));
+}
+
+/**
+ * The first point of the scene bounds that lies inside no part's bounds, trying the middle, then points lifted and offset
+ * within the bounds. A ray that starts inside a part (a mug, a lamp, a table) tests that part, not the room around it.
+ * Null when every candidate is inside a part.
+ */
+function freeOrigin(triangles) {
+  for (const heightFraction of ORIGIN_FRACTIONS) {
+    for (const offsetFraction of ORIGIN_FRACTIONS) {
+      for (const depthFraction of ORIGIN_FRACTIONS) {
+        const fractions = [offsetFraction, heightFraction, depthFraction];
+        const point = triangles.minimum.map((low, axis) => low + fractions[axis] * (triangles.maximum[axis] - low));
+        if (!insideAnyPart(point, triangles)) {
+          return point;
+        }
       }
     }
   }
-  return { corners, triangleCount, centre: minimum.map((value, axis) => (value + maximum[axis]) / 2) };
+  return null;
 }
 
 export function fibonacciDirection(index, count, out) {
@@ -79,12 +122,16 @@ function hitsFrontFace(corners, offset, origin, direction) {
 }
 
 /**
- * The share of rays from the middle of the parts' bounds that hit a part's inner face, or null when the scene is empty or
- * has more than CLOSED_ROOM_MAXIMUM_TRIANGLES triangles. `worldMatrices` maps a part's name to its world matrix.
+ * The share of rays from the middle of the parts' bounds (or the first nearby point outside every part) that hit a part's
+ * inner face, or null when the scene is empty, has more than CLOSED_ROOM_MAXIMUM_TRIANGLES triangles or has no free origin. `worldMatrices` maps a part's name to its world matrix.
  */
 export function closedRoomShare(parts, worldMatrices) {
   const triangles = worldTriangles(parts.filter(part => !['blend', 'add'].includes(part.material?.alphaMode)), worldMatrices);
   if (!triangles) {
+    return null;
+  }
+  const origin = freeOrigin(triangles);
+  if (!origin) {
     return null;
   }
   const direction = [0, 0, 0];
@@ -92,7 +139,7 @@ export function closedRoomShare(parts, worldMatrices) {
   for (let ray = 0; ray < CLOSED_ROOM_RAYS; ray++) {
     fibonacciDirection(ray, CLOSED_ROOM_RAYS, direction);
     for (let triangle = 0; triangle < triangles.triangleCount; triangle++) {
-      if (hitsFrontFace(triangles.corners, triangle * 9, triangles.centre, direction)) {
+      if (hitsFrontFace(triangles.corners, triangle * 9, origin, direction)) {
         hits++;
         break;
       }

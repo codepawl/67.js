@@ -59,8 +59,9 @@ test('runtime reports real scene capabilities without launching a browser and cl
 });
 
 async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = false, deadlineMs,
-  failDispose = false, heapSize = 1024, stallPrivatePage = false, resumeDelayMs = 0, sceneBake, exportedRecipe, runtimeOptions = {}, contextOverrides = {} } = {}) {
+  failDispose = false, heapSize = 1024, stallPrivatePage = false, resumeDelayMs = 0, sceneBake, exportedRecipe, runtimeOptions = {}, contextOverrides = {}, lookBytesPerPixel = 0 } = {}) {
   const events = [];
+  const viewports = [];
   const deadlines = [];
   let privatePage;
   let sourceRevision = 0;
@@ -75,6 +76,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     constructor(privateTarget) { this.privateTarget = privateTarget; this.closed = false; }
     route() {}
     setDefaultTimeout() {}
+    setViewportSize(size) { this.viewport = size; viewports.push(size); }
     goto() {}
     waitForFunction() {}
     isClosed() { return this.closed; }
@@ -95,6 +97,10 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
         if (input.index === failShot) throw new Error('Injected partial shot failure');
         return { label: input.shot.label, motionTime: input.shot.motionTime,
           rendererTime: input.shot.rendererTime, graphics: 'SwiftShader', width: 384, height: 384 };
+      }
+      if (method === 'look') {
+        const { width, height } = this.viewport;
+        return { mimeType: 'image/png', data: Buffer.alloc(Math.round(width * height * lookBytesPerPixel)).toString('base64'), metadata: { width, height } };
       }
       if (method === 'reviewResult') return { mimeType: 'image/png',
         data: Buffer.alloc(oversize ? 1024 * 1024 + 1 : 16).toString('base64') };
@@ -142,7 +148,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
   new Script(`${source}\nglobalThis.runtime = createAgentRuntime({ backend: 'cpu', ...runtimeOptions });`).runInContext(context);
   const runtime = context.runtime;
   const created = await runtime.create({ recipe });
-  return { runtime, sessionId: created.sessionId, deadlines, events, shotStarted, acquisitionStarted, resolvePrivatePage };
+  return { runtime, sessionId: created.sessionId, deadlines, events, viewports, shotStarted, acquisitionStarted, resolvePrivatePage };
 }
 
 function boundedResult(promise) {
@@ -151,6 +157,29 @@ function boundedResult(promise) {
     new Promise(resolve => { timer = setTimeout(() => resolve('stalled'), 150); }),
   ]).finally(() => clearTimeout(timer));
 }
+
+test('scene_look steps a busy PNG down by 0.75 until it fits the 1 MiB budget and says which size came back (#1197)', async () => {
+  const busy = await reviewRuntimeHarness({ lookBytesPerPixel: 2 });
+  const stepped = await busy.runtime.look({ sessionId: busy.sessionId, width: 1024, height: 640 });
+  assert.deepEqual(busy.viewports.slice(-2).map(size => `${size.width}x${size.height}`), ['1024x640', '768x480']);
+  assert.equal(stepped.metadata.returnedWidth, 768);
+  assert.equal(stepped.metadata.returnedHeight, 480);
+  await busy.runtime.close();
+  assert.equal(stepped.metadata.requestedWidth, 1024);
+  assert.match(stepped.metadata.note, /1024x640.*768x480/);
+  const calm = await reviewRuntimeHarness({ lookBytesPerPixel: 0.5 });
+  const unchanged = await calm.runtime.look({ sessionId: calm.sessionId, width: 1024, height: 640 });
+  assert.equal(calm.viewports.length, 1);
+  assert.equal(unchanged.metadata.note, undefined);
+  await calm.runtime.close();
+});
+
+test('scene_look fails only when the fourth step down still does not fit, naming that size (#1197)', async () => {
+  const hopeless = await reviewRuntimeHarness({ lookBytesPerPixel: 50 });
+  await assert.rejects(hopeless.runtime.look({ sessionId: hopeless.sessionId, width: 1024, height: 640 }), /even at 324x202/);
+  assert.equal(hopeless.viewports.length, 5);
+  await hopeless.runtime.close();
+});
 
 test('an edit of a scene with a bake, or one that adds a bake, gets the bake deadline; a plain edit keeps 30 s', async () => {
   const plain = await reviewRuntimeHarness();
