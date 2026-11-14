@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { freePort } from './helpers/free-port.js';
+import { launchChrome, skipOrThrow } from './helpers/dev-server-browser.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { applyViewTransform } from '../src/view-transform.js';
 
@@ -131,13 +132,13 @@ async function openPage(context) {
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    context.skip('playwright is not installed');
+    skipOrThrow(context, 'playwright is not installed');
     return null;
   }
   const port = await freePort();
   const server = await startServer(port);
   try {
-    const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+    const browser = await launchChrome(chromium);
     const page = await browser.newPage({ viewport: { width: SIZE, height: SIZE } });
     await page.goto(`http://127.0.0.1:${port}/`);
     return {
@@ -149,7 +150,7 @@ async function openPage(context) {
     };
   } catch (error) {
     server.kill();
-    context.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
+    skipOrThrow(context, `Chrome did not start: ${error.message.split('\n')[0]}`);
     return null;
   }
 }

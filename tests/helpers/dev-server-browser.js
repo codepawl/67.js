@@ -23,7 +23,7 @@ async function startServer(port) {
 }
 
 // Playwright's own browser download is not installed on CI, so fall back to the Google Chrome the runner already has.
-async function launchChrome(chromium) {
+export async function launchChrome(chromium) {
   try {
     return await chromium.launch({ headless: true, args: CHROME_ARGUMENTS });
   } catch {
@@ -31,20 +31,22 @@ async function launchChrome(chromium) {
   }
 }
 
+// Where Chrome or playwright is missing a test skips on a developer machine and fails on CI, where Chrome is required.
+export function skipOrThrow(testContext, message) {
+  if (process.env.CI) throw new Error(message);
+  testContext.skip(message);
+}
+
 /**
  * Runs `body(page)` on the dev server's page in headless Chrome and cleans up.
  * Where Chrome or playwright is missing the test skips on a developer machine and fails on CI, where Chrome is required.
  */
 export async function withDevServerPage(testContext, body) {
-  const skipOrThrow = (message) => {
-    if (process.env.CI) throw new Error(message);
-    testContext.skip(message);
-  };
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    skipOrThrow('playwright is not installed');
+    skipOrThrow(testContext, 'playwright is not installed');
     return;
   }
   const port = await freePort();
@@ -54,7 +56,7 @@ export async function withDevServerPage(testContext, body) {
     try {
       browser = await launchChrome(chromium);
     } catch (error) {
-      skipOrThrow(`Chrome did not start: ${error.message.split('\n')[0]}`);
+      skipOrThrow(testContext, `Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
     }
     const page = await browser.newPage({ viewport: { width: 128, height: 128 } });

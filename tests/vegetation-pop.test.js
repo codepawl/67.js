@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { freePort } from './helpers/free-port.js';
+import { launchChrome, skipOrThrow } from './helpers/dev-server-browser.js';
 
 // A pop is a single-frame change of the mean RGB value (0 to 1) above this, or above this share of the change a hard switch
 // makes in one frame. Measured 2026-11-04 on SwiftShader: the fade's largest step is 0.083, a hard switch is 0.30, and plain
@@ -88,7 +89,7 @@ test('a slow dolly across the impostor boundary shows no pop in a frame differen
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    context.skip('playwright is not installed');
+    skipOrThrow(context, 'playwright is not installed');
     return;
   }
   const port = await freePort();
@@ -96,9 +97,9 @@ test('a slow dolly across the impostor boundary shows no pop in a frame differen
   let browser;
   try {
     try {
-      browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+      browser = await launchChrome(chromium);
     } catch (error) {
-      context.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
+      skipOrThrow(context, `Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
     }
     const page = await browser.newPage({ viewport: { width: 320, height: 180 } });

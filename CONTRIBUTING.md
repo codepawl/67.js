@@ -167,7 +167,7 @@ Keep site assets out of the npm package: the `files` list in `package.json` deci
 
 ## Release
 
-Maintainers make releases. `package.json` holds the version, and the publish workflow runs when it changes on `main`.
+Maintainers make releases. `package.json` holds the version, and the publish workflow runs when it changes on `main`. A bump must carry its `## <version>` section in `CHANGELOG.md` and no unfolded `changes/*.md` notes: `npm run check:release-changelog` checks that on the pull request and before `publish`, so npm is never published from a commit whose release page cannot be built.
 
 A minor release ships about once a week, give or take one to three days. A maintainer picks the issues that must be in it,
 waits a few days at most for the issues that should be in it, and moves the rest to the next release. A look change still
