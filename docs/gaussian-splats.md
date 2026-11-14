@@ -19,9 +19,15 @@ detach();               // or renderer.dispose()
 
 ## What it reads
 
-One format: the standard 3DGS PLY that the original training code and most tools write: binary little endian with `x y z f_dc_0..2 opacity scale_0..2 rot_0..3` per vertex. Other properties (normals, `f_rest_*`) are skipped, so a splat has one colour from every direction (spherical harmonics of degree 0). `.spz`, `.ksplat` and `.splat` files are not read; `bench/gaussian-splats/fetch-sample.mjs` shows a short `.splat` to PLY conversion.
+Two formats. The first is the standard 3DGS PLY that the original training code and most tools write: binary little endian with `x y z f_dc_0..2 opacity scale_0..2 rot_0..3` per vertex. Other properties (normals, `f_rest_*`) are skipped, so a splat has one colour from every direction (spherical harmonics of degree 0). `.ksplat` and `.splat` files are not read; `bench/gaussian-splats/fetch-sample.mjs` shows a short `.splat` to PLY conversion.
 
-A file over `maximumBytes` (default 512 MiB), or one whose header names more than `maximumCount` splats (default 2,000,000, never above 4,000,000), throws a `RangeError` before any splat is read. A file that is not a PLY, is ASCII, lacks a property or is truncated throws an `Error` that names the problem. `createGaussianSplats` applies the count limit again.
+The second is SPZ, Niantic's format and the output of World Labs Atlas and Marble, about 10 times smaller than the same PLY. `parseGaussianSplatSpz(bytes, options)` is async (it inflates the gzip stream with `DecompressionStream`, so there is no dependency) and returns the same `{ count, positions, colors, scales, rotations, bounds }` with the same options and limits as the PLY parser. It reads versions 2 and 3 and any spherical harmonic degree (the bands above degree 0 are skipped). Version 4 (zstd) is rejected with a message that names the fix. `parseGaussianSplatSpzAsync` also converts in slices and takes `chunkSize`, `onProgress` and `signal` like `parseGaussianSplatPlyAsync`. SPZ positions are in the SPZ axes (x right, y up, z back) while a trainer's PLY is x right, y down, z forward: to place a PLY and an SPZ of the same scene together, give one of them a `matrix` that scales by `[1, -1, -1]`.
+
+```js
+const data = await parseGaussianSplatSpz(await (await fetch('/world.spz')).arrayBuffer());
+```
+
+A file over `maximumBytes` (default 512 MiB, for SPZ also its inflated size), or one whose header names more than `maximumCount` splats (default 2,000,000, never above 4,000,000), throws a `RangeError` before any splat is read. A file that is not a PLY (or an SPZ: bad gzip, bad magic, unsupported version), is ASCII, lacks a property or is truncated throws an `Error` that names the problem. `createGaussianSplats` applies the count limit again.
 
 ## Loading without freezing the page
 
