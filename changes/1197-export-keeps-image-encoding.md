@@ -1,0 +1,1 @@
+- `exportGlb` and `scene_export_glb` keep the JPEG, PNG or WebP bytes of an imported texture instead of re-encoding it as an uncompressed PNG, so an imported 1.8 MB catalog asset no longer exports at about 6.5 times its size (#1197)

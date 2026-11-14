@@ -4,6 +4,7 @@ import { COMPONENT_TYPES, attributeFloats, createAccessorReader } from './gltf-a
 import { createClips } from './gltf-animation.js';
 import { layerTextureReferences } from './gltf-layers.js';
 import { Matrix4, SceneNode } from './gltf-nodes.js';
+import { rememberSourceEncoding } from './image-source-encoding.js';
 import { createSkinPose, validateSkinGeometry } from './skinning.js';
 
 const GEOMETRY_ATTRIBUTE_NAMES = {
@@ -189,7 +190,11 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
       loaded = { image: texture.image, isCompressedTexture: texture.isCompressedTexture === true, format: texture.format, mipmaps: texture.mipmaps };
       releasers.push(() => texture.dispose?.());
     } else {
-      const image = await decodeImage(bytes, mimeTypeOf(document.images[sourceIndex], bytes), imageTargets.get(sourceIndex));
+      const mimeType = mimeTypeOf(document.images[sourceIndex], bytes);
+      const scaleTarget = imageTargets.get(sourceIndex);
+      const image = await decodeImage(bytes, mimeType, scaleTarget);
+      // A scaled image no longer matches its file, so only an unscaled one lets export reuse the source bytes.
+      if (!scaleTarget) rememberSourceEncoding(image, bytes.slice(), mimeType);
       loaded = { image, isCompressedTexture: false, format: undefined, mipmaps: undefined };
       releasers.push(() => image.close?.());
     }

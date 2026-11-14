@@ -1,0 +1,3 @@
+- entry:core: an imported GLB texture keeps its JPEG, PNG or WebP bytes on export, and an imported 1.8 MB asset no longer exports at about 6.5 times its size (#1197)
+- entry:core+lazy: same change as entry:core (#1197)
+- goal:gltf-box: the same 53 bytes, the price of the export fix (#1197)
