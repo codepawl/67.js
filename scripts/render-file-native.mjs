@@ -181,7 +181,7 @@ async function main() {
       else await request.fulfill({ status: 404, body: 'not found' });
     });
     const loadStarted = performance.now();
-    await page.goto(`http://127.0.0.1:${port}/file.html?export=1&width=800&height=450&samples=1`);
+    await page.goto(`http://127.0.0.1:${port}/file.html?export=1&traceLights=1&width=800&height=450&samples=1`);
     await page.waitForFunction(() => window.__fileSceneError || window.__scene?.parts, null, { timeout: 300000 });
     const loadError = await page.evaluate(() => window.__fileSceneError);
     if (loadError) throw new Error(`Scene file failed to load: ${loadError}`);

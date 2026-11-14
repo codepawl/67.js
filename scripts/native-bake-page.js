@@ -58,6 +58,8 @@ export function encodeNativeInputV2(input, tables = encodeNativeTables(input)) {
 export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
 // The instance bound of the same export (see buildTraceScene's maximumInstances).
 export const NATIVE_JOB_MAXIMUM_INSTANCES = 1_000_000;
+// The point, spot and area lights of the same export together (see buildTraceScene's maximumLights).
+export const NATIVE_JOB_MAXIMUM_LIGHTS = 256;
 // The triangle bound of an export that travels in chunks (`transport: 'chunks'`): no single message bounds it, so it is the
 // bound buildTraceScene accepts for the native tracer. The tracer then refuses what its adapter cannot hold.
 export const NATIVE_CHUNKED_MAXIMUM_TRIANGLES = 4_000_000;
@@ -149,7 +151,7 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
   const { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } = modules;
   const wholeMaterials = kernel === 'cycles';
   const maximumTriangles = transport === 'chunks' ? NATIVE_CHUNKED_MAXIMUM_TRIANGLES : NATIVE_JOB_MAXIMUM_TRIANGLES;
-  const nativeLimits = wholeMaterials ? { maximumTriangles, maximumInstances: NATIVE_JOB_MAXIMUM_INSTANCES } : {};
+  const nativeLimits = wholeMaterials ? { maximumTriangles, maximumInstances: NATIVE_JOB_MAXIMUM_INSTANCES, maximumLights: NATIVE_JOB_MAXIMUM_LIGHTS } : {};
   let traceScene = buildTraceScene(parts, environment, { instancing: wholeMaterials && instancing === true, ...nativeLimits });
   refuseLocalVolumes(traceScene, 'the native path tracer');
   let flattenedBecause;

@@ -209,7 +209,7 @@ Exit code 2 means the Cook package or its addon is missing (the message gives th
 Limits known today:
 
 - 4 million unique triangles with `--instancing`; fewer without it, since every copy counts. The scene is read from the page in chunks, so the size of one message does not bound it.
-- At most 7 area lights.
+- At most 256 point, spot and area lights together. The 16 point, 8 spot and 7 area lights of a drawn frame do not bound a traced one: the kernel picks lights through its light tree. Light linking (`affects`) still needs each kind within those drawn limits, because a linked light keeps one mask bit; a scene over them with a link fails with a message that names the list and the count. More emitters than 256 go in as meshes with an emissive material, which have no count limit.
 - Glass exported from Blender as soft alpha stays alpha (a see-through cutout, not refraction) unless you patch it, for example with `--patch-materials`.
 - There is no camera near clip, so geometry between the eye and the target is drawn.
 - Bloom and colour grade are not drawn (see above).

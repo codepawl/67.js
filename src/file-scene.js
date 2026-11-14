@@ -5,6 +5,7 @@ import { createCascadedShadows } from './cascaded-shadows.js';
 import { applyWaterReflection, attachWaterReflection } from './water-reflection.js';
 import { createCameraSampler } from './camera-track.js';
 import { inWholeWorldOrder, readPartRanks } from './showcase-download.js';
+import { withinDrawnLightLimits } from './drawn-light-lists.js';
 
 // Headless twin of the showcase page for scripts/render-media.mjs (--scene file). The export script serves the scene.json
 // at /__file/config.json with every asset path already pointing at a file it can read, and an optional camera track at
@@ -24,6 +25,15 @@ async function loadStagedParts(description, asset, model, sharedTextures) {
   }
   await import('./replace-textured-parts.js');
   return inWholeWorldOrder(files);
+}
+
+// The native path tracer takes more lights of one kind than a drawn frame does. With `?traceLights=1` (set by
+// scripts/render-file-native.mjs, whose picture is traced from `window.__scene.environment`, not drawn) the renderer of this
+// page gets the first lights of each kind that fit, so it starts. Without the parameter the lists are untouched and a list
+// that is too long fails as before.
+function environmentForRenderer(environment) {
+  if (!new URLSearchParams(location.search).has('traceLights')) return environment;
+  return withinDrawnLightLimits(environment);
 }
 
 async function readJson(url) {
@@ -51,7 +61,7 @@ async function start() {
     ground: false, hdr: true, samples: 4, memoryBudgetMiB: 384,
     ...rendererOptions,
     shadowCascades,
-    environment: { ...(rendererOptions.environment ?? {}), map },
+    environment: { ...environmentForRenderer(rendererOptions.environment ?? {}), map },
   });
   attachWaterReflection(renderer, reflection.surface, { updateEvery: 1 });
   const frame = { exposure: description.exposure ?? 1, ...(description.frame ?? {}) };
