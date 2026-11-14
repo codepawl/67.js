@@ -1,7 +1,7 @@
-import { MAX_MORPH_TARGETS, registerShaderFeatureCode, registerDeformationSupport } from './shader-registry.js';
+import { MAX_MORPH_TARGETS, MAX_STORED_MORPH_TARGETS, registerShaderFeatureCode, registerDeformationSupport } from './shader-registry.js';
 import { skinTextureLayout } from './skinning.js';
 
-export { MAX_MORPH_TARGETS };
+export { MAX_MORPH_TARGETS, MAX_STORED_MORPH_TARGETS };
 
 const validatedMetadata = new WeakSet();
 const MIN_NORMAL_FLOAT32 = 2 ** -126;
@@ -14,8 +14,8 @@ function upperFloatBound(value) {
 }
 
 function targetCount(value) {
-  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_MORPH_TARGETS) {
-    throw new RangeError('Morph target count must be within one and 64.');
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_STORED_MORPH_TARGETS) {
+    throw new RangeError('Morph target count must be within one and 256.');
   }
   return value;
 }
@@ -167,6 +167,25 @@ export function validateMorphTransform(pose, metadata, worldMatrix, skin) {
   }
 }
 
+/**
+ * For a geometry with more than MAX_MORPH_TARGETS targets, chooses the nonzero weights that are largest in magnitude (the
+ * lower target wins a tie) for one draw. Writes the target index and weight of each slot into the two outputs and returns
+ * the slot count. A geometry with fewer targets draws all of them in order and needs no selection.
+ */
+export function selectMorphSlots(weights, slotTargets, slotWeights) {
+  const active = [];
+  for (let target = 0; target < weights.length; target++) {
+    if (weights[target] !== 0) active.push(target);
+  }
+  active.sort((first, second) => Math.abs(weights[second]) - Math.abs(weights[first]) || first - second);
+  const count = Math.min(active.length, MAX_MORPH_TARGETS);
+  for (let slot = 0; slot < count; slot++) {
+    slotTargets[slot] = active[slot];
+    slotWeights[slot] = weights[active[slot]];
+  }
+  return count;
+}
+
 /** Pack relative RGB channels as two RGBA texels per target vertex. */
 export function packMorphTargets(geometry, layout) {
   const metadata = geometryMetadata(geometry);
@@ -197,8 +216,9 @@ registerShaderFeatureCode('morph', {
   vertex: `
 uniform float morphEnabled;
 uniform int morphVertexCount;
-uniform int morphTargetCount;
+uniform int morphTargetCount; // slots in use: the weights and target indices of the draw
 uniform float morphWeights[${MAX_MORPH_TARGETS}];
+uniform float morphSlotTargets[${MAX_MORPH_TARGETS}];
 uniform highp sampler2D morphTargets;
 vec3 morphDelta(int target, int channel) {
   int index = (target * morphVertexCount + gl_VertexID) * 2 + channel;
@@ -210,7 +230,7 @@ vec3 morphedPosition(vec3 base) {
   vec3 result = base;
   for (int target = 0; target < ${MAX_MORPH_TARGETS}; target++) {
     if (target >= morphTargetCount) break;
-    if (morphWeights[target] != 0.0) result += morphDelta(target, 0) * morphWeights[target];
+    if (morphWeights[target] != 0.0) result += morphDelta(int(morphSlotTargets[target]), 0) * morphWeights[target];
   }
   return result;
 }
@@ -219,7 +239,7 @@ vec3 morphedNormal(vec3 base) {
   vec3 result = base;
   for (int target = 0; target < ${MAX_MORPH_TARGETS}; target++) {
     if (target >= morphTargetCount) break;
-    if (morphWeights[target] != 0.0) result += morphDelta(target, 1) * morphWeights[target];
+    if (morphWeights[target] != 0.0) result += morphDelta(int(morphSlotTargets[target]), 1) * morphWeights[target];
   }
   float largest = max(max(abs(result.x), abs(result.y)), abs(result.z));
   return largest > 0.0 ? normalize(result / largest) : base;
@@ -227,4 +247,4 @@ vec3 morphedNormal(vec3 base) {
 `
 });
 
-registerDeformationSupport({ validateMorphGeometry, validateMorphPose, validateMorphTransform, packMorphTargets, skinTextureLayout });
+registerDeformationSupport({ selectMorphSlots, validateMorphGeometry, validateMorphPose, validateMorphTransform, packMorphTargets, skinTextureLayout });

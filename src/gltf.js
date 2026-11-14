@@ -10,7 +10,7 @@ import { readPunctualLights } from './gltf-lights.js';
 import { Matrix4 } from './gltf-nodes.js';
 import { textureDescriptorInfo } from './renderer.js';
 import { createSkinPose, matrixDeterminant, updateSkinPose, validateSkinGeometry, validateSkinPose } from './skinning.js';
-import { MAX_MORPH_TARGETS, createMorphPose, validateMorphGeometry, validateMorphPose, validateMorphTransform } from './morph.js';
+import { MAX_STORED_MORPH_TARGETS, createMorphPose, validateMorphGeometry, validateMorphPose, validateMorphTransform } from './morph.js';
 
 // The defaults fit one large exported scene (a 240 MB GLB of 8 million vertices with 8K textures) and still bound a hostile file.
 const DEFAULT_LIMITS = Object.freeze({
@@ -351,7 +351,7 @@ function validateDocument(document, limits, allowedExtensions) {
   let morphBytes = 0;
   for (const mesh of document.meshes ?? []) {
     const targetCount = morphCount(mesh);
-    if (targetCount > MAX_MORPH_TARGETS) throw new Error('Morph target count exceeds 64.');
+    if (targetCount > MAX_STORED_MORPH_TARGETS) throw new Error('Morph target count exceeds 256.');
     validateDefaultWeights(mesh.weights, targetCount);
     for (const primitive of mesh.primitives ?? []) {
       if (isLinePrimitive(primitive)) continue;

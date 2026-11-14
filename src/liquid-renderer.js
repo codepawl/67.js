@@ -10,7 +10,7 @@ const LIQUID_UNIFORMS = [
   'environmentSpecular', 'environmentEnabled', 'environmentIntensity', 'environmentRotation', 'environmentLevelMax',
   'time', 'wind', 'explosionProgress', 'explosionCenter', 'assemblyAmount',
   'skinEnabled', 'skinInfluences', 'jointPalette',
-  'morphEnabled', 'morphVertexCount', 'morphTargetCount', 'morphWeights[0]', 'morphTargets',
+  'morphEnabled', 'morphVertexCount', 'morphTargetCount', 'morphWeights[0]', 'morphSlotTargets[0]', 'morphTargets',
 ];
 
 // The program compiles when the first liquid or foam batch draws, so a renderer without them never builds it.

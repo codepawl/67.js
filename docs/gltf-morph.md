@@ -20,7 +20,7 @@ asset.dispose();
 
 ## Imported data
 
-Morph primitives contain between one and 64 targets, with matching target counts across their mesh.
+Morph primitives contain between one and 256 targets, with matching target counts across their mesh.
 Each target accepts `POSITION`, `NORMAL`, or both.
 Channels require unnormalized float `VEC3` accessors matching the base vertex count.
 Position deltas require finite ordered `min` and `max` bounds.

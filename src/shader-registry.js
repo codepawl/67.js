@@ -70,8 +70,11 @@ export const materialTags = { armor: 1, floor: 2, water: 3, foliage: 4, terrain:
 // Functions from source to source that startProgram applies to every shader before compiling it; the vegetation addon adds its card code here.
 export const shaderTransforms = [];
 
-/** The most morph targets one geometry carries; the morph shader's weight array has this length. */
+/** The most morph targets one draw applies at once; the morph shader's weight array has this length. */
 export const MAX_MORPH_TARGETS = 64;
+
+/** The most morph targets one geometry stores. A draw applies the MAX_MORPH_TARGETS with the largest weights. */
+export const MAX_STORED_MORPH_TARGETS = 256;
 
 // skinning.js and morph.js set the JavaScript half of skinned and morphed parts: validation, texture layout and packing.
 // The renderer calls them only for a part with a skin or morph targets, so a renderer without those parts never carries them.
