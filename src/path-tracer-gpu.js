@@ -1,6 +1,7 @@
 import { resolveLightSelection } from './path-tracer-light-tree.js';
 import { buildFragmentSource, VERTEX_SOURCE } from './path-tracer-gpu-shader.js';
-import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { gpuTriangleCapacity, packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { MAX_GPU_TRACE_TRIANGLES, MAX_TRACE_TRIANGLES } from './path-tracer-scene.js';
 
 // The GPU backend of the path tracer: one WebGL2 fragment pass per sample draws every pixel of a band, and four float
 // targets add the samples up. It needs a page with WebGL2 (a canvas), EXT_color_buffer_float and EXT_float_blend. The
@@ -72,6 +73,20 @@ export async function withBlueNoiseTile(options) {
   return { ...options, blueNoiseTile: { size: BLUE_NOISE_SIZE, bytes: createBlueNoiseTile(options.seed ?? 0) } };
 }
 
+/**
+ * MAX_TEXTURE_SIZE bounds the dimensions of a texture, not whether the driver can allocate it: a triangle table of two million
+ * triangles is 288 MB. Past the old bound the upload is checked, so a device that ran out of memory fails with the count
+ * instead of tracing a black image.
+ */
+function refuseUnallocatedTables(gl, scene) {
+  const triangleCount = scene.indices.length / 3;
+  if (triangleCount <= MAX_TRACE_TRIANGLES) return;
+  const glError = gl.getError();
+  if (glError === gl.NO_ERROR) return;
+  const reason = glError === gl.OUT_OF_MEMORY ? 'ran out of memory' : `reported GL error 0x${glError.toString(16)}`;
+  throw new Error(`The GPU ${reason} while uploading the scene tables for ${triangleCount} triangles. Simplify or drop meshes to stay near ${MAX_TRACE_TRIANGLES} triangles, or render the frame with the native Cook backend.`);
+}
+
 export function uploadScene(gl, program, scene, options = {}) {
   const atlas = packAtlas(scene.materials);
   const lights = packLights(scene.lights);
@@ -88,6 +103,7 @@ export function uploadScene(gl, program, scene, options = {}) {
     createTexture(gl, unit, gl.RGBA32F, gl.RGBA, gl.FLOAT, table.width, table.height, table.data);
     bind(name);
   }
+  refuseUnallocatedTables(gl, scene);
   createTexture(gl, unit, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, atlas.width, atlas.height, atlas.data);
   bind('uAtlas');
   const colors = environment?.colors ?? new Float32Array(4);
@@ -335,4 +351,10 @@ export async function traceTexelsOnGpu(scene, texels, options, shouldStop) {
     escaped[texel] = statistics[texel * 4 + 2] / samples;
   }
   return { radiance, escaped, gpu, compileSeconds };
+}
+
+/** The triangles this page's WebGL2 context can hold in its data textures (MAX_TEXTURE_SIZE rows of the triangle table), up to MAX_GPU_TRACE_TRIANGLES. */
+export function gpuTriangleLimit() {
+  const { gl } = getContext();
+  return gpuTriangleCapacity({ maximumTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) }, MAX_GPU_TRACE_TRIANGLES);
 }

@@ -15,6 +15,10 @@ import { liftRankedTriangles } from './flush-lift.js';
 // and colours, one resolved material per part, the lights in plain arrays, and the environment map as a sampling table.
 
 export const MAX_TRACE_TRIANGLES = 400_000;
+// The most triangles the WebGL2 and WebGPU tracers are ever asked to hold, whatever the device could address: the triangle
+// table is 144 bytes a triangle, so this is 288 MB of texture or buffer, plus the BVH built in JavaScript. A device with
+// smaller limits lowers it (`gpuTriangleCapacity` in path-tracer-gpu-pack.js); the option `gpuTriangleLimit` carries the result.
+export const MAX_GPU_TRACE_TRIANGLES = 2_000_000;
 // The bound a scene built for the native "cycles" tracer may ask for with `options.maximumTriangles` (unique triangles of an
 // instanced scene, all triangles of a flattened one). The CPU and WebGL tracers never pass it and keep MAX_TRACE_TRIANGLES.
 export const MAX_NATIVE_TRACE_TRIANGLES = 4_000_000;
@@ -279,6 +283,14 @@ function writeWorldPart(world, part, geometry, partIndex, vertexOffset, triangle
  */
 function resolveTriangleLimits(options) {
   const requested = options?.maximumTriangles;
+  const deviceLimit = options?.gpuTriangleLimit;
+  if (deviceLimit !== undefined) {
+    if (requested !== undefined) throw new RangeError('buildTraceScene takes maximumTriangles (native tracer) or gpuTriangleLimit (WebGL2 and WebGPU tracers), not both.');
+    if (!Number.isInteger(deviceLimit) || deviceLimit < 1 || deviceLimit > MAX_GPU_TRACE_TRIANGLES) {
+      throw new RangeError(`buildTraceScene option gpuTriangleLimit is an integer from 1 to ${MAX_GPU_TRACE_TRIANGLES}, got ${deviceLimit}. Leave it out for the CPU tracer, which takes at most ${MAX_TRACE_TRIANGLES} triangles.`);
+    }
+    return { native: false, gpu: true, unique: deviceLimit, total: Infinity };
+  }
   if (requested === undefined) return { native: false, unique: MAX_TRACE_TRIANGLES, total: Infinity };
   if (!Number.isInteger(requested) || requested < 1 || requested > MAX_NATIVE_TRACE_TRIANGLES) {
     throw new RangeError(`buildTraceScene option maximumTriangles is an integer from 1 to ${MAX_NATIVE_TRACE_TRIANGLES} for the native path tracer, got ${requested}. Leave it out for the CPU and WebGL path tracers, which take at most ${MAX_TRACE_TRIANGLES} triangles.`);
@@ -306,6 +318,16 @@ function resolveInstanceLimit(options) {
   return { native: true, count: requested };
 }
 
+function flattenedLimitMessage(limits, triangleCount) {
+  if (limits.native) {
+    return `A native path trace takes at most ${limits.unique} triangles in total, got ${triangleCount}. Share geometry between copies (they stay instances) or simplify the meshes.`;
+  }
+  if (limits.gpu) {
+    return `This GPU path trace takes at most ${limits.unique} triangles in total (what the device's texture or buffer limits hold, up to ${MAX_GPU_TRACE_TRIANGLES}), got ${triangleCount}. Simplify or drop meshes (a crowd can use a lower detail level for the avatars far from the camera), or render the frame with the native Cook backend.`;
+  }
+  return `A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total, got ${triangleCount}. Simplify or drop meshes, or trace on the GPU backend, which holds more when the device allows it.`;
+}
+
 function flattenParts(parts, geometries = parts.map(traceGeometry), limits = resolveTriangleLimits()) {
   let vertexTotal = 0;
   let indexTotal = 0;
@@ -315,9 +337,7 @@ function flattenParts(parts, geometries = parts.map(traceGeometry), limits = res
     indexTotal += geometry.indices.length;
   }
   if (indexTotal / 3 > limits.unique) {
-    throw new RangeError(limits.native
-      ? `A native path trace takes at most ${limits.unique} triangles in total, got ${indexTotal / 3}. Share geometry between copies (they stay instances) or simplify the meshes.`
-      : `A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`);
+    throw new RangeError(flattenedLimitMessage(limits, indexTotal / 3));
   }
   const world = allocateWorld(vertexTotal, indexTotal);
   let vertexOffset = 0;
