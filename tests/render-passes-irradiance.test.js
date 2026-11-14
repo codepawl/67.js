@@ -18,7 +18,7 @@ const recipe = {
     { id: 'ball', geometry: 's', material: 'ball', translation: [0, 0.6, 0], scale: [0.5, 0.5, 0.5] },
   ],
   camera: { eye: [2, 1.5, 3], target: [0, 0.4, 0] },
-  bake: { preset: 'draft', irradianceGrid: 10, probes: false },
+  bake: { preset: 'draft', irradianceGrid: 10 },
 };
 
 let directory;
