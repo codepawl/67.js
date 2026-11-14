@@ -23,6 +23,10 @@ Start the server with `npx --package @codepawlhq/67js 67js-mcp --backend gpu --a
 6. `scene_checkpoint` before a risky batch, `scene_restore` to undo, `scene_release_checkpoint` after. Without a checkpoint, `scene_restore` with `revision` goes back to one of the last 4 earlier revisions.
 7. `scene_export_recipe` keeps the result. `scene_dispose` a scene you finished with.
 
+Beside the loop: `mesh_inspect`, `mesh_edit` and `mesh_stack` edit polygon meshes (see the modeling row below), and
+`scene_walkmap` returns a grid of walkable and blocked cells for placing characters and paths. `scene_ask_user`, where the
+server lists it, opens the view for the person to pin notes on: use it when a change is hard to put in words.
+
 `sessionId` may be left out: the last used scene is meant. With two scenes open, pass it on every call. The server keeps 4 scenes and closes the least recently used (`evictedSessions` in the create result), and 16 checkpoints per scene, oldest first (`evictedCheckpointIds`).
 Variants: `scene_apply` with a `branch` name, compare in one `scene_review` (a `branch` per shot), keep one with `scene_restore`.
 

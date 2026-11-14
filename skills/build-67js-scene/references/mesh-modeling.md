@@ -4,7 +4,8 @@
 This is the [mesh modeling guide](#mesh-modeling-for-agents). Read [Workflow](#workflow) and
 [Choosing faces and edges](#choosing-faces-and-edges) completely before the first edit. Read the
 [Recipes](#recipes) entry closest to the shape you are building, [Giving a part a surface](#giving-a-part-a-surface) for
-textures, and [Errors and fixes](#errors-and-fixes) when a call fails. The full contract (every op, field and default) is `docs/mesh.md` in the npm package; `docs/mcp.md` lists
+textures, and [Errors and fixes](#errors-and-fixes) when a call fails. By task: [Imported parts](#imported-parts) to edit a GLB part,
+[Fields: noise, gradients and repeats](#fields-noise-gradients-and-repeats), [Cutting and repairing](#cutting-and-repairing) and [Organic shapes and decals](#organic-shapes-and-decals). The full contract (every op, field and default) is `docs/mesh.md` in the npm package; `docs/mcp.md` lists
 the tools.
 <!-- skill-navigation:end -->
 
