@@ -7,11 +7,13 @@ If no engine is installed, nothing breaks. The job runs on the `gpu` backend (or
 ## Install Cook
 
 ```sh
-npm install github:codepawl/cook
-npm run build   # run inside the installed package; it compiles the binary with cargo
+npm install --allow-git=all github:codepawl/cook#v0.1.1
+npx cook fetch-addon
 ```
 
-`npm run build` is a separate step, so installing never compiles anything. The built binary is optional too: without it the job falls back as described above.
+`npx cook fetch-addon` downloads the prebuilt binary for Windows x64 or Linux x64 from the Cook release, checks its SHA-256 and writes it into the package. On another system, or to compile it yourself, run `npm run build` inside the installed package instead. It needs Rust. Installing never compiles or downloads the binary, and the binary is optional: without it the job falls back as described above.
+
+On a Linux server or in a container, install the libraries that the NVIDIA Vulkan driver loads (`libvulkan1 libegl1 libgl1 libx11-6 libxext6`), and in Docker set `NVIDIA_DRIVER_CAPABILITIES=all`. Without them Vulkan sees only a software adapter, which has no ray queries. The [Cook README](https://github.com/codepawl/cook#install) has the full steps.
 
 ## What an engine module exports
 
