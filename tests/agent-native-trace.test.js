@@ -252,3 +252,60 @@ test('explicit wavelet and no filter never reach the a-trous filter', async () =
   assert.equal(none.report.denoiser, 'none');
   assert.ok(calls.every(call => call.denoise === undefined && !call.afterwards));
 });
+
+// A sequence that returns flat frames of the given brightness, each through a session with the same camera block.
+function sequenceOfFlatFrames(levels, { withoutSessionAt = -1, changedSceneAt = -1 } = {}) {
+  const pixels = 4 * 4;
+  const kernelParams = new Uint8Array(320);
+  const view = new DataView(kernelParams.buffer);
+  [[0, 0, 0], [0, 0, -1], [1, 0, 0], [0, 1, 0]].forEach((vector, row) => vector.forEach((value, axis) => view.setFloat32(112 + row * 16 + axis * 4, value, true)));
+  let frame = 0;
+  return {
+    trace() {
+      const level = levels[frame];
+      const index = frame++;
+      const normal = new Float32Array(pixels * 3);
+      for (let pixel = 0; pixel < pixels; pixel++) normal[pixel * 3 + 2] = 1;
+      const traced = { rgba: new Float32Array(pixels * 4).fill(level), albedo: new Float32Array(pixels * 3).fill(0.5), normal,
+        depth: new Float32Array(pixels).fill(3), variance: new Float32Array(pixels), adapter: 'test adapter', backend: 'test' };
+      if (index === withoutSessionAt) return { traced, route: { path: 'one-shot', reason: 'test' } };
+      return { traced, route: { path: index === 0 ? 'new-session' : index === changedSceneAt ? 'updated' : 'reused' }, kernelParams };
+    },
+  };
+}
+
+test('a temporal accumulator blends session frames before the filter and leaves rawLinear as traced', async () => {
+  const { createTemporalAccumulator } = await import('../scripts/agent-native-temporal.mjs');
+  const temporal = createTemporalAccumulator({ width: 4, height: 4 });
+  const sequence = sequenceOfFlatFrames([1, 0, 0]);
+  const frameOptions = { tracer: {}, sequence, temporal, exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'none', kernel: 'cycles' };
+  const first = await traceFrameNative(frameOptions);
+  assert.equal(first.report.temporal.restarted, 'the first frame of the job');
+  assert.equal(first.linear[0], 1);
+  const second = await traceFrameNative(frameOptions);
+  assert.equal(second.report.temporal.historyShare, 1);
+  assert.equal(second.report.temporal.restarted, undefined);
+  assert.ok(Math.abs(second.linear[0] - 0.5) < 1e-6, 'the filter input is the blend');
+  assert.equal(second.rawLinear[0], 0, 'rawLinear is this frame alone');
+  const third = await traceFrameNative(frameOptions);
+  assert.ok(Math.abs(third.linear[0] - 1 / 3) < 1e-6);
+});
+
+test('a frame whose scene changed, or that left the session, starts the history again', async () => {
+  const { createTemporalAccumulator } = await import('../scripts/agent-native-temporal.mjs');
+  const temporal = createTemporalAccumulator({ width: 4, height: 4 });
+  const sequence = sequenceOfFlatFrames([1, 0, 1, 0, 1], { changedSceneAt: 1, withoutSessionAt: 3 });
+  const frameOptions = { tracer: {}, sequence, temporal, exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'none', kernel: 'cycles' };
+  await traceFrameNative(frameOptions);
+  const changed = await traceFrameNative(frameOptions);
+  assert.equal(changed.report.temporal.restarted, 'the scene changed since the frame before');
+  assert.equal(changed.linear[0], 0);
+  const blended = await traceFrameNative(frameOptions);
+  assert.ok(Math.abs(blended.linear[0] - 0.5) < 1e-6);
+  const oneShot = await traceFrameNative(frameOptions);
+  assert.equal(oneShot.report.temporal.restarted, 'this frame did not render through a session');
+  assert.equal(oneShot.linear[0], 0);
+  const after = await traceFrameNative(frameOptions);
+  assert.equal(after.report.temporal.restarted, 'the frame before did not render through a session');
+  assert.equal(after.linear[0], 1);
+});
