@@ -17,32 +17,7 @@ Crucible is a 3D engine for JavaScript that an AI agent drives through an MCP se
 
 The agent knows every part of Crucible and carries the heavy steps. It builds the scene, lights it, checks the preview and renders the result. You keep the creative choices and stay in the loop, because the agent shows previews and asks when a matter of taste is open.
 
-## What you can make
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <a href="https://crucible.codepawl.com/showcase.html"><img src="https://crucible.codepawl.com/previews/feature-buildup.webp" alt="A harbour town with a pier and a boat changes from dusk to golden hour" width="100%"></a><br>
-      <b>A harbour town built up from nothing</b>
-    </td>
-    <td width="50%" valign="top">
-      <a href="https://crucible.codepawl.com/showcase.html"><img src="https://crucible.codepawl.com/previews/feature-clockwork.webp" alt="A gold gyroscope of rings around a stack of gears with a cyan glow" width="100%"></a><br>
-      <b>Gold rings around a clockwork core</b>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <a href="https://github.com/codepawl/crucible/blob/main/docs/cycles-parity.md"><img src="https://crucible.codepawl.com/previews/feature-cook-dof.webp" alt="Coloured spheres on wooden planks while the focus moves from a red sphere to a gold one" width="100%"></a><br>
-      <b>Path-traced depth of field</b>
-    </td>
-    <td width="50%" valign="top">
-      <a href="https://crucible.codepawl.com/showcase.html"><img src="https://crucible.codepawl.com/previews/feature-flicker-fixed.webp" alt="A low pan over a warehouse floor with yellow lines and racks of boxes" width="100%"></a><br>
-      <b>A warehouse floor without flicker</b>
-    </td>
-  </tr>
-</table>
-
-More scenes are on the [showcase page](https://crucible.codepawl.com/showcase.html) and in the [Showcase](#showcase) section below.
+Scenes built with Crucible open live in the browser on the [showcase](https://crucible.codepawl.com/showcase.html).
 
 ## What it is
 
@@ -131,34 +106,6 @@ For a plain-text guide, give the agent [llms.txt](https://crucible.codepawl.com/
 
 [viz3d](https://github.com/codepawl/viz3d) uses Crucible. It is a skill that turns places, systems and events into 3D apps and films, and it renders its films and stills in Crucible.
 To add it in Claude Code, run `/plugin marketplace add codepawl/viz3d`, then `/plugin install visualize-in-3d@codepawl`.
-
-## Showcase
-
-Each picture below is a Crucible render. The linked ones open live in the browser.
-
-<table>
-  <tr>
-    <td width="33%" valign="top"><b><a href="https://crucible.codepawl.com/showcase.html?scene=airport">Airport ramp</a></b></td>
-    <td width="33%" valign="top"><b><a href="https://crucible.codepawl.com/showcase.html?scene=datacenter">AI data center</a></b></td>
-    <td width="33%" valign="top"><b><a href="https://crucible.codepawl.com/showcase.html?scene=port">Container port</a></b></td>
-  </tr>
-  <tr>
-    <td><a href="https://crucible.codepawl.com/showcase.html?scene=airport"><img src="https://crucible.codepawl.com/previews/showcase-airport.webp" alt="An airport ramp with an airliner at its stand and the turnaround crew"></a></td>
-    <td><a href="https://crucible.codepawl.com/showcase.html?scene=datacenter"><img src="https://crucible.codepawl.com/previews/showcase-datacenter.webp" alt="A cutaway AI data center hall"></a></td>
-    <td><a href="https://crucible.codepawl.com/showcase.html?scene=port"><img src="https://crucible.codepawl.com/previews/showcase-port.webp" alt="A container port with cranes and stacked containers"></a></td>
-  </tr>
-</table>
-
-<table>
-  <tr>
-    <td width="50%" valign="top"><b>Bistro cafe corner</b></td>
-    <td width="50%" valign="top"><b>Bistro plaza</b></td>
-  </tr>
-  <tr>
-    <td><img src="https://crucible.codepawl.com/previews/bistro-cafe.webp" alt="A green corner restaurant with red awnings and a blue scooter in the Bistro scene"></td>
-    <td><img src="https://crucible.codepawl.com/previews/bistro-plaza.webp" alt="A large plane tree in a hedged circle on a Bistro plaza"></td>
-  </tr>
-</table>
 
 ## Render images and video
 
