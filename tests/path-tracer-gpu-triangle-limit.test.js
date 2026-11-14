@@ -63,7 +63,7 @@ function skinnedCrowd() {
 test('a skinned crowd over 400,000 triangles is refused by default and the default bound stays 400,000', () => {
   assert.equal(MAX_TRACE_TRIANGLES, 400_000);
   assert.ok(CROWD_TRIANGLES > MAX_TRACE_TRIANGLES);
-  assert.throws(() => buildTraceScene(skinnedCrowd(), ENVIRONMENT), { name: 'RangeError', message: 'A path trace takes at most 400000 triangles in total.' });
+  assert.throws(() => buildTraceScene(skinnedCrowd(), ENVIRONMENT), { name: 'RangeError', message: new RegExp(`^A path trace takes at most 400000 triangles in total, got ${CROWD_TRIANGLES}\\. Simplify or drop meshes`) });
 });
 
 test('with the device bound the crowd flattens, skins and packs into tables that fit a 16384 row texture', () => {
@@ -106,6 +106,17 @@ test('the capacity of a device follows its texture size or buffer size, up to th
   assert.equal(gpuTriangleCapacity({ maximumBufferBytes: 128 * 1024 * 1024 }, MAX_GPU_TRACE_TRIANGLES), Math.floor((128 * 1024 * 1024) / (TRIANGLE_TEXELS * 16)));
   assert.equal(gpuTriangleCapacity({ maximumBufferBytes: 1 << 30 }, MAX_GPU_TRACE_TRIANGLES), MAX_GPU_TRACE_TRIANGLES);
   assert.equal(gpuTriangleCapacity({ maximumBufferBytes: 10 }, MAX_GPU_TRACE_TRIANGLES), 1);
+});
+
+test('a WebGPU limit that is not a whole number of table rows is counted in whole rows and capped by maxBufferSize', () => {
+  const rowBytes = DATA_TEXTURE_WIDTH * 16;
+  const oddLimit = 100 * rowBytes + 5000;
+  const capacity = gpuTriangleCapacity({ maximumBufferBytes: oddLimit }, MAX_GPU_TRACE_TRIANGLES);
+  assert.equal(capacity, Math.floor((100 * DATA_TEXTURE_WIDTH) / TRIANGLE_TEXELS));
+  const paddedBytes = Math.ceil((capacity * TRIANGLE_TEXELS) / DATA_TEXTURE_WIDTH) * rowBytes;
+  assert.ok(paddedBytes <= oddLimit);
+  const cappedBySize = gpuTriangleCapacity({ maximumBufferBytes: 1 << 30, maximumBufferSize: 50 * rowBytes }, MAX_GPU_TRACE_TRIANGLES);
+  assert.equal(cappedBySize, Math.floor((50 * DATA_TEXTURE_WIDTH) / TRIANGLE_TEXELS));
 });
 
 test('a 2048 row WebGL2 device still holds the 400,000 triangles the old bound allowed', () => {

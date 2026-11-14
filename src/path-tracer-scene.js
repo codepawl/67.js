@@ -312,7 +312,7 @@ function flattenedLimitMessage(limits, triangleCount) {
   if (limits.gpu) {
     return `This GPU path trace takes at most ${limits.unique} triangles in total (what the device's texture or buffer limits hold, up to ${MAX_GPU_TRACE_TRIANGLES}), got ${triangleCount}. Simplify or drop meshes (a crowd can use a lower detail level for the avatars far from the camera), or render the frame with the native Cook backend.`;
   }
-  return `A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`;
+  return `A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total, got ${triangleCount}. Simplify or drop meshes, or trace on the GPU backend, which holds more when the device allows it.`;
 }
 
 function flattenParts(parts, geometries = parts.map(traceGeometry), limits = resolveTriangleLimits()) {

@@ -1171,6 +1171,15 @@ function renderBandsInWorkers(scene, camera, options, buffers, shouldStop) {
   });
 }
 
+async function readDeviceTriangleLimit(gpuModule) {
+  try {
+    return await gpuModule.gpuTriangleLimit();
+  } catch {
+    // No device on this page: build with the default bound so a scene error reaches the caller before the device error of the trace.
+    return undefined;
+  }
+}
+
 /**
  * Renders one still. `scene` is `{ parts, environment, camera }` as the rasterizer takes them. Resolves with the linear
  * pixels, the tone-mapped RGBA bytes, and a report. Rejects, and returns nothing, when `maxSeconds` runs out.
@@ -1187,7 +1196,8 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   const gpuModule = options.backend === 'gpu' || options.backend === 'webgpu'
     ? await (options.backend === 'webgpu' ? import('./path-tracer-webgpu.js') : import('./path-tracer-gpu.js'))
     : null;
-  const scene = buildTraceScene(parts, environment, gpuModule ? { gpuTriangleLimit: await gpuModule.gpuTriangleLimit() } : {});
+  const deviceLimit = gpuModule ? await readDeviceTriangleLimit(gpuModule) : undefined;
+  const scene = buildTraceScene(parts, environment, deviceLimit === undefined ? {} : { gpuTriangleLimit: deviceLimit });
   if (options.backend !== 'cpu') refuseLocalVolumes(scene, `backend "${options.backend}"`);
   const pixelCount = width * height;
   const buffers = {

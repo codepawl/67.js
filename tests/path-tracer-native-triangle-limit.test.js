@@ -36,7 +36,7 @@ function copiesOf(geometry, copyCount) {
 }
 
 const ENVIRONMENT = { keyColor: [1, 1, 1], lightDirection: [0, 1, 0] };
-const OLD_FLATTENED_MESSAGE = 'A path trace takes at most 400000 triangles in total.';
+const OLD_FLATTENED_MESSAGE = 'A path trace takes at most 400000 triangles in total, got 400001. Simplify or drop meshes, or trace on the GPU backend, which holds more when the device allows it.';
 
 test('the CPU and WebGL bound is still 400,000 and a build without the option keeps the old messages', () => {
   assert.equal(MAX_TRACE_TRIANGLES, 400_000);
